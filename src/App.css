@@ -5640,3 +5640,135 @@ body {
 }
 
 /* ApprentiFR department sector filter END */
+
+/* ApprentiFR public trend timeline BEGIN */
+
+.public-trend-panel {
+  margin-top: 32px;
+}
+
+.public-trend-row {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.public-trend-day {
+  min-height: 128px;
+  padding: 14px;
+  border-radius: 22px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.07);
+}
+
+.public-trend-day span,
+.public-trend-day small,
+.public-trend-day em {
+  display: block;
+}
+
+.public-trend-day span {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 950;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.public-trend-day strong {
+  display: block;
+  margin-top: 10px;
+  color: #0f172a;
+  font-size: 1.25rem;
+  letter-spacing: -0.04em;
+}
+
+.public-trend-day small {
+  margin-top: 4px;
+  color: #64748b;
+  font-weight: 800;
+}
+
+.public-trend-day em {
+  margin-top: 12px;
+  color: #334155;
+  font-size: 0.82rem;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.public-trend-day.is-fixed {
+  outline: 3px solid rgba(15, 23, 42, 0.12);
+}
+
+.public-trend-day.level-vert {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.public-trend-day.level-jaune {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.public-trend-day.level-orange {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.public-trend-day.level-rouge {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.public-trend-day.level-non-renseigne {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.public-trend-note {
+  margin-top: 16px;
+  color: #64748b;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 1100px) {
+  .public-trend-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .public-trend-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ApprentiFR public trend timeline END */
+
+/* ApprentiFR public trend source BEGIN */
+
+.public-trend-day i {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 8px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  color: #334155;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.public-trend-day.is-fixed i {
+  background: rgba(15, 23, 42, 0.14);
+  color: #0f172a;
+}
+
+/* ApprentiFR public trend source END */

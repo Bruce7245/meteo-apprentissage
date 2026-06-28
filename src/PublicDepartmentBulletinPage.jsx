@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
 import { db } from './firebase';
 
 const levelLabels = {
@@ -121,6 +121,111 @@ function getAdvice(level) {
   }
 }
 
+const LEVEL_META = {
+  Vert: { score: 1 },
+  Jaune: { score: 2 },
+  Orange: { score: 3 },
+  Rouge: { score: 4 },
+  'Non renseigné': { score: 0 },
+};
+
+function safeNumber(value) {
+  return Number(value || 0);
+}
+
+function percentChange(current, previous) {
+  const c = safeNumber(current);
+  const p = safeNumber(previous);
+  if (!p) return c > 0 ? 100 : 0;
+  return ((c - p) / p) * 100;
+}
+
+function formatDateLabel(dateString) {
+  if (!dateString) return '—';
+  const date = new Date(`${dateString}T12:00:00`);
+  return date.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: 'short',
+  });
+}
+
+function isWeekend(dateString) {
+  const date = new Date(`${dateString}T12:00:00`);
+  const day = date.getDay();
+  return day === 0 || day === 6;
+}
+
+function addDays(dateString, offset) {
+  const date = new Date(`${dateString}T12:00:00`);
+  date.setDate(date.getDate() + offset);
+  return date.toISOString().slice(0, 10);
+}
+
+function todayString() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function movingAverage(values, windowSize = 7) {
+  return values.map((_, index) => {
+    const start = Math.max(0, index - windowSize + 1);
+    const slice = values.slice(start, index + 1).filter((value) => Number.isFinite(value));
+    if (!slice.length) return null;
+    return slice.reduce((sum, value) => sum + value, 0) / slice.length;
+  });
+}
+
+function buildForecast(values, horizon = 7) {
+  const recent = values.filter((value) => Number.isFinite(value)).slice(-7);
+  if (recent.length < 2) {
+    return Array.from({ length: horizon }, () => null);
+  }
+
+  const slope = (recent[recent.length - 1] - recent[0]) / Math.max(recent.length - 1, 1);
+  let current = recent[recent.length - 1];
+
+  return Array.from({ length: horizon }, () => {
+    current = Math.max(0, current + slope);
+    return Math.round(current * 10) / 10;
+  });
+}
+
+function computeVigilanceLevels(series, criterion) {
+  const values = series.map((row) => safeNumber(row[criterion]));
+  const ma7 = movingAverage(values, 7);
+
+  return series.map((row, index) => {
+    const current = values[index];
+    const previous = index > 0 ? values[index - 1] : current;
+    const currentMa7 = ma7[index] ?? current;
+    const dailyDelta = percentChange(current, previous);
+    const maDelta = percentChange(current, currentMa7);
+    const weekend = isWeekend(row.date);
+    let level = 'Vert';
+    const lowVolumeBase = Math.max(previous, current, currentMa7);
+
+    if (lowVolumeBase < 10) {
+      if (dailyDelta <= -60 && !weekend) level = 'Jaune';
+      return { level, score: LEVEL_META[level].score, dailyDelta, maDelta };
+    }
+
+    const repeatedWeakness =
+      index >= 2 &&
+      values[index] < (ma7[index] ?? values[index]) &&
+      values[index - 1] < (ma7[index - 1] ?? values[index - 1]) &&
+      values[index - 2] < (ma7[index - 2] ?? values[index - 2]);
+
+    if (repeatedWeakness && dailyDelta <= -50 && maDelta <= -40 && !weekend && lowVolumeBase >= 35) {
+      level = 'Rouge';
+    } else if (repeatedWeakness && dailyDelta <= -35 && maDelta <= -30 && !weekend) {
+      level = 'Orange';
+    } else if ((dailyDelta <= -20 || maDelta <= -15) && !(weekend && dailyDelta > -40)) {
+      level = 'Jaune';
+    }
+
+    return { level, score: LEVEL_META[level].score, dailyDelta, maDelta };
+  });
+}
+
 function getSectorLevel(row) {
   return normalizeLevel(row?.publicLevel || row?.suggestedLevel || row?.level || 'Non renseigné');
 }
@@ -128,6 +233,7 @@ function getSectorLevel(row) {
 export default function PublicDepartmentBulletinPage({ departmentCode }) {
   const [departments, setDepartments] = useState([]);
   const [sectorStats, setSectorStats] = useState([]);
+  const [dailyRows, setDailyRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [selectedSector, setSelectedSector] = useState('');
@@ -142,9 +248,16 @@ export default function PublicDepartmentBulletinPage({ departmentCode }) {
         setLoading(true);
         setErrorMessage('');
 
-        const [departmentsSnapshot, sectorStatsSnapshot] = await Promise.all([
+        const [departmentsSnapshot, sectorStatsSnapshot, dailySnapshot] = await Promise.all([
           getDocs(collection(db, 'departments')),
           getDocs(collection(db, 'departmentSectorStats')),
+          getDocs(
+            query(
+              collection(db, 'departmentDailyStats'),
+              orderBy('date', 'desc'),
+              limit(8000)
+            )
+          ),
         ]);
 
         if (!isMounted) {
@@ -177,6 +290,22 @@ export default function PublicDepartmentBulletinPage({ departmentCode }) {
         });
 
         setDepartments(loadedDepartments);
+        const loadedDailyRows = dailySnapshot.docs.map((document) => {
+          const data = document.data();
+          const code = normalizeDepartmentCode(data.code || data.departmentCode || String(document.id || '' ).split('_').pop());
+
+          return {
+            id: document.id,
+            ...data,
+            code,
+            date: data.date || String(document.id || '' ).split('_')[0],
+            jobsCount: safeNumber(data.jobsCount),
+            openingCount: safeNumber(data.openingCount),
+            recruitersCount: safeNumber(data.recruitersCount),
+          };
+        });
+
+        setDailyRows(loadedDailyRows);
         setSectorStats(loadedSectorStats);
       } catch (error) {
         console.error('Erreur chargement bulletin département :', error);
@@ -296,6 +425,50 @@ export default function PublicDepartmentBulletinPage({ departmentCode }) {
       },
     ];
   }, [department, aggregate, selectedSector, displayedSectorRows]);
+  const departmentDailyRows = useMemo(() => {
+    return dailyRows
+      .filter((row) => normalizeDepartmentCode(row.code) === normalizedCode)
+      .filter((row) => row.date)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  }, [dailyRows, normalizedCode]);
+
+  const trendTimeline = useMemo(() => {
+    const currentLevel = normalizeLevel(department?.level || 'Non renseigné');
+    const criterion = 'jobsCount';
+    const values = departmentDailyRows.map((row) => safeNumber(row[criterion]));
+    const lastDate = departmentDailyRows.length
+      ? departmentDailyRows[departmentDailyRows.length - 1].date
+      : todayString();
+    const lastValue = values.length ? values[values.length - 1] : null;
+    const forecastValues = buildForecast(values, 7);
+    const forecastRows = forecastValues.map((value, index) => ({
+      date: addDays(lastDate, index + 1),
+      jobsCount: Number.isFinite(value) ? value : 0,
+    }));
+    const computed = computeVigilanceLevels([...departmentDailyRows, ...forecastRows], criterion).slice(-7);
+
+    return [
+      {
+        key: 'today',
+        label: 'Aujourd’hui',
+        dateLabel: formatDateLabel(todayString()),
+        level: currentLevel,
+        value: Number.isFinite(lastValue) ? lastValue : null,
+        source: 'Bulletin publié',
+        fixed: true,
+      },
+      ...forecastRows.map((row, index) => ({
+        key: `j-${index + 1}`,
+        label: `J+${index + 1}`,
+        dateLabel: formatDateLabel(row.date),
+        level: Number.isFinite(forecastValues[index]) ? normalizeLevel(computed[index]?.level || 'Non renseigné') : 'Non renseigné',
+        value: Number.isFinite(forecastValues[index]) ? forecastValues[index] : null,
+        source: 'Projection indicative',
+        fixed: false,
+      })),
+    ];
+  }, [department, departmentDailyRows]);
+
   const visibleCriteria = useMemo(() => {
     return criteria.filter((criterion) => {
       const level = normalizeLevel(criterion.level);
@@ -352,6 +525,7 @@ export default function PublicDepartmentBulletinPage({ departmentCode }) {
           <div className="public-nav-links">
             <a href="/">Accueil</a>
             <a href="#criteres">Critères</a>
+            <a href="#tendance">Tendance</a>
             <a href="#secteurs">Secteurs</a>
           </div>
         </nav>
@@ -419,6 +593,40 @@ export default function PublicDepartmentBulletinPage({ departmentCode }) {
               ))
             )}
           </div>
+        </section>
+
+        <section className="public-section public-trend-panel" id="tendance">
+          <div className="public-section-heading">
+            <div>
+              <p className="public-kicker">Tendance estimée</p>
+              <h2>Évolution probable sur 7 jours</h2>
+            </div>
+            <p>
+              La couleur du jour reste celle du bulletin publié. Les jours suivants
+              sont estimés à partir de la tendance récente des offres départementales.
+            </p>
+          </div>
+
+          <div className="public-trend-row">
+            {trendTimeline.map((item) => (
+              <article
+                key={item.key}
+                className={`public-trend-day level-${getLevelClass(item.level)}${item.fixed ? ' is-fixed' : ''}`}
+              >
+                <span>{item.label}</span>
+                <strong>{item.level}</strong>
+                <small>{item.dateLabel}</small>
+                <i>{item.source}</i>
+                <em>{item.value === null ? '—' : `${formatNumber(item.value)} offres`}</em>
+              </article>
+            ))}
+          </div>
+
+          <p className="public-trend-note">
+            Projection indicative non publiée. Le filtre secteur affine les critères,
+            mais la tendance reste départementale tant qu’aucun historique quotidien
+            sectoriel n’est disponible.
+          </p>
         </section>
 
         <section className="public-section public-bulletin-section">
