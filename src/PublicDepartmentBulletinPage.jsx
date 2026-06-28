@@ -660,10 +660,10 @@ export default function PublicDepartmentBulletinPage({ departmentCode }) {
         <section className="public-hero-content">
           <div>
             <p className="public-kicker">Bulletin départemental publié</p>
-            <h1>Vigilance apprentissage</h1>
+            <h1>Bulletin départemental</h1>
             <p>
-              Lecture publique du niveau publié. La carte administrative ci-contre
-              affiche le territoire concerné et sa couleur de vigilance.
+              Suivi public de la vigilance apprentissage du département.
+              La carte affiche la limite administrative concernée et le niveau publié.
             </p>
           </div>
 
@@ -767,9 +767,8 @@ export default function PublicDepartmentBulletinPage({ departmentCode }) {
                   key={item.key}
                   className={`public-vigilance-segment level-${getLevelClass(item.level)}${item.fixed ? ' is-fixed' : ' is-forecast'}`}
                   title={item.label + ' ' + item.dateLabel + ' - ' + item.level + ' - ' + item.source}
+                  aria-label={item.label + ' ' + item.dateLabel + ' - ' + item.level + ' - ' + item.source}
                 >
-                  <strong>{item.level}</strong>
-                  <small>{item.fixed ? 'Publié' : 'Tendance'}</small>
                 </div>
               ))}
             </div>
