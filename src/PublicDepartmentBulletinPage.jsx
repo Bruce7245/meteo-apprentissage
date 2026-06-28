@@ -318,7 +318,7 @@ function DepartmentShapeCard({ department, level }) {
         <span>Département observé</span>
         <strong>{department.name}</strong>
         <small>Limite administrative {department.code}</small>
-      </div>
+          </div>
 
       <div className="public-department-shape-map">
         {loadingShape ? (
@@ -561,13 +561,15 @@ export default function PublicDepartmentBulletinPage({ departmentCode }) {
     const currentLevel = normalizeLevel(department?.level || 'Non renseigné');
     const criterion = 'jobsCount';
     const values = departmentDailyRows.map((row) => safeNumber(row[criterion]));
+    const today = todayString();
     const lastDate = departmentDailyRows.length
       ? departmentDailyRows[departmentDailyRows.length - 1].date
-      : todayString();
+      : today;
+    const forecastBaseDate = lastDate && lastDate > today ? lastDate : today;
     const lastValue = values.length ? values[values.length - 1] : null;
     const forecastValues = buildForecast(values, 7);
     const forecastRows = forecastValues.map((value, index) => ({
-      date: addDays(lastDate, index + 1),
+      date: addDays(forecastBaseDate, index + 1),
       jobsCount: Number.isFinite(value) ? value : 0,
     }));
     const computed = computeVigilanceLevels([...departmentDailyRows, ...forecastRows], criterion).slice(-7);
@@ -575,8 +577,8 @@ export default function PublicDepartmentBulletinPage({ departmentCode }) {
     return [
       {
         key: 'today',
-        label: 'Aujourd’hui',
-        dateLabel: formatDateLabel(todayString()),
+        label: 'J+0',
+        dateLabel: formatDateLabel(today),
         level: currentLevel,
         value: Number.isFinite(lastValue) ? lastValue : null,
         source: 'Bulletin publié',
@@ -658,10 +660,10 @@ export default function PublicDepartmentBulletinPage({ departmentCode }) {
         <section className="public-hero-content">
           <div>
             <p className="public-kicker">Bulletin départemental publié</p>
-            <h1>{department.name} ({department.code})</h1>
+            <h1>Vigilance apprentissage</h1>
             <p>
-              Lecture publique de la vigilance apprentissage du département. La forme affichée
-              reprend sa limite administrative et la couleur du niveau publié.
+              Lecture publique du niveau publié. La carte administrative ci-contre
+              affiche le territoire concerné et sa couleur de vigilance.
             </p>
           </div>
 
@@ -719,33 +721,40 @@ export default function PublicDepartmentBulletinPage({ departmentCode }) {
           <div className="public-section-heading">
             <div>
               <p className="public-kicker">Tendance estimée</p>
-              <h2>Évolution probable sur 7 jours</h2>
+              <h2>Timeline de vigilance sur 7 jours</h2>
             </div>
             <p>
-              La couleur du jour reste celle du bulletin publié. Les jours suivants
-              sont estimés à partir de la tendance récente des offres départementales.
+              Le niveau J+0 correspond au bulletin publié pour ce département.
+              Les niveaux J+1 à J+7 sont des tendances révisables après chaque
+              récupération quotidienne des offres.
             </p>
           </div>
 
-          <div className="public-trend-row">
+          <div className="public-trend-track" aria-label={`Timeline de vigilance ${department.name} (${department.code})`}>
             {trendTimeline.map((item) => (
               <article
                 key={item.key}
-                className={`public-trend-day level-${getLevelClass(item.level)}${item.fixed ? ' is-fixed' : ''}`}
+                className={`public-trend-node level-${getLevelClass(item.level)}${item.fixed ? ' is-fixed' : ' is-forecast'}`}
               >
-                <span>{item.label}</span>
+                <div className="public-trend-marker" aria-hidden="true">
+                  <span className="public-trend-dot" />
+                </div>
+                <div className="public-trend-card">
+                  <span>{item.label} · {item.dateLabel}</span>
                 <strong>{item.level}</strong>
-                <small>{item.dateLabel}</small>
+                <small>{item.fixed ? 'Aujourd’hui' : 'Tendance révisable'}</small>
                 <i>{item.source}</i>
                 <em>{item.value === null ? '—' : `${formatNumber(item.value)} offres`}</em>
+                </div>
               </article>
             ))}
           </div>
 
           <p className="public-trend-note">
-            Projection indicative non publiée. Le filtre secteur affine les critères,
-            mais la tendance reste départementale tant qu’aucun historique quotidien
-            sectoriel n’est disponible.
+            Les niveaux de J+1 à J+7 sont des tendances et peuvent être revus chaque jour
+            à la suite de la récupération des offres. Ils sont calculés à partir des offres
+            créées observées dans le département, de la moyenne mobile sur 7 jours et de
+            la variation récente. Les rayures signalent une tendance, pas un bulletin publié.
           </p>
         </section>
 

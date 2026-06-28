@@ -5641,137 +5641,7 @@ body {
 
 /* ApprentiFR department sector filter END */
 
-/* ApprentiFR public trend timeline BEGIN */
 
-.public-trend-panel {
-  margin-top: 32px;
-}
-
-.public-trend-row {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.public-trend-day {
-  min-height: 128px;
-  padding: 14px;
-  border-radius: 22px;
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.07);
-}
-
-.public-trend-day span,
-.public-trend-day small,
-.public-trend-day em {
-  display: block;
-}
-
-.public-trend-day span {
-  color: #64748b;
-  font-size: 0.74rem;
-  font-weight: 950;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.public-trend-day strong {
-  display: block;
-  margin-top: 10px;
-  color: #0f172a;
-  font-size: 1.25rem;
-  letter-spacing: -0.04em;
-}
-
-.public-trend-day small {
-  margin-top: 4px;
-  color: #64748b;
-  font-weight: 800;
-}
-
-.public-trend-day em {
-  margin-top: 12px;
-  color: #334155;
-  font-size: 0.82rem;
-  font-style: normal;
-  font-weight: 850;
-}
-
-.public-trend-day.is-fixed {
-  outline: 3px solid rgba(15, 23, 42, 0.12);
-}
-
-.public-trend-day.level-vert {
-  background: #f0fdf4;
-  border-color: #bbf7d0;
-}
-
-.public-trend-day.level-jaune {
-  background: #fffbeb;
-  border-color: #fde68a;
-}
-
-.public-trend-day.level-orange {
-  background: #fff7ed;
-  border-color: #fed7aa;
-}
-
-.public-trend-day.level-rouge {
-  background: #fef2f2;
-  border-color: #fecaca;
-}
-
-.public-trend-day.level-non-renseigne {
-  background: #f8fafc;
-  border-color: #cbd5e1;
-}
-
-.public-trend-note {
-  margin-top: 16px;
-  color: #64748b;
-  font-size: 0.92rem;
-  line-height: 1.55;
-}
-
-@media (max-width: 1100px) {
-  .public-trend-row {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 680px) {
-  .public-trend-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-/* ApprentiFR public trend timeline END */
-
-/* ApprentiFR public trend source BEGIN */
-
-.public-trend-day i {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  margin-top: 8px;
-  padding: 5px 8px;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.08);
-  color: #334155;
-  font-size: 0.68rem;
-  font-style: normal;
-  font-weight: 950;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.public-trend-day.is-fixed i {
-  background: rgba(15, 23, 42, 0.14);
-  color: #0f172a;
-}
-
-/* ApprentiFR public trend source END */
 
 /* ApprentiFR public department administrative shape BEGIN */
 
@@ -5922,3 +5792,206 @@ body {
 }
 
 /* ApprentiFR public department administrative shape END */
+
+
+/* ApprentiFR real trend track BEGIN */
+
+.public-trend-track {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(132px, 1fr));
+  gap: 0;
+  overflow-x: auto;
+  padding: 18px 4px 10px;
+}
+
+.public-trend-track::before {
+  content: "";
+  position: absolute;
+  top: 33px;
+  left: 72px;
+  right: 72px;
+  height: 4px;
+  border-radius: 999px;
+  background: #cbd5e1;
+}
+
+.public-trend-node {
+  position: relative;
+  z-index: 1;
+  min-width: 132px;
+  padding: 0 6px;
+}
+
+.public-trend-marker {
+  display: flex;
+  justify-content: center;
+  height: 38px;
+}
+
+.public-trend-dot {
+  width: 25px;
+  height: 25px;
+  border-radius: 999px;
+  border: 4px solid #ffffff;
+  background: #94a3b8;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.22);
+}
+
+.public-trend-card {
+  min-height: 142px;
+  padding: 14px;
+  border-radius: 22px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.07);
+}
+
+.public-trend-card span,
+.public-trend-card small,
+.public-trend-card em {
+  display: block;
+}
+
+.public-trend-card span {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 950;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.public-trend-card strong {
+  display: block;
+  margin-top: 10px;
+  color: #0f172a;
+  font-size: 1.22rem;
+  letter-spacing: -0.04em;
+}
+
+.public-trend-card small {
+  margin-top: 4px;
+  color: #64748b;
+  font-weight: 850;
+}
+
+.public-trend-card i {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 8px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  color: #334155;
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.public-trend-card em {
+  margin-top: 12px;
+  color: #334155;
+  font-size: 0.82rem;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.public-trend-node.is-fixed .public-trend-card {
+  outline: 3px solid rgba(15, 23, 42, 0.14);
+}
+
+.public-trend-node.is-fixed .public-trend-card i {
+  background: rgba(15, 23, 42, 0.14);
+  color: #0f172a;
+}
+
+.public-trend-node.level-vert .public-trend-dot {
+  background: #22c55e;
+}
+
+.public-trend-node.level-jaune .public-trend-dot {
+  background: #facc15;
+}
+
+.public-trend-node.level-orange .public-trend-dot {
+  background: #fb923c;
+}
+
+.public-trend-node.level-rouge .public-trend-dot {
+  background: #ef4444;
+}
+
+.public-trend-node.level-non-renseigne .public-trend-dot {
+  background: #94a3b8;
+}
+
+.public-trend-node.level-vert .public-trend-card {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.public-trend-node.level-jaune .public-trend-card {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.public-trend-node.level-orange .public-trend-card {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.public-trend-node.level-rouge .public-trend-card {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.public-trend-node.level-non-renseigne .public-trend-card {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.public-trend-node.is-forecast.level-vert .public-trend-card {
+  background:
+    repeating-linear-gradient(135deg, rgba(15, 23, 42, 0.14) 0 7px, transparent 7px 15px),
+    #f0fdf4;
+}
+
+.public-trend-node.is-forecast.level-jaune .public-trend-card {
+  background:
+    repeating-linear-gradient(135deg, rgba(15, 23, 42, 0.15) 0 7px, transparent 7px 15px),
+    #fffbeb;
+}
+
+.public-trend-node.is-forecast.level-orange .public-trend-card {
+  background:
+    repeating-linear-gradient(135deg, rgba(15, 23, 42, 0.16) 0 7px, transparent 7px 15px),
+    #fff7ed;
+}
+
+.public-trend-node.is-forecast.level-rouge .public-trend-card {
+  background:
+    repeating-linear-gradient(135deg, rgba(15, 23, 42, 0.16) 0 7px, transparent 7px 15px),
+    #fef2f2;
+}
+
+.public-trend-node.is-forecast.level-non-renseigne .public-trend-card {
+  background:
+    repeating-linear-gradient(135deg, rgba(15, 23, 42, 0.12) 0 7px, transparent 7px 15px),
+    #f8fafc;
+}
+
+@media (max-width: 760px) {
+  .public-trend-track {
+    grid-template-columns: repeat(8, minmax(145px, 1fr));
+    padding-bottom: 14px;
+  }
+
+  .public-trend-track::before {
+    left: 78px;
+    right: 78px;
+  }
+}
+
+/* ApprentiFR real trend track END */
