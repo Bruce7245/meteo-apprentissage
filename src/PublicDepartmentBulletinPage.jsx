@@ -721,7 +721,7 @@ export default function PublicDepartmentBulletinPage({ departmentCode }) {
           <div className="public-section-heading">
             <div>
               <p className="public-kicker">Tendance estimée</p>
-              <h2>Timeline de vigilance sur 7 jours</h2>
+              <h2>Chronologie de vigilance sur 7 jours</h2>
             </div>
             <p>
               Le niveau J+0 correspond au bulletin publié pour ce département.
@@ -730,24 +730,54 @@ export default function PublicDepartmentBulletinPage({ departmentCode }) {
             </p>
           </div>
 
-          <div className="public-trend-track" aria-label={`Timeline de vigilance ${department.name} (${department.code})`}>
-            {trendTimeline.map((item) => (
-              <article
-                key={item.key}
-                className={`public-trend-node level-${getLevelClass(item.level)}${item.fixed ? ' is-fixed' : ' is-forecast'}`}
-              >
-                <div className="public-trend-marker" aria-hidden="true">
-                  <span className="public-trend-dot" />
+          <div
+            className="public-vigilance-timeline"
+            aria-label={`Chronologie de vigilance ${department.name} (${department.code})`}
+          >
+            <div
+              className="public-vigilance-day-header"
+              style={{ gridTemplateColumns: `220px repeat(${trendTimeline.length}, minmax(74px, 1fr))` }}
+            >
+              <span className="public-vigilance-day-empty">Jour</span>
+              {trendTimeline.map((item) => (
+                <span
+                  key={item.key}
+                  className={`public-vigilance-day-label${item.fixed ? ' is-fixed' : ' is-forecast'}`}
+                >
+                  <strong>{item.label}</strong>
+                  <small>{item.dateLabel}</small>
+                </span>
+              ))}
+            </div>
+
+            <div
+              className="public-vigilance-row"
+              style={{ gridTemplateColumns: `220px repeat(${trendTimeline.length}, minmax(74px, 1fr))` }}
+            >
+              <div className="public-vigilance-row-title">
+                <span className="public-vigilance-icon" aria-hidden="true" />
+                <div>
+                  <strong>Vigilance apprentissage</strong>
+                  <small>{department.name} ({department.code})</small>
                 </div>
-                <div className="public-trend-card">
-                  <span>{item.label} · {item.dateLabel}</span>
-                <strong>{item.level}</strong>
-                <small>{item.fixed ? 'Aujourd’hui' : 'Tendance révisable'}</small>
-                <i>{item.source}</i>
-                <em>{item.value === null ? '—' : `${formatNumber(item.value)} offres`}</em>
+              </div>
+
+              {trendTimeline.map((item) => (
+                <div
+                  key={item.key}
+                  className={`public-vigilance-segment level-${getLevelClass(item.level)}${item.fixed ? ' is-fixed' : ' is-forecast'}`}
+                  title={item.label + ' ' + item.dateLabel + ' - ' + item.level + ' - ' + item.source}
+                >
+                  <strong>{item.level}</strong>
+                  <small>{item.fixed ? 'Publié' : 'Tendance'}</small>
                 </div>
-              </article>
-            ))}
+              ))}
+            </div>
+
+            <div className="public-vigilance-legend">
+              <span><i className="legend-solid" /> Bulletin publié</span>
+              <span><i className="legend-striped" /> Tendance révisable</span>
+            </div>
           </div>
 
           <p className="public-trend-note">
