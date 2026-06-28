@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
+import { geoMercator, geoPath } from 'd3-geo';
 import { db } from './firebase';
 
 const levelLabels = {
@@ -228,6 +229,130 @@ function computeVigilanceLevels(series, criterion) {
 
 function getSectorLevel(row) {
   return normalizeLevel(row?.publicLevel || row?.suggestedLevel || row?.level || 'Non renseigné');
+}
+
+const PUBLIC_LEVEL_COLORS = {
+  Vert: '#22c55e',
+  Jaune: '#facc15',
+  Orange: '#fb923c',
+  Rouge: '#ef4444',
+  'Non renseigné': '#cbd5e1',
+};
+
+function getGeoFeatureCode(feature) {
+  const props = feature?.properties || {};
+
+  return normalizeDepartmentCode(
+    props.code ||
+      props.code_insee ||
+      props.codeDepartement ||
+      props.dep ||
+      feature?.id
+  );
+}
+
+function getGeoFeatureName(feature) {
+  const props = feature?.properties || {};
+
+  return props.nom || props.name || props.libelle || props.department || 'Département';
+}
+
+function DepartmentShapeCard({ department, level }) {
+  const [features, setFeatures] = useState([]);
+  const [loadingShape, setLoadingShape] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadDepartmentShape() {
+      try {
+        const response = await fetch('/departements.geojson');
+
+        if (!response.ok) {
+          throw new Error('Impossible de charger departements.geojson');
+        }
+
+        const geojson = await response.json();
+
+        if (mounted) {
+          setFeatures(geojson.features || []);
+        }
+      } catch (error) {
+        console.error('Erreur chargement forme département :', error);
+      } finally {
+        if (mounted) {
+          setLoadingShape(false);
+        }
+      }
+    }
+
+    loadDepartmentShape();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const feature = useMemo(() => {
+    const code = normalizeDepartmentCode(department?.code);
+
+    return features.find((item) => getGeoFeatureCode(item) === code);
+  }, [features, department]);
+
+  const pathDefinition = useMemo(() => {
+    if (!feature) return '';
+
+    const projection = geoMercator().fitSize([320, 240], feature);
+    const pathGenerator = geoPath(projection);
+
+    return pathGenerator(feature) || '';
+  }, [feature]);
+
+  const cleanLevel = normalizeLevel(level);
+  const fill = PUBLIC_LEVEL_COLORS[cleanLevel] || PUBLIC_LEVEL_COLORS['Non renseigné'];
+  const featureName = feature ? getGeoFeatureName(feature) : department?.name;
+
+  return (
+    <aside className={`public-department-shape-card level-${getLevelClass(cleanLevel)}`}>
+      <div className="public-department-shape-header">
+        <span>Département observé</span>
+        <strong>{department.name}</strong>
+        <small>Limite administrative {department.code}</small>
+      </div>
+
+      <div className="public-department-shape-map">
+        {loadingShape ? (
+          <p>Chargement de la limite administrative…</p>
+        ) : pathDefinition ? (
+          <svg
+            viewBox="0 0 320 240"
+            role="img"
+            aria-label={`${featureName} (${department.code}), vigilance ${cleanLevel}`}
+          >
+            <path
+              d={pathDefinition}
+              fill={fill}
+              stroke="rgba(15, 23, 42, 0.72)"
+              strokeWidth="2"
+              vectorEffect="non-scaling-stroke"
+            >
+              <title>
+                {featureName} ({department.code}) - Vigilance {cleanLevel}
+              </title>
+            </path>
+          </svg>
+        ) : (
+          <p>Limite administrative indisponible.</p>
+        )}
+      </div>
+
+      <div className="public-department-shape-footer">
+        <span>Niveau publié</span>
+        <strong>{cleanLevel}</strong>
+        <small>{levelLabels[cleanLevel]}</small>
+      </div>
+    </aside>
+  );
 }
 
 export default function PublicDepartmentBulletinPage({ departmentCode }) {
@@ -535,17 +660,12 @@ export default function PublicDepartmentBulletinPage({ departmentCode }) {
             <p className="public-kicker">Bulletin départemental publié</p>
             <h1>{department.name} ({department.code})</h1>
             <p>
-              Lecture publique de la vigilance apprentissage du département, avec une synthèse
-              et des critères affichés en badges pour alléger la carte nationale.
+              Lecture publique de la vigilance apprentissage du département. La forme affichée
+              reprend sa limite administrative et la couleur du niveau publié.
             </p>
           </div>
 
-          <aside className={`public-hero-bulletin level-${getLevelClass(departmentLevel)}`}>
-            <span>Niveau publié</span>
-            <strong>{departmentLevel}</strong>
-            <p>{levelLabels[departmentLevel]}</p>
-            <small>Département {department.code}</small>
-          </aside>
+          <DepartmentShapeCard department={department} level={departmentLevel} />
         </section>
       </header>
 

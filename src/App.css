@@ -5772,3 +5772,153 @@ body {
 }
 
 /* ApprentiFR public trend source END */
+
+/* ApprentiFR public department administrative shape BEGIN */
+
+.public-department-shape-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 420px;
+  padding: 22px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 34px;
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.72), transparent 42%),
+    rgba(255, 255, 255, 0.78);
+  box-shadow: 0 26px 70px rgba(15, 23, 42, 0.22);
+  backdrop-filter: blur(18px);
+}
+
+.public-department-shape-card::before {
+  content: "";
+  position: absolute;
+  inset: 18px;
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+}
+
+.public-department-shape-header,
+.public-department-shape-footer {
+  position: relative;
+  z-index: 2;
+}
+
+.public-department-shape-header span,
+.public-department-shape-header small,
+.public-department-shape-footer span,
+.public-department-shape-footer small {
+  display: block;
+  color: #475569;
+  font-size: 0.76rem;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.public-department-shape-header strong {
+  display: block;
+  margin-top: 6px;
+  color: #0f172a;
+  font-size: clamp(1.7rem, 4vw, 2.75rem);
+  line-height: 0.95;
+  letter-spacing: -0.07em;
+}
+
+.public-department-shape-header small {
+  margin-top: 8px;
+  color: #64748b;
+}
+
+.public-department-shape-map {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  min-height: 250px;
+  margin: 18px 0;
+  place-items: center;
+}
+
+.public-department-shape-map svg {
+  display: block;
+  width: min(100%, 360px);
+  height: 260px;
+  overflow: visible;
+  filter: drop-shadow(0 22px 26px rgba(15, 23, 42, 0.24));
+}
+
+.public-department-shape-map p {
+  margin: 0;
+  color: #475569;
+  font-weight: 850;
+  text-align: center;
+}
+
+.public-department-shape-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.public-department-shape-footer strong {
+  color: #0f172a;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  line-height: 0.9;
+  letter-spacing: -0.08em;
+}
+
+.public-department-shape-footer small {
+  max-width: 160px;
+  text-align: right;
+}
+
+.public-department-shape-card.level-vert {
+  background:
+    radial-gradient(circle at top right, rgba(34, 197, 94, 0.24), transparent 44%),
+    rgba(240, 253, 244, 0.92);
+}
+
+.public-department-shape-card.level-jaune {
+  background:
+    radial-gradient(circle at top right, rgba(250, 204, 21, 0.28), transparent 44%),
+    rgba(255, 251, 235, 0.94);
+}
+
+.public-department-shape-card.level-orange {
+  background:
+    radial-gradient(circle at top right, rgba(249, 115, 22, 0.28), transparent 44%),
+    rgba(255, 247, 237, 0.95);
+}
+
+.public-department-shape-card.level-rouge {
+  background:
+    radial-gradient(circle at top right, rgba(239, 68, 68, 0.25), transparent 44%),
+    rgba(254, 242, 242, 0.95);
+}
+
+.public-department-shape-card.level-non-renseigne {
+  background:
+    radial-gradient(circle at top right, rgba(148, 163, 184, 0.28), transparent 44%),
+    rgba(248, 250, 252, 0.95);
+}
+
+@media (max-width: 720px) {
+  .public-department-shape-card {
+    min-height: auto;
+  }
+
+  .public-department-shape-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .public-department-shape-footer small {
+    max-width: none;
+    text-align: left;
+  }
+}
+
+/* ApprentiFR public department administrative shape END */
