@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import {
   Badge,
   Box,
-  Button,
   Container,
   Flex,
   Grid,
@@ -11,40 +10,113 @@ import {
   Stack,
   Text,
 } from '@chakra-ui/react'
+import FranceDepartments from '@svg-maps/france.departments'
 
 const LEVELS = {
   green: { label: 'Vert', color: '#2f9e44', bg: '#eaf7ed' },
   yellow: { label: 'Jaune', color: '#b7791f', bg: '#fff8db' },
   orange: { label: 'Orange', color: '#c05621', bg: '#fff0e6' },
   red: { label: 'Rouge', color: '#c53030', bg: '#ffe8e8' },
+  unknown: { label: 'Non renseigné', color: '#94a3b8', bg: '#eef2f6' },
 }
 
-const DEPARTMENTS = [
-  { code: '72', name: 'Sarthe', level: 'orange', offers: 237, companies: 16910, formations: 636 },
-  { code: '75', name: 'Paris', level: 'red', offers: 447, companies: 48230, formations: 1214 },
-  { code: '69', name: 'Rhône', level: 'orange', offers: 440, companies: 31120, formations: 984 },
-  { code: '13', name: 'Bouches-du-Rhône', level: 'orange', offers: 438, companies: 29750, formations: 872 },
-  { code: '01', name: 'Ain', level: 'red', offers: 292, companies: 14240, formations: 418 },
-  { code: '44', name: 'Loire-Atlantique', level: 'yellow', offers: 361, companies: 24180, formations: 744 },
-  { code: '35', name: 'Ille-et-Vilaine', level: 'green', offers: 318, companies: 19800, formations: 690 },
-  { code: '49', name: 'Maine-et-Loire', level: 'yellow', offers: 205, companies: 15120, formations: 512 },
-]
+const DEPARTMENT_DATA = {
+  '01': { name: 'Ain', level: 'red', offers: 292, companies: 14240, formations: 418 },
+  '13': { name: 'Bouches-du-Rhône', level: 'orange', offers: 438, companies: 29750, formations: 872 },
+  '35': { name: 'Ille-et-Vilaine', level: 'green', offers: 318, companies: 19800, formations: 690 },
+  '44': { name: 'Loire-Atlantique', level: 'yellow', offers: 361, companies: 24180, formations: 744 },
+  '49': { name: 'Maine-et-Loire', level: 'yellow', offers: 205, companies: 15120, formations: 512 },
+  '69': { name: 'Rhône', level: 'orange', offers: 440, companies: 31120, formations: 984 },
+  '72': { name: 'Sarthe', level: 'orange', offers: 237, companies: 16910, formations: 636 },
+  '75': { name: 'Paris', level: 'red', offers: 447, companies: 48230, formations: 1214 },
+}
+
+function normalizeDepartmentCode(location) {
+  const rawCode = String(location.id ?? location.code ?? '')
+    .replace(/^department-/, '')
+    .toUpperCase()
+
+  if (rawCode === '2A' || rawCode === '2B') return rawCode
+  return rawCode.padStart(2, '0')
+}
 
 function Metric({ label, value }) {
   return (
     <Box bg="white" border="1px solid" borderColor="gray.200" borderRadius="2xl" p="5">
       <Text color="gray.500" fontSize="sm">{label}</Text>
-      <Text mt="1" fontSize="2xl" fontWeight="800" color="#17324d">{value.toLocaleString('fr-FR')}</Text>
+      <Text mt="1" fontSize="2xl" fontWeight="800" color="#17324d">
+        {value === null ? 'À importer' : value.toLocaleString('fr-FR')}
+      </Text>
+    </Box>
+  )
+}
+
+function FranceMap({ selectedCode, onSelect }) {
+  const locations = FranceDepartments.locations ?? []
+  const viewBox = FranceDepartments.viewBox ?? '0 0 1000 1000'
+
+  return (
+    <Box mt="6" className="france-map-wrapper">
+      <svg
+        className="france-map"
+        viewBox={viewBox}
+        role="img"
+        aria-label="Carte interactive des départements français"
+      >
+        {locations.map((location) => {
+          const code = normalizeDepartmentCode(location)
+          const department = DEPARTMENT_DATA[code]
+          const level = LEVELS[department?.level ?? 'unknown']
+          const selected = code === selectedCode
+
+          return (
+            <path
+              key={location.id}
+              id={`department-${code}`}
+              name={location.name}
+              d={location.path}
+              fill={level.color}
+              stroke={selected ? '#102a43' : '#ffffff'}
+              strokeWidth={selected ? 3.2 : 1.15}
+              tabIndex="0"
+              role="button"
+              aria-label={`${location.name}, vigilance ${level.label}`}
+              className="department-shape"
+              onClick={() => onSelect(code)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  onSelect(code)
+                }
+              }}
+            >
+              <title>{`${location.name} (${code}) — ${level.label}`}</title>
+            </path>
+          )
+        })}
+      </svg>
     </Box>
   )
 }
 
 function App() {
   const [selectedCode, setSelectedCode] = useState('72')
-  const selected = useMemo(
-    () => DEPARTMENTS.find((department) => department.code === selectedCode) ?? DEPARTMENTS[0],
-    [selectedCode],
-  )
+
+  const selected = useMemo(() => {
+    const mapLocation = (FranceDepartments.locations ?? []).find(
+      (location) => normalizeDepartmentCode(location) === selectedCode,
+    )
+
+    return {
+      code: selectedCode,
+      name: DEPARTMENT_DATA[selectedCode]?.name ?? mapLocation?.name ?? 'Département',
+      level: DEPARTMENT_DATA[selectedCode]?.level ?? 'unknown',
+      offers: DEPARTMENT_DATA[selectedCode]?.offers ?? null,
+      companies: DEPARTMENT_DATA[selectedCode]?.companies ?? null,
+      formations: DEPARTMENT_DATA[selectedCode]?.formations ?? null,
+    }
+  }, [selectedCode])
+
   const selectedLevel = LEVELS[selected.level]
 
   return (
@@ -70,37 +142,13 @@ function App() {
                 <Heading mt="1" color="#17324d" fontSize="2xl">Vigilance par département</Heading>
               </Box>
               <Badge px="3" py="2" borderRadius="full" bg="#edf6ff" color="#24557a">
-                Données de démonstration
+                Prototype SVG
               </Badge>
             </Flex>
 
-            <SimpleGrid mt="7" columns={{ base: 2, sm: 3, md: 4 }} gap="3">
-              {DEPARTMENTS.map((department) => {
-                const level = LEVELS[department.level]
-                const active = department.code === selectedCode
-                return (
-                  <Button
-                    key={department.code}
-                    h="94px"
-                    p="3"
-                    borderRadius="2xl"
-                    border="2px solid"
-                    borderColor={active ? '#17324d' : level.color}
-                    bg={level.bg}
-                    color="#17324d"
-                    onClick={() => setSelectedCode(department.code)}
-                    _hover={{ transform: 'translateY(-2px)', boxShadow: 'md' }}
-                  >
-                    <Stack gap="0" align="center">
-                      <Text fontSize="2xl" fontWeight="900">{department.code}</Text>
-                      <Text fontSize="xs" lineClamp="1">{department.name}</Text>
-                    </Stack>
-                  </Button>
-                )
-              })}
-            </SimpleGrid>
+            <FranceMap selectedCode={selectedCode} onSelect={setSelectedCode} />
 
-            <Flex mt="7" gap="3" wrap="wrap">
+            <Flex mt="6" gap="4" wrap="wrap">
               {Object.entries(LEVELS).map(([key, level]) => (
                 <Flex key={key} align="center" gap="2">
                   <Box boxSize="3" borderRadius="full" bg={level.color} />
@@ -129,9 +177,9 @@ function App() {
             </SimpleGrid>
 
             <Box mt="6" p="5" borderRadius="2xl" bg="#f7fafc">
-              <Text fontWeight="800" color="#17324d">Lecture provisoire</Text>
+              <Text fontWeight="800" color="#17324d">Collecte progressive</Text>
               <Text mt="2" color="gray.600" lineHeight="1.7">
-                Le moteur final combinera volumes d’offres, densité d’entreprises, saisonnalité, secteurs et fiabilité des sources.
+                Les départements gris ne disposent pas encore de données publiées. La collecte INSEE traitera au minimum trois nouveaux départements par jour jusqu’à couverture complète.
               </Text>
             </Box>
           </Box>
