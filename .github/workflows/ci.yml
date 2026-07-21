@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - "agent/**"
   pull_request:
     branches:
       - main
@@ -34,11 +35,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build frontend
-        run: npm run build
-
       - name: Install Functions dependencies
         run: npm ci --prefix functions
+
+      - name: Lint source code
+        run: npm run lint
+
+      - name: Build frontend
+        run: npm run build
 
       - name: Validate Functions syntax
         run: node --check functions/index.js
