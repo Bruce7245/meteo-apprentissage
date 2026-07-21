@@ -7,10 +7,14 @@ import AdminPublishedMapPage from './pages/admin/AdminPublishedMapPage.jsx';
 import AdminDraftMapPage from './pages/admin/AdminDraftMapPage.jsx';
 import AdminSectorDashboardPage from './pages/admin/AdminSectorDashboardPage.jsx';
 import AdminCompaniesDashboardPage from './pages/admin/AdminCompaniesDashboardPage.jsx';
+import {
+  isValidDepartmentCode,
+  normalizeDepartmentCode,
+} from './utils/departmentUtils.js';
 import './App.css';
 
 function normalizePath(pathname) {
-  return pathname.replace(/\/+$/, '') || '/';
+  return pathname.replace(/\/{2,}/g, '/').replace(/\/+$/, '') || '/';
 }
 
 function NotFoundPage() {
@@ -31,8 +35,23 @@ function App() {
 
   if (path === '/') return <PublicMapPage />;
 
-  if (path.startsWith('/departement/')) {
-    const departmentCode = decodeURIComponent(path.replace('/departement/', ''));
+  const departmentMatch = path.match(/^\/departement\/([^/]+)$/);
+
+  if (departmentMatch) {
+    let departmentCode = '';
+
+    try {
+      departmentCode = normalizeDepartmentCode(
+        decodeURIComponent(departmentMatch[1])
+      );
+    } catch {
+      return <NotFoundPage />;
+    }
+
+    if (!isValidDepartmentCode(departmentCode)) {
+      return <NotFoundPage />;
+    }
+
     return <PublicDepartmentPage departmentCode={departmentCode} />;
   }
 
