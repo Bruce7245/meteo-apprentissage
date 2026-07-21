@@ -28,3 +28,49 @@ button,
 a {
   font: inherit;
 }
+
+.france-map-wrapper {
+  width: 100%;
+  min-height: 420px;
+  display: grid;
+  place-items: center;
+  border-radius: 24px;
+  padding: 18px;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(69, 123, 157, 0.08), transparent 55%),
+    #f8fafc;
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+}
+
+.france-map {
+  display: block;
+  width: min(100%, 680px);
+  max-height: 620px;
+  filter: drop-shadow(0 12px 24px rgba(23, 50, 77, 0.12));
+}
+
+.department-shape {
+  cursor: pointer;
+  transform-origin: center;
+  transition:
+    opacity 140ms ease,
+    filter 140ms ease,
+    stroke-width 140ms ease;
+  outline: none;
+}
+
+.department-shape:hover,
+.department-shape:focus-visible {
+  opacity: 0.78;
+  filter: brightness(1.08);
+  stroke: #102a43;
+  stroke-width: 2.4px;
+}
+
+@media (max-width: 640px) {
+  .france-map-wrapper {
+    min-height: 330px;
+    padding: 10px;
+  }
+}
