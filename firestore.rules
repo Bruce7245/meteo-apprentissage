@@ -13,45 +13,191 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if signedIn() && request.auth.uid == userId;
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow write: if false;
     }
 
-    match /bulletins/{document} {
+    // PUBLIC
+    match /departments/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /bulletins/{document=**} {
       allow read: if true;
       allow create, update, delete: if isAdmin();
     }
 
-    match /departments/{document} {
+    match /vigilancePublicIndex/{document=**} {
       allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow write: if false;
     }
 
-    match /departmentStats/{document} {
+    match /departmentVigilanceDaily/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /departmentSectorVigilanceDaily/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ADMIN - STATS / PILOTAGE
+    match /departmentStats/{document=**} {
       allow read: if isAdmin();
       allow write: if false;
     }
 
-    match /departmentDailyStats/{document} {
+    match /departmentDailyStats/{document=**} {
       allow read: if isAdmin();
       allow write: if false;
     }
 
-    match /departmentSectorStats/{document} {
+    match /departmentSectorStats/{document=**} {
       allow read: if isAdmin();
       allow write: if false;
     }
 
-    match /aiReports/{document} {
+    match /departmentSectorDailyStats/{document=**} {
       allow read: if isAdmin();
       allow write: if false;
     }
 
-    match /apiImports/{document} {
+    match /departmentMarketSnapshots/{document=**} {
       allow read: if isAdmin();
       allow write: if false;
     }
 
+    match /departmentSectorMarketSnapshots/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /aiReports/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /apiImports/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ADMIN - OFFRES
+    match /dailyOfferSnapshots/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /offerAnalyticsDaily/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /offerAnalyticsMonthly/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /offerAnalyticsYears/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /lbaCurrentOffers/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /lbaOfferObservations/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /lbaOfferImportRuns/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /lbaOfferStatsDaily/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /lbaOfferStatsByMonthDepartment/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /lbaOfferStatsByMonthDepartmentRome/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /lbaOfferStatsByMonthDepartmentNaf/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /lbaOfferStatsByMonthDepartmentCity/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /lbaCompaniesFromOffers/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ADMIN - FORMATIONS
+    match /formationDetails/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /formationDepartmentStats/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /formationDepartmentSectorStats/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ADMIN - ENTREPRISES / INSEE
+    match /inseeEstablishments/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /inseeDepartmentStats/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /inseeDepartmentSectorStats/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /inseeDepartmentNafStats/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /inseeDepartmentNafStatsIndex/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /inseeDepartmentImportIndex/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // DEFAULT
     match /{document=**} {
       allow read, write: if false;
     }

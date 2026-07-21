@@ -11,7 +11,6 @@ node_modules
 dist
 dist-ssr
 *.local
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -29,3 +28,42 @@ dist/
 *.tar.gz
 *.before-*
 *.backup.*
+.backfill_admin_key.local
+# Environnement et secrets
+.env
+.env.*
+!.env.example
+*.secret
+*.secret.*
+functions/.secret.local
+service-account*.json
+*serviceAccount*.json
+*admin-key*.json
+*admin_key*.json
+.backfill_admin_key*
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+# Dépendances et builds
+functions/node_modules/
+# Sauvegardes locales
+backups/
+front-backups/
+*.backup
+*.bak
+# Sauvegardes et fichiers de travail
+_front-backups/
+logs/
+package.before-*.json
+package-lock.before-*.json
+firestore.before-*
+firestore.rules.before-*
+vite.config.before-*.js
+# Clés et identifiants sensibles
+*admin-key*
+*admin_key*
+*credentials*.json
+# Secrets et environnement
+firebase-adminsdk*.json
+# Logs et sauvegardes
+# Dépendances et compilations
