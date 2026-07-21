@@ -1,0 +1,169 @@
+.france-map-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 230px;
+  gap: 22px;
+  align-items: start;
+}
+
+.france-map-canvas {
+  min-width: 0;
+  border: 1px solid rgba(29, 53, 87, 0.1);
+  border-radius: 24px;
+  padding: 18px;
+  background:
+    radial-gradient(
+      circle at center,
+      rgba(69, 123, 157, 0.08),
+      transparent 66%
+    ),
+    #f8fafc;
+}
+
+.france-vigilance-map {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 650px;
+}
+
+.france-map-path {
+  stroke: #ffffff;
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+  cursor: pointer;
+  transition:
+    filter 160ms ease,
+    opacity 160ms ease,
+    stroke-width 160ms ease,
+    transform 160ms ease;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.france-map-path:hover,
+.france-vigilance-map a:focus .france-map-path {
+  filter: brightness(0.94);
+  opacity: 0.94;
+  stroke: #1d3557;
+  stroke-width: 2.4;
+  outline: none;
+}
+
+.france-map-vert {
+  fill: #86efac;
+}
+
+.france-map-jaune {
+  fill: #fde047;
+}
+
+.france-map-orange {
+  fill: #fb923c;
+}
+
+.france-map-rouge {
+  fill: #ef4444;
+}
+
+.map-inspector {
+  min-height: 230px;
+  border: 1px solid rgba(29, 53, 87, 0.1);
+  border-radius: 22px;
+  padding: 20px;
+  background: #ffffff;
+}
+
+.map-inspector-title {
+  display: block;
+  margin-bottom: 14px;
+  color: #1d3557;
+  font-size: 1.1rem;
+  line-height: 1.35;
+}
+
+.map-inspector p {
+  margin-bottom: 0;
+  font-size: 0.9rem;
+}
+
+.map-inspector-link {
+  display: inline-flex;
+  margin-top: 16px;
+}
+
+.overseas-section {
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid rgba(29, 53, 87, 0.1);
+}
+
+.overseas-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.overseas-heading h3 {
+  margin: 0;
+  color: #1d3557;
+  font-size: 1.05rem;
+}
+
+.overseas-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.overseas-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid rgba(29, 53, 87, 0.1);
+  border-radius: 18px;
+  background: #f8fafc;
+}
+
+.overseas-card strong,
+.overseas-card small {
+  display: block;
+}
+
+.overseas-card strong {
+  color: #1d3557;
+}
+
+.overseas-card small {
+  margin-top: 3px;
+  color: #64748b;
+}
+
+@media (max-width: 900px) {
+  .france-map-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .map-inspector {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .france-map-canvas {
+    padding: 8px;
+    border-radius: 18px;
+  }
+
+  .overseas-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .overseas-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

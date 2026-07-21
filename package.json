@@ -12,6 +12,7 @@
   "dependencies": {
     "@chakra-ui/react": "^3.36.0",
     "@emotion/react": "^11.14.0",
+    "@svg-maps/france.departments": "^2.0.0",
     "adm-zip": "^0.5.18",
     "chart.js": "^4.5.1",
     "d3-geo": "^3.1.1",
