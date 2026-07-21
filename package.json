@@ -1,7 +1,7 @@
 {
   "name": "apprentifr",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -12,6 +12,7 @@
   "dependencies": {
     "@chakra-ui/react": "^3.30.0",
     "@emotion/react": "^11.14.0",
+    "@svg-maps/france.departments": "^2.0.0",
     "firebase": "^12.0.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
