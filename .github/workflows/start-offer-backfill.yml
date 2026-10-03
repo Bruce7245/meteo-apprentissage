@@ -1,0 +1,64 @@
+name: Start offer backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type START to launch the national active-offer backfill"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: start-offer-backfill
+  cancel-in-progress: false
+
+jobs:
+  start:
+    name: Start national offer backfill
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Verify confirmation
+        shell: bash
+        run: |
+          if [ "${{ inputs.confirmation }}" != "START" ]; then
+            echo "Confirmation must be exactly START."
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: meteo-apprentissage
+
+      - name: Start offer backfill
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KEY="$(gcloud secrets versions access latest             --secret=BACKFILL_ADMIN_KEY             --project=meteo-apprentissage)"
+
+          echo "::add-mask::$KEY"
+
+          curl --fail-with-body --silent --show-error             --max-time 540             -H "x-admin-key: $KEY"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/startOfferBackfillJobHttp"             > /tmp/start-offer-backfill.json
+
+          echo "Start response:"
+          python -m json.tool /tmp/start-offer-backfill.json
+
+          echo
+          echo "Current job status:"
+          curl --fail-with-body --silent --show-error             -H "x-admin-key: $KEY"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getOfferBackfillJobStatusHttp"             > /tmp/offer-backfill-status.json
+
+          python -m json.tool /tmp/offer-backfill-status.json
+
+          unset KEY
