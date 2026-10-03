@@ -99,7 +99,35 @@ function getNextPageIndex({ pagination, pageIndex, pageSize, receivedCount }) {
   return currentPageIndex + 1;
 }
 
+function getNextIncompleteBatchNumber(batchStates, totalBatches = 11) {
+  const states = batchStates && typeof batchStates === "object" ? batchStates : {};
+  const total = Math.max(1, Number.parseInt(String(totalBatches), 10) || 11);
+
+  for (let batchNumber = 1; batchNumber <= total; batchNumber += 1) {
+    const status = states[batchNumber]?.status || states[String(batchNumber)]?.status || null;
+
+    if (status !== "completed") {
+      return batchNumber;
+    }
+  }
+
+  return null;
+}
+
+function registerBatchFailure(currentFailures, maxFailures = 3) {
+  const current = Math.max(0, Number.parseInt(String(currentFailures || 0), 10) || 0);
+  const max = Math.max(1, Number.parseInt(String(maxFailures || 3), 10) || 3);
+  const consecutiveFailures = current + 1;
+
+  return {
+    consecutiveFailures,
+    shouldPause: consecutiveFailures >= max,
+  };
+}
+
 module.exports = {
   getDepartmentBatch,
   getNextPageIndex,
+  getNextIncompleteBatchNumber,
+  registerBatchFailure,
 };
