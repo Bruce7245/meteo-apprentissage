@@ -11,6 +11,8 @@ const {
 const {
   getDepartmentBatch,
   getNextPageIndex,
+  getNextIncompleteBatchNumber,
+  registerBatchFailure,
 } = require('./lib/formation-import-batch.cjs');
 
 admin.initializeApp();
@@ -6074,6 +6076,231 @@ exports.importLbaFormationsBatchHttp = onRequest(
         error: String(error.message || error),
       });
     }
+  }
+);
+
+
+const FORMATION_AUTO_JOB_COLLECTION = 'adminJobs';
+const FORMATION_AUTO_JOB_ID = 'formationNationalBackgroundJob';
+const FORMATION_AUTO_TOTAL_BATCHES = 11;
+const FORMATION_AUTO_MAX_FAILURES = 3;
+
+async function formationAutoLoadBatchStates() {
+  const snapshots = await Promise.all(
+    Array.from({ length: FORMATION_AUTO_TOTAL_BATCHES }, (_, index) => {
+      const batchNumber = index + 1;
+      return db.collection('formationImportBatches')
+        .doc(`batch_${String(batchNumber).padStart(2, '0')}`)
+        .get();
+    })
+  );
+
+  const states = {};
+
+  snapshots.forEach((snapshot, index) => {
+    const batchNumber = index + 1;
+    states[batchNumber] = snapshot.exists
+      ? snapshot.data()
+      : { status: 'pending' };
+  });
+
+  return states;
+}
+
+async function formationAutoAcquireLease(source) {
+  const jobRef = db.collection(FORMATION_AUTO_JOB_COLLECTION).doc(FORMATION_AUTO_JOB_ID);
+  const nowMs = Date.now();
+  const leaseOwner = `${source}-${nowMs}`;
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(jobRef);
+    const job = snapshot.exists ? (snapshot.data() || {}) : {
+      status: 'running',
+      consecutiveFailures: 0,
+      currentBatchNumber: 1,
+      schemaVersion: 'formationNationalBackgroundJob.v1',
+    };
+
+    if (['paused', 'error', 'done'].includes(job.status)) {
+      return {
+        acquired: false,
+        reason: `status_${job.status}`,
+        job,
+      };
+    }
+
+    const leaseUntilMs = Number(job.leaseUntilMs || 0);
+
+    if (leaseUntilMs > nowMs) {
+      return {
+        acquired: false,
+        reason: 'locked',
+        leaseUntilMs,
+        job,
+      };
+    }
+
+    transaction.set(jobRef, {
+      ...job,
+      status: 'running',
+      leaseOwner,
+      leaseUntilMs: nowMs + 9 * 60 * 1000,
+      lastLeaseAt: admin.firestore.FieldValue.serverTimestamp(),
+      startedAt: job.startedAt || admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      schemaVersion: 'formationNationalBackgroundJob.v1',
+    }, { merge: true });
+
+    return {
+      acquired: true,
+      job: {
+        ...job,
+        leaseOwner,
+      },
+      leaseOwner,
+    };
+  });
+}
+
+async function formationAutoUpdateJob(update) {
+  await db.collection(FORMATION_AUTO_JOB_COLLECTION)
+    .doc(FORMATION_AUTO_JOB_ID)
+    .set({
+      ...update,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+}
+
+async function formationAutoRunOnce({ source = 'schedule-5min' } = {}) {
+  const startedAtMs = Date.now();
+  const acquired = await formationAutoAcquireLease(source);
+
+  if (!acquired.acquired) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: acquired.reason,
+      leaseUntilMs: acquired.leaseUntilMs || null,
+    };
+  }
+
+  let selectedBatchNumber = null;
+
+  try {
+    const batchStates = await formationAutoLoadBatchStates();
+    selectedBatchNumber = getNextIncompleteBatchNumber(
+      batchStates,
+      FORMATION_AUTO_TOTAL_BATCHES
+    );
+
+    if (selectedBatchNumber === null) {
+      await formationAutoUpdateJob({
+        status: 'done',
+        currentBatchNumber: null,
+        consecutiveFailures: 0,
+        leaseUntilMs: 0,
+        leaseOwner: null,
+        finishedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastRunSource: source,
+        lastRunDurationMs: Date.now() - startedAtMs,
+      });
+
+      return {
+        ok: true,
+        status: 'done',
+        completedBatches: FORMATION_AUTO_TOTAL_BATCHES,
+      };
+    }
+
+    await formationAutoUpdateJob({
+      status: 'running',
+      currentBatchNumber: selectedBatchNumber,
+      lastRunSource: source,
+      lastRunStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const result = await inseeBackgroundAdminFetch('importLbaFormationsBatchHttp', {
+      batch: selectedBatchNumber,
+      write: 1,
+      maxPages: 20,
+      maxRunSeconds: 240,
+      delayMs: 300,
+      retryCount: 2,
+    });
+
+    const nextBatchNumber = result.status === 'completed'
+      ? Math.min(selectedBatchNumber + 1, FORMATION_AUTO_TOTAL_BATCHES)
+      : selectedBatchNumber;
+
+    await formationAutoUpdateJob({
+      status: 'running',
+      currentBatchNumber: nextBatchNumber,
+      consecutiveFailures: 0,
+      errorMessage: null,
+      lastCompletedBatchNumber:
+        result.status === 'completed' ? selectedBatchNumber : null,
+      lastBatchStatus: result.status || null,
+      lastStoppedReason: result.stoppedReason || null,
+      lastRunPages: result.pagesThisRun || 0,
+      lastRunDurationMs: Date.now() - startedAtMs,
+      lastRunFinishedAt: admin.firestore.FieldValue.serverTimestamp(),
+      leaseUntilMs: 0,
+      leaseOwner: null,
+    });
+
+    return {
+      ok: true,
+      status: 'running',
+      batchNumber: selectedBatchNumber,
+      batchStatus: result.status || null,
+      stoppedReason: result.stoppedReason || null,
+      pagesThisRun: result.pagesThisRun || 0,
+      durationMs: Date.now() - startedAtMs,
+    };
+  } catch (error) {
+    const failure = registerBatchFailure(
+      acquired.job?.consecutiveFailures || 0,
+      FORMATION_AUTO_MAX_FAILURES
+    );
+    const errorMessage = String(error.message || error);
+
+    await formationAutoUpdateJob({
+      status: failure.shouldPause ? 'error' : 'running',
+      currentBatchNumber: selectedBatchNumber,
+      consecutiveFailures: failure.consecutiveFailures,
+      errorMessage,
+      errorAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastRunSource: source,
+      lastRunDurationMs: Date.now() - startedAtMs,
+      leaseUntilMs: 0,
+      leaseOwner: null,
+    });
+
+    console.error('formationAutoRunOnce error', error);
+
+    return {
+      ok: false,
+      status: failure.shouldPause ? 'error' : 'running',
+      batchNumber: selectedBatchNumber,
+      consecutiveFailures: failure.consecutiveFailures,
+      error: errorMessage,
+    };
+  }
+}
+
+exports.resumeFormationNationalBackgroundJob = onSchedule(
+  {
+    schedule: '*/5 * * * *',
+    timeZone: 'Europe/Paris',
+    region: 'europe-west1',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    secrets: [BACKFILL_ADMIN_KEY],
+  },
+  async () => {
+    return formationAutoRunOnce({
+      source: 'schedule-5min',
+    });
   }
 );
 
