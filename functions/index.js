@@ -5736,7 +5736,7 @@ exports.importLbaFormationsBatchHttp = onRequest(
     const startedAtMs = Date.now();
 
     try {
-      const adminKey = request.get('x-admin-key') || request.query.key || '';
+      const adminKey = request.get('x-admin-key') || '';
       const expectedKey = BACKFILL_ADMIN_KEY.value();
 
       if (!expectedKey || adminKey !== expectedKey) {
