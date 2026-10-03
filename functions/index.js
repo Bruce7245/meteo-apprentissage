@@ -8,6 +8,10 @@ const {
   FORMATION_NEED_METHOD_VERSION,
   getFormationNeedTimeCoefficient,
 } = require('./lib/formation-need.cjs');
+const {
+  getDepartmentBatch,
+  getNextPageIndex,
+} = require('./lib/formation-import-batch.cjs');
 
 admin.initializeApp();
 
@@ -6642,6 +6646,134 @@ function bfdsApplySessionToSectorStats(stats, session, asOfDate, defaultCapacity
   }
 }
 
+async function buildFormationDepartmentStats({
+  departmentCode,
+  asOfDate,
+  defaultCapacity = DEFAULT_FORMATION_CAPACITY,
+  write = true,
+}) {
+  const snapshot = await db.collection('formationDetails')
+    .where('importDepartmentCode', '==', departmentCode)
+    .get();
+
+  const sectorMap = new Map();
+  const seenFormationsBySector = new Map();
+
+  let scannedCount = 0;
+
+  snapshot.docs.forEach((doc) => {
+    scannedCount += 1;
+
+    const data = doc.data();
+    const sectorCode = data.sectorCode || 'unknown';
+    const sectorLabel = data.sectorLabel || sectorCode;
+    const formationId = data.formationId || doc.id;
+
+    if (!sectorMap.has(sectorCode)) {
+      sectorMap.set(
+        sectorCode,
+        bfdsEmptySectorStats(departmentCode, sectorCode, sectorLabel, asOfDate, defaultCapacity)
+      );
+      seenFormationsBySector.set(sectorCode, new Set());
+    }
+
+    const stats = sectorMap.get(sectorCode);
+    const seen = seenFormationsBySector.get(sectorCode);
+
+    if (!seen.has(formationId)) {
+      stats.formationsCount += 1;
+      seen.add(formationId);
+    }
+
+    const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+
+    sessions.forEach((session) => {
+      bfdsApplySessionToSectorStats(stats, session, asOfDate, defaultCapacity);
+    });
+  });
+
+  const sectors = Array.from(sectorMap.values())
+    .map((stats) => ({
+      ...stats,
+      estimatedCapacityTotal: bfdsRound(stats.estimatedCapacityTotal, 2),
+      estimatedDefaultCapacityTotal: bfdsRound(stats.estimatedDefaultCapacityTotal, 2),
+      estimatedNeedToSecure: bfdsRound(stats.estimatedNeedToSecure, 2),
+    }))
+    .sort((a, b) => b.estimatedNeedToSecure - a.estimatedNeedToSecure);
+
+  const totals = sectors.reduce((acc, stats) => {
+    acc.formationsCount += stats.formationsCount;
+    acc.sessionsCount += stats.sessionsCount;
+    acc.upcomingSessionsCount += stats.upcomingSessionsCount;
+    acc.recentStartedSessionsCount += stats.recentStartedSessionsCount;
+    acc.knownCapacityTotal += stats.knownCapacityTotal;
+    acc.estimatedDefaultCapacityTotal += stats.estimatedDefaultCapacityTotal;
+    acc.estimatedCapacityTotal += stats.estimatedCapacityTotal;
+    acc.estimatedNeedToSecure += stats.estimatedNeedToSecure;
+    return acc;
+  }, {
+    formationsCount: 0,
+    sessionsCount: 0,
+    upcomingSessionsCount: 0,
+    recentStartedSessionsCount: 0,
+    knownCapacityTotal: 0,
+    estimatedDefaultCapacityTotal: 0,
+    estimatedCapacityTotal: 0,
+    estimatedNeedToSecure: 0,
+  });
+
+  Object.keys(totals).forEach((key) => {
+    totals[key] = bfdsRound(totals[key], 2);
+  });
+
+  if (write) {
+    const batch = db.batch();
+
+    sectors.forEach((stats) => {
+      batch.set(
+        db.collection('formationDepartmentSectorStats').doc(`${departmentCode}_${stats.sectorCode}`),
+        {
+          ...stats,
+          computedAt: admin.firestore.FieldValue.serverTimestamp(),
+          calculationMethod: FORMATION_NEED_METHOD_VERSION,
+          schemaVersion: 'formationDepartmentSectorStats.v2',
+        },
+        { merge: true }
+      );
+    });
+
+    batch.set(
+      db.collection('formationDepartmentStats').doc(departmentCode),
+      {
+        departmentCode,
+        asOfDate,
+        defaultCapacity,
+        ...totals,
+        sectorsCount: sectors.length,
+        computedAt: admin.firestore.FieldValue.serverTimestamp(),
+        calculationMethod: FORMATION_NEED_METHOD_VERSION,
+        schemaVersion: 'formationDepartmentStats.v2',
+      },
+      { merge: true }
+    );
+
+    await batch.commit();
+  }
+
+  return {
+    ok: true,
+    write,
+    departmentCode,
+    asOfDate,
+    defaultCapacity,
+    calculationMethod: FORMATION_NEED_METHOD_VERSION,
+    scannedCount,
+    sectorsCount: sectors.length,
+    totals,
+    topSectors: sectors.slice(0, 15),
+  };
+}
+
 exports.buildFormationDepartmentStatsHttp = onRequest(
   {
     region: 'europe-west1',
@@ -6664,7 +6796,10 @@ exports.buildFormationDepartmentStatsHttp = onRequest(
 
       const departmentCode = String(request.query.department || '').trim().toUpperCase();
       const asOfDate = String(request.query.date || new Date().toISOString().slice(0, 10));
-      const defaultCapacity = Math.max(1, Math.min(50, bfdsNumber(request.query.defaultCapacity, DEFAULT_FORMATION_CAPACITY)));
+      const defaultCapacity = Math.max(
+        1,
+        Math.min(50, bfdsNumber(request.query.defaultCapacity, DEFAULT_FORMATION_CAPACITY))
+      );
       const shouldWrite = String(request.query.write || '1') === '1';
 
       if (!departmentCode) {
@@ -6675,126 +6810,14 @@ exports.buildFormationDepartmentStatsHttp = onRequest(
         return;
       }
 
-      const snapshot = await db.collection('formationDetails')
-        .where('importDepartmentCode', '==', departmentCode)
-        .get();
-
-      const sectorMap = new Map();
-      const seenFormationsBySector = new Map();
-
-      let scannedCount = 0;
-
-      snapshot.docs.forEach((doc) => {
-        scannedCount += 1;
-
-        const data = doc.data();
-        const sectorCode = data.sectorCode || 'unknown';
-        const sectorLabel = data.sectorLabel || sectorCode;
-        const formationId = data.formationId || doc.id;
-
-        if (!sectorMap.has(sectorCode)) {
-          sectorMap.set(
-            sectorCode,
-            bfdsEmptySectorStats(departmentCode, sectorCode, sectorLabel, asOfDate, defaultCapacity)
-          );
-          seenFormationsBySector.set(sectorCode, new Set());
-        }
-
-        const stats = sectorMap.get(sectorCode);
-        const seen = seenFormationsBySector.get(sectorCode);
-
-        if (!seen.has(formationId)) {
-          stats.formationsCount += 1;
-          seen.add(formationId);
-        }
-
-        const sessions = Array.isArray(data.sessions) ? data.sessions : [];
-
-        sessions.forEach((session) => {
-          bfdsApplySessionToSectorStats(stats, session, asOfDate, defaultCapacity);
-        });
-      });
-
-      const sectors = Array.from(sectorMap.values())
-        .map((stats) => ({
-          ...stats,
-          estimatedCapacityTotal: bfdsRound(stats.estimatedCapacityTotal, 2),
-          estimatedDefaultCapacityTotal: bfdsRound(stats.estimatedDefaultCapacityTotal, 2),
-          estimatedNeedToSecure: bfdsRound(stats.estimatedNeedToSecure, 2),
-        }))
-        .sort((a, b) => b.estimatedNeedToSecure - a.estimatedNeedToSecure);
-
-      const totals = sectors.reduce((acc, stats) => {
-        acc.formationsCount += stats.formationsCount;
-        acc.sessionsCount += stats.sessionsCount;
-        acc.upcomingSessionsCount += stats.upcomingSessionsCount;
-        acc.recentStartedSessionsCount += stats.recentStartedSessionsCount;
-        acc.knownCapacityTotal += stats.knownCapacityTotal;
-        acc.estimatedDefaultCapacityTotal += stats.estimatedDefaultCapacityTotal;
-        acc.estimatedCapacityTotal += stats.estimatedCapacityTotal;
-        acc.estimatedNeedToSecure += stats.estimatedNeedToSecure;
-        return acc;
-      }, {
-        formationsCount: 0,
-        sessionsCount: 0,
-        upcomingSessionsCount: 0,
-        recentStartedSessionsCount: 0,
-        knownCapacityTotal: 0,
-        estimatedDefaultCapacityTotal: 0,
-        estimatedCapacityTotal: 0,
-        estimatedNeedToSecure: 0,
-      });
-
-      Object.keys(totals).forEach((key) => {
-        totals[key] = bfdsRound(totals[key], 2);
-      });
-
-      if (shouldWrite) {
-        const batch = db.batch();
-
-        sectors.forEach((stats) => {
-          batch.set(
-            db.collection('formationDepartmentSectorStats').doc(`${departmentCode}_${stats.sectorCode}`),
-            {
-              ...stats,
-              computedAt: admin.firestore.FieldValue.serverTimestamp(),
-              calculationMethod: FORMATION_NEED_METHOD_VERSION,
-              schemaVersion: 'formationDepartmentSectorStats.v2',
-            },
-            { merge: true }
-          );
-        });
-
-        batch.set(
-          db.collection('formationDepartmentStats').doc(departmentCode),
-          {
-            departmentCode,
-            asOfDate,
-            defaultCapacity,
-            ...totals,
-            sectorsCount: sectors.length,
-            computedAt: admin.firestore.FieldValue.serverTimestamp(),
-            calculationMethod: FORMATION_NEED_METHOD_VERSION,
-            schemaVersion: 'formationDepartmentStats.v2',
-          },
-          { merge: true }
-        );
-
-        await batch.commit();
-      }
-
-      response.json({
-        ok: true,
-        write: shouldWrite,
+      const result = await buildFormationDepartmentStats({
         departmentCode,
         asOfDate,
         defaultCapacity,
-        calculationMethod: FORMATION_NEED_METHOD_VERSION,
-        scannedCount,
-        sectorsCount: sectors.length,
-        totals,
-        topSectors: sectors.slice(0, 15),
+        write: shouldWrite,
       });
+
+      response.json(result);
     } catch (error) {
       console.error('buildFormationDepartmentStatsHttp error', error);
       response.status(500).json({
