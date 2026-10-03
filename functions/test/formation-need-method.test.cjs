@@ -65,5 +65,5 @@ test("formation need v2 preserves a known capacity", () => {
   assert.equal(result.hasKnownCapacity, true);
   assert.equal(result.retainedCapacity, 24);
   assert.equal(result.coefficient, 0.70);
-  assert.equal(result.estimatedNeed, 16.8);
+  assert.ok(Math.abs(result.estimatedNeed - 16.8) < 1e-10);
 });
