@@ -79,3 +79,12 @@ test("pagination honors explicit total page count", () => {
     receivedCount: 100,
   }), null);
 });
+
+test("pagination stops on an explicit null next page even when page is full", () => {
+  assert.equal(getNextPageIndex({
+    pagination: { next_page_index: null },
+    pageIndex: 2,
+    pageSize: 100,
+    receivedCount: 100,
+  }), null);
+});
