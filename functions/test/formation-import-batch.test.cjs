@@ -4,6 +4,8 @@ const assert = require("node:assert/strict");
 const {
   getDepartmentBatch,
   getNextPageIndex,
+  getNextIncompleteBatchNumber,
+  registerBatchFailure,
 } = require("../lib/formation-import-batch.cjs");
 
 const CODES = [
@@ -87,4 +89,28 @@ test("pagination stops on an explicit null next page even when page is full", ()
     pageSize: 100,
     receivedCount: 100,
   }), null);
+});
+
+test("automatic runner selects the first non-completed batch", () => {
+  assert.equal(getNextIncompleteBatchNumber({
+    1: { status: "completed" },
+    2: { status: "completed" },
+    3: { status: "paused" },
+  }, 11), 3);
+
+  assert.equal(getNextIncompleteBatchNumber({
+    1: { status: "completed" },
+    2: { status: "completed" },
+  }, 2), null);
+});
+
+test("automatic runner pauses after three consecutive failures", () => {
+  assert.deepEqual(registerBatchFailure(0, 3), {
+    consecutiveFailures: 1,
+    shouldPause: false,
+  });
+  assert.deepEqual(registerBatchFailure(2, 3), {
+    consecutiveFailures: 3,
+    shouldPause: true,
+  });
 });
