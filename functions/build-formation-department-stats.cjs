@@ -1,4 +1,9 @@
 const admin = require("firebase-admin");
+const {
+  DEFAULT_FORMATION_CAPACITY,
+  FORMATION_NEED_METHOD_VERSION,
+  getFormationNeedTimeCoefficient,
+} = require("./lib/formation-need.cjs");
 
 if (!admin.apps.length) {
   admin.initializeApp({ projectId: "meteo-apprentissage" });
@@ -8,7 +13,7 @@ const db = admin.firestore();
 
 const departmentCode = String(process.argv[2] || "72").toUpperCase();
 const asOfDate = String(process.argv[3] || new Date().toISOString().slice(0, 10));
-const defaultCapacity = Number(process.argv[4] || 8);
+const defaultCapacity = Number(process.argv[4] || DEFAULT_FORMATION_CAPACITY);
 
 function parseDateOnly(value) {
   if (!value) return null;
@@ -24,21 +29,6 @@ function parseDateOnly(value) {
 
 function diffDays(fromDate, toDate) {
   return Math.round((toDate.getTime() - fromDate.getTime()) / 86400000);
-}
-
-function getTimeCoefficient(daysBeforeStart) {
-  if (daysBeforeStart > 180) return 0.10;
-  if (daysBeforeStart > 120) return 0.20;
-  if (daysBeforeStart > 90) return 0.35;
-  if (daysBeforeStart > 60) return 0.50;
-  if (daysBeforeStart > 30) return 0.70;
-  if (daysBeforeStart > 15) return 0.85;
-  if (daysBeforeStart >= 0) return 1.00;
-
-  if (daysBeforeStart >= -30) return 0.60;
-  if (daysBeforeStart >= -90) return 0.25;
-
-  return 0;
 }
 
 function getSector(stats, sectorCode, sectorLabel) {
@@ -189,11 +179,11 @@ async function main() {
       if (!start) continue;
 
       const daysBeforeStart = diffDays(asOf, start);
-      const timeCoefficient = getTimeCoefficient(daysBeforeStart);
+      const timeCoefficient = getFormationNeedTimeCoefficient(daysBeforeStart);
 
       if (daysBeforeStart >= 0) {
         sector.upcomingSessionsCount += 1;
-      } else if (daysBeforeStart >= -30) {
+      } else if (daysBeforeStart >= -90) {
         sector.recentStartedSessionsCount += 1;
       }
 
@@ -300,6 +290,7 @@ async function main() {
       departmentCode,
       asOfDate,
       defaultCapacity,
+      calculationMethod: FORMATION_NEED_METHOD_VERSION,
       importedDocumentsCount: scanned,
       ...totals,
       sectorsCount: finalizedSectors.length,
@@ -317,7 +308,7 @@ async function main() {
         .sort((a, b) => a.date.localeCompare(b.date)),
       source: "api-apprentissage-lba-formation-v1",
       computedAt,
-      schemaVersion: "formationDepartmentStats.v1",
+      schemaVersion: "formationDepartmentStats.v2",
     },
   });
 
@@ -328,9 +319,10 @@ async function main() {
         ...sector,
         asOfDate,
         defaultCapacity,
+        calculationMethod: FORMATION_NEED_METHOD_VERSION,
         source: "api-apprentissage-lba-formation-v1",
         computedAt,
-        schemaVersion: "formationDepartmentSectorStats.v1",
+        schemaVersion: "formationDepartmentSectorStats.v2",
       },
     });
   }
