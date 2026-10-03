@@ -46,3 +46,6 @@ jobs:
 
       - name: Validate Functions syntax
         run: node --check functions/index.js
+
+      - name: Test formation need calculation
+        run: npm run test:formation-need --prefix functions
