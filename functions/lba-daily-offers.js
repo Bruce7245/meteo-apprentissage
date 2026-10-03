@@ -716,6 +716,7 @@ async function runOfferBackfillOnce({ source = "scheduler" } = {}) {
   const date = cleanText(job.date) || todayParis();
   const runId = cleanText(job.runId) || `offer_backfill_${date}_${Date.now().toString(36)}`;
   let currentIndex = Math.max(0, toInt(job.currentDepartmentIndex, 0));
+  let consecutiveFailures = Math.max(0, toInt(job.consecutiveFailures, 0));
 
   const window = getOfferBackfillWindow(
     DEPARTMENT_CODES,
@@ -762,6 +763,7 @@ async function runOfferBackfillOnce({ source = "scheduler" } = {}) {
       const result = await importDepartment(date, departmentCode, runId);
       results.push(result);
       currentIndex += 1;
+      consecutiveFailures = 0;
 
       const nextWindow = getOfferBackfillWindow(
         DEPARTMENT_CODES,
@@ -827,7 +829,7 @@ async function runOfferBackfillOnce({ source = "scheduler" } = {}) {
     };
   } catch (error) {
     const failure = registerOfferBackfillFailure(
-      job.consecutiveFailures || 0,
+      consecutiveFailures,
       OFFER_BACKFILL_MAX_FAILURES
     );
 
