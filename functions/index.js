@@ -8,6 +8,10 @@ const {
   FORMATION_NEED_METHOD_VERSION,
   getFormationNeedTimeCoefficient,
 } = require('./lib/formation-need.cjs');
+const {
+  getDepartmentBatch,
+  getNextPageIndex,
+} = require('./lib/formation-import-batch.cjs');
 
 admin.initializeApp();
 
@@ -5418,6 +5422,239 @@ async function fetchLbaFormationSearchPage({
   return payload;
 }
 
+async function fetchLbaFormationSearchPageWithRetry(args, {
+  retries = 2,
+  delayMs = 800,
+} = {}) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await fetchLbaFormationSearchPage(args);
+    } catch (error) {
+      lastError = error;
+      const status = Number(error?.httpStatus || 0);
+      const retryable = status === 429 || status >= 500 || status === 0;
+
+      if (!retryable || attempt >= retries) {
+        throw error;
+      }
+
+      await sleep(delayMs * (attempt + 1));
+    }
+  }
+
+  throw lastError || new Error('LBA formation search failed');
+}
+
+async function importLbaFormationPage({
+  token,
+  departmentCode,
+  longitude,
+  latitude,
+  radius,
+  pageIndex,
+  pageSize,
+  write,
+  filterDepartment = true,
+  romes = null,
+  rncp = null,
+  targetDiplomaLevel = null,
+  retryCount = 2,
+}) {
+  const payload = await fetchLbaFormationSearchPageWithRetry({
+    token,
+    longitude,
+    latitude,
+    radius,
+    romes,
+    rncp,
+    targetDiplomaLevel,
+    pageIndex,
+    pageSize,
+  }, {
+    retries: retryCount,
+  });
+
+  const formations = extractArrayFromFormationSearchPayload(payload);
+  const batch = db.batch();
+
+  let writtenCount = 0;
+  let skippedNoId = 0;
+  let skippedOutsideDepartment = 0;
+
+  const sectorCounter = {};
+  const romeCounter = {};
+  const rncpCounter = {};
+  const sessionStartCounter = {};
+  const sample = [];
+
+  const importContext = {
+    departmentCode,
+    latitude,
+    longitude,
+    radius,
+  };
+
+  for (const formation of formations) {
+    const normalized = normalizeFormationForImport(formation, importContext);
+
+    if (!normalized.docId || !normalized.data.formationId) {
+      skippedNoId += 1;
+      continue;
+    }
+
+    const formationDepartmentCode = normalized.data.venue.departmentCode;
+
+    if (filterDepartment && formationDepartmentCode !== departmentCode) {
+      skippedOutsideDepartment += 1;
+      continue;
+    }
+
+    const sectorCode = normalized.data.sectorCode || 'unknown';
+
+    sectorCounter[sectorCode] = (sectorCounter[sectorCode] || 0) + 1;
+
+    for (const romeCode of normalized.data.romeCodes || []) {
+      romeCounter[romeCode] = (romeCounter[romeCode] || 0) + 1;
+    }
+
+    if (normalized.data.rncp) {
+      rncpCounter[normalized.data.rncp] = (rncpCounter[normalized.data.rncp] || 0) + 1;
+    }
+
+    for (const session of normalized.data.sessions || []) {
+      const startDate = session.debut ? String(session.debut).slice(0, 10) : 'unknown';
+      sessionStartCounter[startDate] = (sessionStartCounter[startDate] || 0) + 1;
+    }
+
+    if (sample.length < 10) {
+      sample.push({
+        formationId: normalized.data.formationId,
+        intitule: normalized.data.intitule,
+        rncp: normalized.data.rncp,
+        romeCodes: normalized.data.romeCodes,
+        sectorCode: normalized.data.sectorCode,
+        session: normalized.data.primarySession,
+        venue: normalized.data.venue,
+      });
+    }
+
+    if (write) {
+      batch.set(
+        db.collection('formationDetails').doc(normalized.docId),
+        normalized.data,
+        { merge: true }
+      );
+    }
+
+    writtenCount += 1;
+  }
+
+  const pagination = payload?.pagination || null;
+
+  if (write && writtenCount > 0) {
+    await batch.commit();
+  }
+
+  if (write) {
+    await db.collection('apiImports').doc(`lba_formations_${departmentCode}_page_${pageIndex}`).set(
+      {
+        type: 'lba_formations_import_page',
+        departmentCode,
+        longitude,
+        latitude,
+        radius,
+        pageIndex,
+        pageSize,
+        filterDepartment,
+        receivedCount: formations.length,
+        writtenCount,
+        skippedNoId,
+        skippedOutsideDepartment,
+        pagination,
+        sectorCounter,
+        romeCounter,
+        rncpCounter,
+        sessionStartCounter,
+        finishedAt: admin.firestore.FieldValue.serverTimestamp(),
+        schemaVersion: 'lba_formations_import_page.v2',
+      },
+      { merge: true }
+    );
+  }
+
+  return {
+    ok: true,
+    write,
+    departmentCode,
+    longitude,
+    latitude,
+    radius,
+    pageIndex,
+    pageSize,
+    filterDepartment,
+    receivedCount: formations.length,
+    writtenCount,
+    skippedNoId,
+    skippedOutsideDepartment,
+    pagination,
+    sectorCounter,
+    sessionStartCounter,
+    sample,
+  };
+}
+
+async function resolveDepartmentFormationSearch(departmentCode, departmentName) {
+  const ref = db.collection('departments').doc(departmentCode);
+  const snapshot = await ref.get();
+  const data = snapshot.exists ? snapshot.data() : {};
+  const search = data?.formationSearch || {};
+
+  const latitude = Number(search.latitude);
+  const longitude = Number(search.longitude);
+  const radiusKm = Number(search.radiusKm || getDepartmentFormationRadiusKm(departmentCode));
+
+  if (
+    search.enabled !== false &&
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude)
+  ) {
+    return {
+      departmentCode,
+      departmentName: data.name || departmentName || null,
+      latitude,
+      longitude,
+      radius: Number.isFinite(radiusKm) ? radiusKm : 100,
+      source: 'departments.formationSearch',
+    };
+  }
+
+  const communesUrl = new URL(
+    `https://geo.api.gouv.fr/departements/${encodeURIComponent(departmentCode)}/communes`
+  );
+  communesUrl.searchParams.set('fields', 'nom,code,population,centre');
+  communesUrl.searchParams.set('format', 'json');
+  communesUrl.searchParams.set('geometry', 'centre');
+
+  const communesPayload = await fetchGeoApiJson(communesUrl.toString());
+  const communes = Array.isArray(communesPayload) ? communesPayload : [];
+  const mainCommune = findMainCommune(communes);
+
+  if (!mainCommune?.center) {
+    throw new Error(`No formation search center for department ${departmentCode}`);
+  }
+
+  return {
+    departmentCode,
+    departmentName: data.name || departmentName || null,
+    latitude: mainCommune.center.latitude,
+    longitude: mainCommune.center.longitude,
+    radius: getDepartmentFormationRadiusKm(departmentCode),
+    source: 'geo.api.gouv.fr_fallback',
+  };
+}
+
 exports.importLbaFormationsPage = onRequest(
   {
     region: 'europe-west1',
@@ -5453,148 +5690,29 @@ exports.importLbaFormationsPage = onRequest(
       const latitude = request.query.latitude ?? '48.0061';
       const radius = Number(request.query.radius || 100);
       const pageIndex = Math.max(Number(request.query.pageIndex ?? request.query.page_index ?? 0), 0);
-      const pageSize = Math.min(Math.max(Number(request.query.pageSize ?? request.query.page_size ?? 100), 1), 100);
+      const pageSize = Math.min(
+        Math.max(Number(request.query.pageSize ?? request.query.page_size ?? 100), 1),
+        100
+      );
       const shouldWrite = String(request.query.write || '') === '1';
       const filterDepartment = String(request.query.filterDepartment || '1') !== '0';
 
-      const payload = await fetchLbaFormationSearchPage({
+      const result = await importLbaFormationPage({
         token,
+        departmentCode,
         longitude,
         latitude,
         radius,
+        pageIndex,
+        pageSize,
+        write: shouldWrite,
+        filterDepartment,
         romes: request.query.romes || null,
         rncp: request.query.rncp || null,
         targetDiplomaLevel: request.query.target_diploma_level || null,
-        pageIndex,
-        pageSize,
       });
 
-      const formations = extractArrayFromFormationSearchPayload(payload);
-
-      const batch = db.batch();
-
-      let writtenCount = 0;
-      let skippedNoId = 0;
-      let skippedOutsideDepartment = 0;
-
-      const sectorCounter = {};
-      const romeCounter = {};
-      const rncpCounter = {};
-      const sessionStartCounter = {};
-      const sample = [];
-
-      const importContext = {
-        departmentCode,
-        latitude,
-        longitude,
-        radius,
-      };
-
-      for (const formation of formations) {
-        const normalized = normalizeFormationForImport(formation, importContext);
-
-        if (!normalized.docId || !normalized.data.formationId) {
-          skippedNoId += 1;
-          continue;
-        }
-
-        const formationDepartmentCode = normalized.data.venue.departmentCode;
-
-        if (filterDepartment && formationDepartmentCode !== departmentCode) {
-          skippedOutsideDepartment += 1;
-          continue;
-        }
-
-        const sectorCode = normalized.data.sectorCode || 'unknown';
-
-        sectorCounter[sectorCode] = (sectorCounter[sectorCode] || 0) + 1;
-
-        for (const romeCode of normalized.data.romeCodes || []) {
-          romeCounter[romeCode] = (romeCounter[romeCode] || 0) + 1;
-        }
-
-        if (normalized.data.rncp) {
-          rncpCounter[normalized.data.rncp] = (rncpCounter[normalized.data.rncp] || 0) + 1;
-        }
-
-        for (const session of normalized.data.sessions || []) {
-          const start = session.debut ? String(session.debut).slice(0, 10) : 'unknown';
-          sessionStartCounter[start] = (sessionStartCounter[start] || 0) + 1;
-        }
-
-        if (sample.length < 10) {
-          sample.push({
-            formationId: normalized.data.formationId,
-            intitule: normalized.data.intitule,
-            rncp: normalized.data.rncp,
-            romeCodes: normalized.data.romeCodes,
-            sectorCode: normalized.data.sectorCode,
-            session: normalized.data.primarySession,
-            venue: normalized.data.venue,
-          });
-        }
-
-        if (shouldWrite) {
-          batch.set(
-            db.collection('formationDetails').doc(normalized.docId),
-            normalized.data,
-            { merge: true }
-          );
-        }
-
-        writtenCount += 1;
-      }
-
-      if (shouldWrite && writtenCount > 0) {
-        await batch.commit();
-
-        await db.collection('apiImports').doc(`lba_formations_${departmentCode}_page_${pageIndex}`).set(
-          {
-            type: 'lba_formations_import_page',
-            departmentCode,
-            longitude,
-            latitude,
-            radius,
-            pageIndex,
-            pageSize,
-            filterDepartment,
-            receivedCount: formations.length,
-            writtenCount,
-            skippedNoId,
-            skippedOutsideDepartment,
-            pagination: payload?.pagination || null,
-            sectorCounter,
-            romeCounter,
-            rncpCounter,
-            sessionStartCounter,
-            finishedAt: admin.firestore.FieldValue.serverTimestamp(),
-            schemaVersion: 'lba_formations_import_page.v1',
-          },
-          { merge: true }
-        );
-      }
-
-      const pagination = payload?.pagination || null;
-
-      response.json({
-        ok: true,
-        write: shouldWrite,
-        departmentCode,
-        longitude,
-        latitude,
-        radius,
-        pageIndex,
-        pageSize,
-        filterDepartment,
-        receivedCount: formations.length,
-        writtenCount,
-        skippedNoId,
-        skippedOutsideDepartment,
-        pagination,
-        sectorCounter,
-        sessionStartCounter,
-        sample,
-      });
+      response.json(result);
     } catch (error) {
       console.error('importLbaFormationsPage error', error);
       response.status(500).json({
@@ -5602,6 +5720,358 @@ exports.importLbaFormationsPage = onRequest(
         error: String(error.message || error),
         httpStatus: error.httpStatus || null,
         lbaPayload: error.payload || null,
+      });
+    }
+  }
+);
+
+exports.importLbaFormationsBatchHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    secrets: [API_APPRENTISSAGE_TOKEN, BACKFILL_ADMIN_KEY],
+  },
+  async (request, response) => {
+    const startedAtMs = Date.now();
+
+    try {
+      const adminKey = request.get('x-admin-key') || '';
+      const expectedKey = BACKFILL_ADMIN_KEY.value();
+
+      if (!expectedKey || adminKey !== expectedKey) {
+        response.status(403).json({
+          ok: false,
+          error: 'Forbidden',
+        });
+        return;
+      }
+
+      const token = API_APPRENTISSAGE_TOKEN.value();
+
+      if (!token) {
+        response.status(500).json({
+          ok: false,
+          error: 'Secret API_APPRENTISSAGE_TOKEN absent ou vide',
+        });
+        return;
+      }
+
+      const batchNumber = Math.max(1, Number.parseInt(String(request.query.batch || '1'), 10));
+      const shouldWrite = String(request.query.write || '') === '1';
+      const reset = String(request.query.reset || '0') === '1';
+      const pageSize = Math.min(Math.max(Number(request.query.pageSize || 100), 1), 100);
+      const maxPagesPerRun = Math.min(Math.max(Number(request.query.maxPages || 30), 1), 60);
+      const maxRunMs = Math.min(
+        Math.max(Number(request.query.maxRunSeconds || 420), 30),
+        480
+      ) * 1000;
+      const delayMs = Math.min(Math.max(Number(request.query.delayMs || 300), 0), 5000);
+      const retryCount = Math.min(Math.max(Number(request.query.retryCount || 2), 0), 4);
+
+      const departmentRows = APPRENTIFR_DEPARTMENTS.map(
+        ([code, name, regionCode, regionName]) => ({
+          code,
+          name,
+          regionCode,
+          regionName,
+        })
+      );
+
+      let batchDefinition;
+      try {
+        batchDefinition = getDepartmentBatch(departmentRows, batchNumber, 10);
+      } catch (error) {
+        response.status(400).json({
+          ok: false,
+          error: String(error.message || error),
+        });
+        return;
+      }
+
+      const stateRef = db.collection('formationImportBatches')
+        .doc(`batch_${String(batchNumber).padStart(2, '0')}`);
+
+      let state = {
+        batchNumber,
+        batchSize: 10,
+        departmentCodes: batchDefinition.items.map((item) => item.code),
+        currentDepartmentIndex: 0,
+        currentPageIndex: 0,
+        pagesProcessed: 0,
+        receivedCount: 0,
+        writtenCount: 0,
+        skippedNoId: 0,
+        skippedOutsideDepartment: 0,
+        departmentStates: {},
+        status: 'pending',
+        schemaVersion: 'formationImportBatch.v1',
+      };
+
+      if (shouldWrite && !reset) {
+        const stateSnapshot = await stateRef.get();
+        if (stateSnapshot.exists) {
+          state = {
+            ...state,
+            ...stateSnapshot.data(),
+            departmentStates: stateSnapshot.data().departmentStates || {},
+          };
+        }
+      }
+
+      if (state.status === 'completed' && !reset) {
+        response.json({
+          ok: true,
+          alreadyCompleted: true,
+          batch: batchDefinition,
+          state,
+        });
+        return;
+      }
+
+      if (reset) {
+        state.currentDepartmentIndex = 0;
+        state.currentPageIndex = 0;
+        state.pagesProcessed = 0;
+        state.receivedCount = 0;
+        state.writtenCount = 0;
+        state.skippedNoId = 0;
+        state.skippedOutsideDepartment = 0;
+        state.departmentStates = {};
+        state.status = 'pending';
+      }
+
+      state.status = 'running';
+
+      if (shouldWrite) {
+        await stateRef.set({
+          ...state,
+          startedAt: state.startedAt || admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+
+      const runRows = [];
+      let pagesThisRun = 0;
+      let stoppedReason = null;
+
+      while (state.currentDepartmentIndex < batchDefinition.items.length) {
+        if (pagesThisRun >= maxPagesPerRun) {
+          stoppedReason = 'page_budget';
+          break;
+        }
+
+        if (Date.now() - startedAtMs >= maxRunMs) {
+          stoppedReason = 'time_budget';
+          break;
+        }
+
+        const department = batchDefinition.items[state.currentDepartmentIndex];
+        const departmentCode = department.code;
+
+        let departmentState = state.departmentStates[departmentCode] || {
+          status: 'pending',
+          pageIndex: state.currentPageIndex || 0,
+          pagesProcessed: 0,
+          receivedCount: 0,
+          writtenCount: 0,
+          skippedNoId: 0,
+          skippedOutsideDepartment: 0,
+        };
+
+        try {
+          const searchConfig = await resolveDepartmentFormationSearch(
+            departmentCode,
+            department.name
+          );
+
+          departmentState = {
+            ...departmentState,
+            status: 'running',
+            searchSource: searchConfig.source,
+            latitude: searchConfig.latitude,
+            longitude: searchConfig.longitude,
+            radius: searchConfig.radius,
+          };
+
+          const pageIndex = Number(departmentState.pageIndex || 0);
+
+          const pageResult = await importLbaFormationPage({
+            token,
+            departmentCode,
+            longitude: searchConfig.longitude,
+            latitude: searchConfig.latitude,
+            radius: searchConfig.radius,
+            pageIndex,
+            pageSize,
+            write: shouldWrite,
+            filterDepartment: true,
+            retryCount,
+          });
+
+          pagesThisRun += 1;
+          state.pagesProcessed += 1;
+          state.receivedCount += pageResult.receivedCount;
+          state.writtenCount += pageResult.writtenCount;
+          state.skippedNoId += pageResult.skippedNoId;
+          state.skippedOutsideDepartment += pageResult.skippedOutsideDepartment;
+
+          departmentState.pagesProcessed += 1;
+          departmentState.receivedCount += pageResult.receivedCount;
+          departmentState.writtenCount += pageResult.writtenCount;
+          departmentState.skippedNoId += pageResult.skippedNoId;
+          departmentState.skippedOutsideDepartment += pageResult.skippedOutsideDepartment;
+          departmentState.lastPageIndex = pageIndex;
+          departmentState.updatedAt = new Date().toISOString();
+
+          const nextPageIndex = getNextPageIndex({
+            pagination: pageResult.pagination,
+            pageIndex,
+            pageSize,
+            receivedCount: pageResult.receivedCount,
+          });
+
+          runRows.push({
+            departmentCode,
+            departmentName: department.name,
+            pageIndex,
+            receivedCount: pageResult.receivedCount,
+            writtenCount: pageResult.writtenCount,
+            skippedOutsideDepartment: pageResult.skippedOutsideDepartment,
+            nextPageIndex,
+          });
+
+          if (nextPageIndex === null) {
+            const stats = await buildFormationDepartmentStats({
+              departmentCode,
+              asOfDate: parisDateString(new Date()),
+              defaultCapacity: DEFAULT_FORMATION_CAPACITY,
+              write: shouldWrite,
+            });
+
+            departmentState.status = 'completed';
+            departmentState.pageIndex = 0;
+            departmentState.completedAt = new Date().toISOString();
+            departmentState.stats = {
+              scannedCount: stats.scannedCount,
+              sectorsCount: stats.sectorsCount,
+              estimatedNeedToSecure: stats.totals.estimatedNeedToSecure,
+              calculationMethod: stats.calculationMethod,
+            };
+
+            state.departmentStates[departmentCode] = departmentState;
+            state.currentDepartmentIndex += 1;
+            state.currentPageIndex = 0;
+          } else {
+            departmentState.pageIndex = nextPageIndex;
+            state.departmentStates[departmentCode] = departmentState;
+            state.currentPageIndex = nextPageIndex;
+          }
+
+          if (shouldWrite) {
+            await stateRef.set({
+              ...state,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+
+          if (delayMs > 0) {
+            await sleep(delayMs);
+          }
+        } catch (error) {
+          departmentState.status = 'failed';
+          departmentState.error = String(error.message || error);
+          departmentState.httpStatus = error.httpStatus || null;
+          departmentState.failedAt = new Date().toISOString();
+          state.departmentStates[departmentCode] = departmentState;
+          state.status = 'failed';
+          stoppedReason = 'department_error';
+
+          if (shouldWrite) {
+            await stateRef.set({
+              ...state,
+              lastError: {
+                departmentCode,
+                message: departmentState.error,
+                httpStatus: departmentState.httpStatus,
+              },
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+
+          break;
+        }
+      }
+
+      const completed = state.currentDepartmentIndex >= batchDefinition.items.length;
+
+      if (completed) {
+        state.status = 'completed';
+        state.currentPageIndex = 0;
+      } else if (state.status !== 'failed') {
+        state.status = 'paused';
+      }
+
+      if (shouldWrite) {
+        const finalPatch = {
+          ...state,
+          stoppedReason,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        if (completed) {
+          finalPatch.completedAt = admin.firestore.FieldValue.serverTimestamp();
+        }
+
+        await stateRef.set(finalPatch, { merge: true });
+
+        await db.collection('apiImports')
+          .doc(`lba_formations_batch_${String(batchNumber).padStart(2, '0')}`)
+          .set({
+            type: 'lba_formations_import_batch',
+            batchNumber,
+            batchSize: 10,
+            departmentCodes: batchDefinition.items.map((item) => item.code),
+            status: state.status,
+            currentDepartmentIndex: state.currentDepartmentIndex,
+            currentPageIndex: state.currentPageIndex,
+            pagesProcessed: state.pagesProcessed,
+            receivedCount: state.receivedCount,
+            writtenCount: state.writtenCount,
+            skippedNoId: state.skippedNoId,
+            skippedOutsideDepartment: state.skippedOutsideDepartment,
+            stoppedReason,
+            calculationMethod: FORMATION_NEED_METHOD_VERSION,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            schemaVersion: 'lba_formations_import_batch.v1',
+          }, { merge: true });
+      }
+
+      response.json({
+        ok: state.status !== 'failed',
+        write: shouldWrite,
+        batch: batchDefinition,
+        status: state.status,
+        stoppedReason,
+        pagesThisRun,
+        durationMs: Date.now() - startedAtMs,
+        currentDepartmentIndex: state.currentDepartmentIndex,
+        currentPageIndex: state.currentPageIndex,
+        totals: {
+          pagesProcessed: state.pagesProcessed,
+          receivedCount: state.receivedCount,
+          writtenCount: state.writtenCount,
+          skippedNoId: state.skippedNoId,
+          skippedOutsideDepartment: state.skippedOutsideDepartment,
+        },
+        departmentStates: state.departmentStates,
+        runRows,
+      });
+    } catch (error) {
+      console.error('importLbaFormationsBatchHttp error', error);
+      response.status(500).json({
+        ok: false,
+        error: String(error.message || error),
       });
     }
   }
@@ -6642,6 +7112,134 @@ function bfdsApplySessionToSectorStats(stats, session, asOfDate, defaultCapacity
   }
 }
 
+async function buildFormationDepartmentStats({
+  departmentCode,
+  asOfDate,
+  defaultCapacity = DEFAULT_FORMATION_CAPACITY,
+  write = true,
+}) {
+  const snapshot = await db.collection('formationDetails')
+    .where('importDepartmentCode', '==', departmentCode)
+    .get();
+
+  const sectorMap = new Map();
+  const seenFormationsBySector = new Map();
+
+  let scannedCount = 0;
+
+  snapshot.docs.forEach((doc) => {
+    scannedCount += 1;
+
+    const data = doc.data();
+    const sectorCode = data.sectorCode || 'unknown';
+    const sectorLabel = data.sectorLabel || sectorCode;
+    const formationId = data.formationId || doc.id;
+
+    if (!sectorMap.has(sectorCode)) {
+      sectorMap.set(
+        sectorCode,
+        bfdsEmptySectorStats(departmentCode, sectorCode, sectorLabel, asOfDate, defaultCapacity)
+      );
+      seenFormationsBySector.set(sectorCode, new Set());
+    }
+
+    const stats = sectorMap.get(sectorCode);
+    const seen = seenFormationsBySector.get(sectorCode);
+
+    if (!seen.has(formationId)) {
+      stats.formationsCount += 1;
+      seen.add(formationId);
+    }
+
+    const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+
+    sessions.forEach((session) => {
+      bfdsApplySessionToSectorStats(stats, session, asOfDate, defaultCapacity);
+    });
+  });
+
+  const sectors = Array.from(sectorMap.values())
+    .map((stats) => ({
+      ...stats,
+      estimatedCapacityTotal: bfdsRound(stats.estimatedCapacityTotal, 2),
+      estimatedDefaultCapacityTotal: bfdsRound(stats.estimatedDefaultCapacityTotal, 2),
+      estimatedNeedToSecure: bfdsRound(stats.estimatedNeedToSecure, 2),
+    }))
+    .sort((a, b) => b.estimatedNeedToSecure - a.estimatedNeedToSecure);
+
+  const totals = sectors.reduce((acc, stats) => {
+    acc.formationsCount += stats.formationsCount;
+    acc.sessionsCount += stats.sessionsCount;
+    acc.upcomingSessionsCount += stats.upcomingSessionsCount;
+    acc.recentStartedSessionsCount += stats.recentStartedSessionsCount;
+    acc.knownCapacityTotal += stats.knownCapacityTotal;
+    acc.estimatedDefaultCapacityTotal += stats.estimatedDefaultCapacityTotal;
+    acc.estimatedCapacityTotal += stats.estimatedCapacityTotal;
+    acc.estimatedNeedToSecure += stats.estimatedNeedToSecure;
+    return acc;
+  }, {
+    formationsCount: 0,
+    sessionsCount: 0,
+    upcomingSessionsCount: 0,
+    recentStartedSessionsCount: 0,
+    knownCapacityTotal: 0,
+    estimatedDefaultCapacityTotal: 0,
+    estimatedCapacityTotal: 0,
+    estimatedNeedToSecure: 0,
+  });
+
+  Object.keys(totals).forEach((key) => {
+    totals[key] = bfdsRound(totals[key], 2);
+  });
+
+  if (write) {
+    const batch = db.batch();
+
+    sectors.forEach((stats) => {
+      batch.set(
+        db.collection('formationDepartmentSectorStats').doc(`${departmentCode}_${stats.sectorCode}`),
+        {
+          ...stats,
+          computedAt: admin.firestore.FieldValue.serverTimestamp(),
+          calculationMethod: FORMATION_NEED_METHOD_VERSION,
+          schemaVersion: 'formationDepartmentSectorStats.v2',
+        },
+        { merge: true }
+      );
+    });
+
+    batch.set(
+      db.collection('formationDepartmentStats').doc(departmentCode),
+      {
+        departmentCode,
+        asOfDate,
+        defaultCapacity,
+        ...totals,
+        sectorsCount: sectors.length,
+        computedAt: admin.firestore.FieldValue.serverTimestamp(),
+        calculationMethod: FORMATION_NEED_METHOD_VERSION,
+        schemaVersion: 'formationDepartmentStats.v2',
+      },
+      { merge: true }
+    );
+
+    await batch.commit();
+  }
+
+  return {
+    ok: true,
+    write,
+    departmentCode,
+    asOfDate,
+    defaultCapacity,
+    calculationMethod: FORMATION_NEED_METHOD_VERSION,
+    scannedCount,
+    sectorsCount: sectors.length,
+    totals,
+    topSectors: sectors.slice(0, 15),
+  };
+}
+
 exports.buildFormationDepartmentStatsHttp = onRequest(
   {
     region: 'europe-west1',
@@ -6664,7 +7262,10 @@ exports.buildFormationDepartmentStatsHttp = onRequest(
 
       const departmentCode = String(request.query.department || '').trim().toUpperCase();
       const asOfDate = String(request.query.date || new Date().toISOString().slice(0, 10));
-      const defaultCapacity = Math.max(1, Math.min(50, bfdsNumber(request.query.defaultCapacity, DEFAULT_FORMATION_CAPACITY)));
+      const defaultCapacity = Math.max(
+        1,
+        Math.min(50, bfdsNumber(request.query.defaultCapacity, DEFAULT_FORMATION_CAPACITY))
+      );
       const shouldWrite = String(request.query.write || '1') === '1';
 
       if (!departmentCode) {
@@ -6675,126 +7276,14 @@ exports.buildFormationDepartmentStatsHttp = onRequest(
         return;
       }
 
-      const snapshot = await db.collection('formationDetails')
-        .where('importDepartmentCode', '==', departmentCode)
-        .get();
-
-      const sectorMap = new Map();
-      const seenFormationsBySector = new Map();
-
-      let scannedCount = 0;
-
-      snapshot.docs.forEach((doc) => {
-        scannedCount += 1;
-
-        const data = doc.data();
-        const sectorCode = data.sectorCode || 'unknown';
-        const sectorLabel = data.sectorLabel || sectorCode;
-        const formationId = data.formationId || doc.id;
-
-        if (!sectorMap.has(sectorCode)) {
-          sectorMap.set(
-            sectorCode,
-            bfdsEmptySectorStats(departmentCode, sectorCode, sectorLabel, asOfDate, defaultCapacity)
-          );
-          seenFormationsBySector.set(sectorCode, new Set());
-        }
-
-        const stats = sectorMap.get(sectorCode);
-        const seen = seenFormationsBySector.get(sectorCode);
-
-        if (!seen.has(formationId)) {
-          stats.formationsCount += 1;
-          seen.add(formationId);
-        }
-
-        const sessions = Array.isArray(data.sessions) ? data.sessions : [];
-
-        sessions.forEach((session) => {
-          bfdsApplySessionToSectorStats(stats, session, asOfDate, defaultCapacity);
-        });
-      });
-
-      const sectors = Array.from(sectorMap.values())
-        .map((stats) => ({
-          ...stats,
-          estimatedCapacityTotal: bfdsRound(stats.estimatedCapacityTotal, 2),
-          estimatedDefaultCapacityTotal: bfdsRound(stats.estimatedDefaultCapacityTotal, 2),
-          estimatedNeedToSecure: bfdsRound(stats.estimatedNeedToSecure, 2),
-        }))
-        .sort((a, b) => b.estimatedNeedToSecure - a.estimatedNeedToSecure);
-
-      const totals = sectors.reduce((acc, stats) => {
-        acc.formationsCount += stats.formationsCount;
-        acc.sessionsCount += stats.sessionsCount;
-        acc.upcomingSessionsCount += stats.upcomingSessionsCount;
-        acc.recentStartedSessionsCount += stats.recentStartedSessionsCount;
-        acc.knownCapacityTotal += stats.knownCapacityTotal;
-        acc.estimatedDefaultCapacityTotal += stats.estimatedDefaultCapacityTotal;
-        acc.estimatedCapacityTotal += stats.estimatedCapacityTotal;
-        acc.estimatedNeedToSecure += stats.estimatedNeedToSecure;
-        return acc;
-      }, {
-        formationsCount: 0,
-        sessionsCount: 0,
-        upcomingSessionsCount: 0,
-        recentStartedSessionsCount: 0,
-        knownCapacityTotal: 0,
-        estimatedDefaultCapacityTotal: 0,
-        estimatedCapacityTotal: 0,
-        estimatedNeedToSecure: 0,
-      });
-
-      Object.keys(totals).forEach((key) => {
-        totals[key] = bfdsRound(totals[key], 2);
-      });
-
-      if (shouldWrite) {
-        const batch = db.batch();
-
-        sectors.forEach((stats) => {
-          batch.set(
-            db.collection('formationDepartmentSectorStats').doc(`${departmentCode}_${stats.sectorCode}`),
-            {
-              ...stats,
-              computedAt: admin.firestore.FieldValue.serverTimestamp(),
-              calculationMethod: FORMATION_NEED_METHOD_VERSION,
-              schemaVersion: 'formationDepartmentSectorStats.v2',
-            },
-            { merge: true }
-          );
-        });
-
-        batch.set(
-          db.collection('formationDepartmentStats').doc(departmentCode),
-          {
-            departmentCode,
-            asOfDate,
-            defaultCapacity,
-            ...totals,
-            sectorsCount: sectors.length,
-            computedAt: admin.firestore.FieldValue.serverTimestamp(),
-            calculationMethod: FORMATION_NEED_METHOD_VERSION,
-            schemaVersion: 'formationDepartmentStats.v2',
-          },
-          { merge: true }
-        );
-
-        await batch.commit();
-      }
-
-      response.json({
-        ok: true,
-        write: shouldWrite,
+      const result = await buildFormationDepartmentStats({
         departmentCode,
         asOfDate,
         defaultCapacity,
-        calculationMethod: FORMATION_NEED_METHOD_VERSION,
-        scannedCount,
-        sectorsCount: sectors.length,
-        totals,
-        topSectors: sectors.slice(0, 15),
+        write: shouldWrite,
       });
+
+      response.json(result);
     } catch (error) {
       console.error('buildFormationDepartmentStatsHttp error', error);
       response.status(500).json({

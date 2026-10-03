@@ -6,6 +6,7 @@ on:
       - main
       - "agent/**"
       - "fix/**"
+      - "feat/**"
   pull_request:
     branches:
       - main
@@ -48,5 +49,5 @@ jobs:
       - name: Validate Functions syntax
         run: node --check functions/index.js
 
-      - name: Test formation need calculation
-        run: npm run test:formation-need --prefix functions
+      - name: Test Functions unit logic
+        run: npm run test:unit --prefix functions
