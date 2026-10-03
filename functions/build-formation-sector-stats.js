@@ -1,25 +1,15 @@
 const admin = require("firebase-admin");
+const {
+  DEFAULT_FORMATION_CAPACITY,
+  FORMATION_NEED_METHOD_VERSION,
+  computeFormationNeed,
+} = require("./lib/formation-need.cjs");
 
 admin.initializeApp({
   projectId: "meteo-apprentissage",
 });
 
 const db = admin.firestore();
-
-const DEFAULT_CAPACITY_BY_SECTOR = {
-  support_entreprise: 18,
-  commerce_vente: 18,
-  btp: 16,
-  industrie: 16,
-  services_social: 18,
-  restauration_tourisme_loisirs: 16,
-  agriculture: 14,
-  communication_media: 18,
-  transport_logistique: 14,
-  spectacle: 12,
-  sante: 20,
-  unknown: 15,
-};
 
 function toDateOnly(value) {
   if (!value) return null;
@@ -67,9 +57,9 @@ function topCounter(counter, limit = 20) {
     .slice(0, limit);
 }
 
-function safeNumber(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
+function round(value, digits = 2) {
+  const factor = 10 ** digits;
+  return Math.round(Number(value || 0) * factor) / factor;
 }
 
 function createEmptyGroup({ departmentCode, sectorCode, sectorLabel, asOfDate }) {
@@ -95,6 +85,7 @@ function createEmptyGroup({ departmentCode, sectorCode, sectorLabel, asOfDate })
 
     knownCapacityTotal: 0,
     missingCapacitySessionsCount: 0,
+    estimatedDefaultCapacityTotal: 0,
     estimatedCapacityTotal: 0,
     estimatedNeedToSecure: 0,
 
@@ -129,14 +120,18 @@ function addFormationToGroup(group, formation, asOfDate) {
       ? [formation.primarySession]
       : [];
 
-  const defaultCapacity = DEFAULT_CAPACITY_BY_SECTOR[group.sectorCode] || DEFAULT_CAPACITY_BY_SECTOR.unknown;
-
   for (const session of sessions) {
     group.sessionsCount += 1;
 
-    const startDate = toDateOnly(session.debut);
-    const capacity = safeNumber(session.capacite, 0);
-    const hasKnownCapacity = capacity > 0;
+    const startDate = toDateOnly(
+      session.debut || session.startDate || session.dateDebut || null
+    );
+    const days = daysBetween(startDate, asOfDate);
+    const need = computeFormationNeed({
+      capacity: session.capacite ?? session.capacity ?? null,
+      daysBeforeStart: days,
+      defaultCapacity: DEFAULT_FORMATION_CAPACITY,
+    });
 
     if (startDate) {
       increment(group.sessionStartCounter, startDate);
@@ -144,55 +139,48 @@ function addFormationToGroup(group, formation, asOfDate) {
       group.unknownSessionDateCount += 1;
     }
 
-    if (hasKnownCapacity) {
-      group.knownCapacityTotal += capacity;
+    if (need.hasKnownCapacity) {
+      group.knownCapacityTotal += need.retainedCapacity;
     } else {
       group.missingCapacitySessionsCount += 1;
+      group.estimatedDefaultCapacityTotal += need.retainedCapacity;
     }
-
-    const estimatedCapacity = hasKnownCapacity ? capacity : defaultCapacity;
-    const days = daysBetween(startDate, asOfDate);
 
     if (days === null) {
       continue;
     }
 
-    if (days < -30) {
-      group.pastSessionsCount += 1;
-      continue;
-    }
-
-    if (days >= -30 && days < 0) {
-      group.recentStartedSessionsCount += 1;
-      group.estimatedNeedToSecure += Math.round(estimatedCapacity * 0.25);
-      group.estimatedCapacityTotal += estimatedCapacity;
-      continue;
-    }
-
     if (days >= 0) {
       group.upcomingSessionsCount += 1;
-      group.estimatedCapacityTotal += estimatedCapacity;
 
       if (days <= 30) {
         group.upcomingSessionsNext30Days += 1;
-        group.estimatedNeedToSecure += Math.round(estimatedCapacity * 1.0);
-      } else if (days <= 60) {
+      }
+      if (days <= 60) {
         group.upcomingSessionsNext60Days += 1;
-        group.estimatedNeedToSecure += Math.round(estimatedCapacity * 0.75);
-      } else if (days <= 90) {
+      }
+      if (days <= 90) {
         group.upcomingSessionsNext90Days += 1;
-        group.estimatedNeedToSecure += Math.round(estimatedCapacity * 0.5);
-      } else {
-        group.estimatedNeedToSecure += Math.round(estimatedCapacity * 0.25);
       }
+    } else if (days >= -90) {
+      group.recentStartedSessionsCount += 1;
+    } else {
+      group.pastSessionsCount += 1;
+    }
 
-      if (
-        group.nearestSessionDaysBeforeStart === null ||
-        days < group.nearestSessionDaysBeforeStart
-      ) {
-        group.nearestSessionDaysBeforeStart = days;
-        group.nearestSessionStartDate = startDate;
-      }
+    if (need.coefficient <= 0) {
+      continue;
+    }
+
+    group.estimatedCapacityTotal += need.retainedCapacity;
+    group.estimatedNeedToSecure += need.estimatedNeed;
+
+    if (
+      group.nearestSessionDaysBeforeStart === null ||
+      Math.abs(days) < Math.abs(group.nearestSessionDaysBeforeStart)
+    ) {
+      group.nearestSessionDaysBeforeStart = days;
+      group.nearestSessionStartDate = startDate;
     }
   }
 }
@@ -214,10 +202,11 @@ function serializeGroup(group) {
     upcomingSessionsNext90Days: group.upcomingSessionsNext90Days,
     recentStartedSessionsCount: group.recentStartedSessionsCount,
 
-    knownCapacityTotal: group.knownCapacityTotal,
+    knownCapacityTotal: round(group.knownCapacityTotal),
     missingCapacitySessionsCount: group.missingCapacitySessionsCount,
-    estimatedCapacityTotal: group.estimatedCapacityTotal,
-    estimatedNeedToSecure: group.estimatedNeedToSecure,
+    estimatedDefaultCapacityTotal: round(group.estimatedDefaultCapacityTotal),
+    estimatedCapacityTotal: round(group.estimatedCapacityTotal),
+    estimatedNeedToSecure: round(group.estimatedNeedToSecure),
 
     nearestSessionStartDate: group.nearestSessionStartDate,
     nearestSessionDaysBeforeStart: group.nearestSessionDaysBeforeStart,
@@ -229,12 +218,13 @@ function serializeGroup(group) {
     topCities: topCounter(group.cityCounter, 15),
     topSessionStartDates: topCounter(group.sessionStartCounter, 20),
 
-    defaultCapacityUsedBySector:
-      DEFAULT_CAPACITY_BY_SECTOR[group.sectorCode] || DEFAULT_CAPACITY_BY_SECTOR.unknown,
+    defaultCapacity: DEFAULT_FORMATION_CAPACITY,
+    defaultCapacityUsedBySector: DEFAULT_FORMATION_CAPACITY,
+    calculationMethod: FORMATION_NEED_METHOD_VERSION,
 
     source: "formationDetails",
     generatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    schemaVersion: "formationDepartmentSectorStats.v1",
+    schemaVersion: "formationDepartmentSectorStats.v2",
   };
 }
 
@@ -243,10 +233,12 @@ async function main() {
   const asOfDate = process.argv[3] || parisDateString();
 
   console.log("==================================================");
-  console.log("AGRÉGATION FORMATIONS PAR DÉPARTEMENT / SECTEUR");
+  console.log("AGREGATION FORMATIONS PAR DEPARTEMENT / SECTEUR");
   console.log("==================================================");
-  console.log(`Département : ${departmentCode}`);
+  console.log(`Departement : ${departmentCode}`);
   console.log(`Date calcul : ${asOfDate}`);
+  console.log(`Methode : ${FORMATION_NEED_METHOD_VERSION}`);
+  console.log(`Capacite par defaut : ${DEFAULT_FORMATION_CAPACITY}`);
   console.log("");
 
   const snapshot = await db
@@ -316,8 +308,10 @@ async function main() {
       targetCollection: "formationDepartmentSectorStats",
       inputCount: snapshot.size,
       writtenCount: docs.length,
+      defaultCapacity: DEFAULT_FORMATION_CAPACITY,
+      calculationMethod: FORMATION_NEED_METHOD_VERSION,
       finishedAt: admin.firestore.FieldValue.serverTimestamp(),
-      schemaVersion: "formation_department_sector_stats_import.v1",
+      schemaVersion: "formation_department_sector_stats_import.v2",
     },
     { merge: true }
   );
@@ -326,6 +320,8 @@ async function main() {
     ok: true,
     departmentCode,
     asOfDate,
+    calculationMethod: FORMATION_NEED_METHOD_VERSION,
+    defaultCapacity: DEFAULT_FORMATION_CAPACITY,
     inputCount: snapshot.size,
     writtenCount: docs.length,
     sectors: docs.map((doc) => ({

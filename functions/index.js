@@ -3,6 +3,11 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const OpenAI = require('openai');
+const {
+  DEFAULT_FORMATION_CAPACITY,
+  FORMATION_NEED_METHOD_VERSION,
+  getFormationNeedTimeCoefficient,
+} = require('./lib/formation-need.cjs');
 
 admin.initializeApp();
 
@@ -6569,23 +6574,7 @@ function bfdsDaysBetween(dateString, asOfDateString) {
 }
 
 function bfdsTimeCoefficient(daysBeforeStart) {
-  if (daysBeforeStart === null || daysBeforeStart === undefined) return 0;
-
-  const days = Number(daysBeforeStart);
-
-  if (!Number.isFinite(days)) return 0;
-
-  if (days > 180) return 0.10;
-  if (days > 120) return 0.20;
-  if (days > 90) return 0.35;
-  if (days > 60) return 0.50;
-  if (days > 30) return 0.70;
-  if (days > 15) return 0.85;
-  if (days >= 0) return 1.00;
-  if (days >= -30) return 0.60;
-  if (days >= -90) return 0.25;
-
-  return 0;
+  return getFormationNeedTimeCoefficient(daysBeforeStart);
 }
 
 function bfdsEmptySectorStats(departmentCode, sectorCode, sectorLabel, asOfDate, defaultCapacity) {
@@ -6675,7 +6664,7 @@ exports.buildFormationDepartmentStatsHttp = onRequest(
 
       const departmentCode = String(request.query.department || '').trim().toUpperCase();
       const asOfDate = String(request.query.date || new Date().toISOString().slice(0, 10));
-      const defaultCapacity = Math.max(1, Math.min(50, bfdsNumber(request.query.defaultCapacity, 8)));
+      const defaultCapacity = Math.max(1, Math.min(50, bfdsNumber(request.query.defaultCapacity, DEFAULT_FORMATION_CAPACITY)));
       const shouldWrite = String(request.query.write || '1') === '1';
 
       if (!departmentCode) {
@@ -6769,6 +6758,7 @@ exports.buildFormationDepartmentStatsHttp = onRequest(
             {
               ...stats,
               computedAt: admin.firestore.FieldValue.serverTimestamp(),
+              calculationMethod: FORMATION_NEED_METHOD_VERSION,
               schemaVersion: 'formationDepartmentSectorStats.v2',
             },
             { merge: true }
@@ -6784,6 +6774,7 @@ exports.buildFormationDepartmentStatsHttp = onRequest(
             ...totals,
             sectorsCount: sectors.length,
             computedAt: admin.firestore.FieldValue.serverTimestamp(),
+            calculationMethod: FORMATION_NEED_METHOD_VERSION,
             schemaVersion: 'formationDepartmentStats.v2',
           },
           { merge: true }
@@ -6798,6 +6789,7 @@ exports.buildFormationDepartmentStatsHttp = onRequest(
         departmentCode,
         asOfDate,
         defaultCapacity,
+        calculationMethod: FORMATION_NEED_METHOD_VERSION,
         scannedCount,
         sectorsCount: sectors.length,
         totals,
