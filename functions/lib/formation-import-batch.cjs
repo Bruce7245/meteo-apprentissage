@@ -39,18 +39,23 @@ function getNextPageIndex({ pagination, pageIndex, pageSize, receivedCount }) {
     return null;
   }
 
-  const explicitNext =
-    meta.next_page_index ??
-    meta.nextPageIndex ??
-    meta.next_page ??
-    meta.nextPage ??
-    meta.page_suivante;
+  const nextPageKeys = [
+    "next_page_index",
+    "nextPageIndex",
+    "next_page",
+    "nextPage",
+    "page_suivante",
+  ];
 
-  if (explicitNext === null) {
-    return null;
-  }
+  for (const key of nextPageKeys) {
+    if (!Object.prototype.hasOwnProperty.call(meta, key)) continue;
 
-  if (explicitNext !== undefined && explicitNext !== "") {
+    const explicitNext = meta[key];
+
+    if (explicitNext === null || explicitNext === false || explicitNext === "") {
+      return null;
+    }
+
     const parsed = Number(explicitNext);
     if (Number.isFinite(parsed) && parsed > currentPageIndex) {
       return parsed;
