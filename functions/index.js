@@ -14,6 +14,11 @@ const {
   getNextIncompleteBatchNumber,
   registerBatchFailure,
 } = require('./lib/formation-import-batch.cjs');
+const {
+  isValidDepartmentCode: isValidPublicFormationDepartmentCode,
+  normalizeDepartmentCode: normalizePublicFormationDepartmentCode,
+  sanitizePublicFormationStats,
+} = require('./lib/public-formation-stats.cjs');
 
 admin.initializeApp();
 
@@ -7489,6 +7494,63 @@ async function buildFormationDepartmentStats({
     topSectors: sectors.slice(0, 15),
   };
 }
+
+exports.getPublicFormationDepartmentStatsHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    try {
+      const departmentCode = normalizePublicFormationDepartmentCode(
+        request.query.department
+      );
+
+      if (!isValidPublicFormationDepartmentCode(departmentCode)) {
+        response.status(400).json({
+          ok: false,
+          error: 'Invalid department code',
+        });
+        return;
+      }
+
+      const snapshot = await db
+        .collection('formationDepartmentStats')
+        .doc(departmentCode)
+        .get();
+
+      if (!snapshot.exists) {
+        response.status(404).json({
+          ok: false,
+          exists: false,
+          departmentCode,
+          data: null,
+        });
+        return;
+      }
+
+      response.set('Cache-Control', 'public, max-age=300, s-maxage=600');
+      response.json({
+        ok: true,
+        exists: true,
+        departmentCode,
+        data: sanitizePublicFormationStats(
+          snapshot.data(),
+          departmentCode
+        ),
+      });
+    } catch (error) {
+      console.error('getPublicFormationDepartmentStatsHttp error', error);
+      response.status(500).json({
+        ok: false,
+        error: 'Unable to load public formation statistics',
+      });
+    }
+  }
+);
+
 
 exports.buildFormationDepartmentStatsHttp = onRequest(
   {
