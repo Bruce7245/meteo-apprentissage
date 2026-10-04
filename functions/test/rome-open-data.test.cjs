@@ -33,6 +33,7 @@ test('extractRomeReferenceEntries reads nested official-style JSON records', () 
         romeCode: 'D1108',
         label: 'Vente en alimentation',
         normalizedLabel: 'vente en alimentation',
+        searchTerms: [],
         source: 'france-travail-rome',
         sourceVersion: 'sha256:abc',
       },
@@ -40,6 +41,7 @@ test('extractRomeReferenceEntries reads nested official-style JSON records', () 
         romeCode: 'M1607',
         label: 'Secrétariat',
         normalizedLabel: 'secretariat',
+        searchTerms: [],
         source: 'france-travail-rome',
         sourceVersion: 'sha256:abc',
       },
@@ -67,6 +69,7 @@ test('extractRomeReferenceEntries supports CSV-shaped rows and rejects invalid r
       romeCode: 'I1623',
       label: 'Conseil clientèle en après-vente de véhicules',
       normalizedLabel: 'conseil clientele en apres vente de vehicules',
+      searchTerms: [],
       source: 'data-gouv-rome',
       sourceVersion: 'sha256:def',
     },
@@ -125,4 +128,28 @@ test('validateRomeReference accepts a sufficiently large unique reference', () =
     minimumEntries: 1000,
     error: null,
   });
+});
+
+
+test('extractRomeReferenceEntries retains official employment aliases as search terms', () => {
+  const entries = romeOpenData.extractRomeReferenceEntries({
+    code_rome: 'M1805',
+    libelle_rome: 'Études et développement informatique',
+    emplois: [
+      { libelle: 'Développeur web' },
+      { libelle: 'Développeuse web' },
+      { libelle: 'Études et développement informatique' },
+    ],
+  }, {
+    source: 'france-travail-rome',
+    sourceVersion: 'v2',
+  });
+
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].romeCode, 'M1805');
+  assert.equal(entries[0].label, 'Études et développement informatique');
+  assert.deepEqual(entries[0].searchTerms, [
+    'Développeur web',
+    'Développeuse web',
+  ]);
 });
