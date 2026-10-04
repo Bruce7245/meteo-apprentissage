@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const {
   normalizeOccupationSearchText,
   normalizeRomeCode,
@@ -9,6 +10,65 @@ const PUBLIC_SEARCH_LIMIT = 12;
 const PUBLIC_SEARCH_MIN_LENGTH = 2;
 const PUBLIC_SEARCH_MAX_INPUT_LENGTH = 80;
 const INDEX_PREFIX_MAX_LENGTH = 32;
+
+function createPublicRateLimiter({
+  windowMs = 60_000,
+  maxRequests = 60,
+  now = Date.now,
+  salt = crypto.randomBytes(16).toString('hex'),
+} = {}) {
+  const buckets = new Map();
+
+  return function check(identifier) {
+    const currentTime = Number(now());
+    const safeIdentifier = String(identifier || 'anonymous');
+    const key = crypto
+      .createHash('sha256')
+      .update(salt)
+      .update(':')
+      .update(safeIdentifier)
+      .digest('hex');
+
+    let bucket = buckets.get(key);
+
+    if (!bucket || currentTime >= bucket.expiresAt) {
+      bucket = {
+        count: 0,
+        expiresAt: currentTime + windowMs,
+      };
+    }
+
+    if (bucket.count >= maxRequests) {
+      buckets.set(key, bucket);
+
+      return {
+        allowed: false,
+        remaining: 0,
+        retryAfterSeconds: Math.max(
+          1,
+          Math.ceil((bucket.expiresAt - currentTime) / 1000)
+        ),
+      };
+    }
+
+    bucket.count += 1;
+    buckets.set(key, bucket);
+
+    if (buckets.size > 5000) {
+      for (const [bucketKey, candidate] of buckets) {
+        if (currentTime >= candidate.expiresAt) {
+          buckets.delete(bucketKey);
+        }
+      }
+    }
+
+    return {
+      allowed: true,
+      remaining: Math.max(0, maxRequests - bucket.count),
+      retryAfterSeconds: 0,
+    };
+  };
+}
 
 function validatePublicOccupationQuery(value) {
   const input = value === null || value === undefined
@@ -120,6 +180,7 @@ module.exports = {
   PUBLIC_SEARCH_MIN_LENGTH,
   PUBLIC_SEARCH_MAX_INPUT_LENGTH,
   INDEX_PREFIX_MAX_LENGTH,
+  createPublicRateLimiter,
   validatePublicOccupationQuery,
   mergeOccupationSearchResults,
   buildPublicOccupationLookup,
