@@ -107,3 +107,15 @@ test('buildRecentDateCandidates returns newest dates first for snapshot fallback
     ['2026-10-04', '2026-10-03', '2026-10-02', '2026-10-01']
   );
 });
+
+
+test('sanitizePublicOffer rejects non-http application links', () => {
+  const result = publicOffers.sanitizePublicOffer({
+    title: 'Offre test',
+    openingCount: 1,
+    locationQuality: 'in_department',
+    applyUrl: 'javascript:alert(1)',
+  });
+
+  assert.equal(result.applyUrl, null);
+});
