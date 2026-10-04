@@ -114,15 +114,17 @@ git commit -m "feat: expose occupation vigilance public APIs (#40)"
   - `getPublicOccupationDepartment(departmentCode, romeCode) -> Promise<object>`
   - route `/metiers` -> `PublicOccupationMapPage`.
 
-- [ ] **Step 1: Add failing utility tests using the repository's available frontend test approach**
+- [ ] **Step 1: Add failing URL utility tests**
 
-If no frontend test runner exists, keep URL/normalization logic in a CommonJS-compatible pure helper under `functions/lib` only if shared; otherwise add a minimal Node test file under `functions/test` that imports no browser globals and mirrors the exact URL contract.
+Create `functions/test/occupation-public-url.test.cjs` and dynamically import `../../src/utils/occupationUtils.js`. The utility module must not reference browser globals at import time.
 
 Assertions: ROME normalization, invalid ROME rejection, encoded department URL, preservation/removal of `rome`.
 
 - [ ] **Step 2: Verify failure**
 
-Run the new focused Node test.
+Run: `node --test functions/test/occupation-public-url.test.cjs`
+
+Expected: FAIL because `src/utils/occupationUtils.js` does not exist.
 
 - [ ] **Step 3: Implement utilities, service and route**
 
@@ -193,13 +195,15 @@ git commit -m "feat: add accessible occupation search navigation (#40)"
 - Occupation page loads search context and `getPublicOccupationMap(rome)`.
 - Department links become `/departement/<code>?rome=<ROME>`.
 
-- [ ] **Step 1: Add/extend pure map-level normalization tests**
+- [ ] **Step 1: Add failing map display tests**
 
-Assert `insufficient_data` is preserved and never normalized to green; accessible label includes department name, ROME label and textual level.
+Create `src/utils/vigilanceDisplayUtils.js` with no browser-global dependency and test it from `functions/test/occupation-map-display.test.cjs` using dynamic import. Assert `insufficient_data` is preserved and never normalized to green; accessible label includes department name, ROME label and textual level.
 
 - [ ] **Step 2: Verify failure**
 
-Run focused test.
+Run: `node --test functions/test/occupation-map-display.test.cjs`
+
+Expected: FAIL because the display helper is absent.
 
 - [ ] **Step 3: Implement the occupation page**
 
@@ -267,50 +271,7 @@ git add src/pages/public/PublicDepartmentPage.jsx src/services/publicOffersServi
 git commit -m "feat: preserve ROME context in department detail (#40)"
 ```
 
-### Task 6: Written bulletin integration with strict AI boundary
-
-**Files:**
-- Create: `functions/lib/occupation-bulletin.cjs`
-- Create: `functions/test/occupation-bulletin.test.cjs`
-- Modify: `functions/index.js`
-- Modify: `src/pages/public/PublicDepartmentPage.jsx`
-
-**Interfaces:**
-- `buildOccupationBulletinInput(snapshot) -> object` allowlists aggregate metrics, level and deterministic reasons.
-- AI output schema: `{ title: string, summary: string, advice: string }` only.
-- Stored bulletin includes `runId`, department, ROME, model, promptVersion, generatedAt and snapshot hash.
-
-- [ ] **Step 1: Write failing boundary tests**
-
-Assert input cannot contain private/raw/config fields; AI output cannot set level/score/reason codes; snapshot hash mismatch invalidates a stored bulletin.
-
-- [ ] **Step 2: Verify failure**
-
-Run: `node --test functions/test/occupation-bulletin.test.cjs`.
-
-- [ ] **Step 3: Implement bulletin generation and deterministic fallback**
-
-OpenAI failure/invalid output must not affect published vigilance. Frontend uses deterministic reason text when bulletin is absent/stale.
-
-- [ ] **Step 4: Verify**
-
-Run:
-```bash
-node --test functions/test/occupation-bulletin.test.cjs
-npm run test:unit --prefix functions
-npm run build
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add functions/lib/occupation-bulletin.cjs functions/test/occupation-bulletin.test.cjs functions/index.js src/pages/public/PublicDepartmentPage.jsx
-git commit -m "feat: add occupation bulletin narration boundary (#40)"
-```
-
-### Task 7: ISO/RGPD, accessibility and release verification
+### Task 6: ISO/RGPD, accessibility and release verification
 
 **Files:**
 - Update Issue #40 / PR evidence.
