@@ -119,7 +119,57 @@ git add functions/lib/occupation-context.cjs functions/test/occupation-context.t
 git commit -m "feat: aggregate ROME market context (#38)"
 ```
 
-### Task 3: Versioned pure vigilance engine
+### Task 3: Recent trend and seasonality profile
+
+**Files:**
+- Create: `functions/lib/occupation-history.cjs`
+- Create: `functions/test/occupation-history.test.cjs`
+- Create: `functions/build-occupation-history-stats.cjs`
+
+**Interfaces:**
+- Produces:
+  - `computeRecentOfferTrend(dailyHistory) -> { status, changeRatio, observations }`
+  - `computeSeasonalityProfile(monthlyHistory, { asOfMonth, minActiveMonths = 24, completenessThreshold }) -> { status, factor, sampleMonths, completeness }`
+  - Firestore `occupationHistoryStats/{department_rome}`
+
+- [ ] **Step 1: Write failing history tests**
+
+Assert:
+- fewer than 2 usable daily observations => recent trend `unknown`;
+- fewer than 12 complete monthly observations => seasonality `unavailable`, factor `1`;
+- 12–23 complete monthly observations => seasonality `descriptive`, factor `1`;
+- at least 24 complete monthly observations and sufficient completeness => `active`;
+- an active seasonal factor is calculated from the historical month-vs-baseline ratio and then clamped by the config bounds;
+- missing months reduce completeness rather than being treated as zero offers.
+
+- [ ] **Step 2: Run and verify failure**
+
+Run: `node --test functions/test/occupation-history.test.cjs`
+
+Expected: FAIL because history helpers are absent.
+
+- [ ] **Step 3: Implement history helpers and builder**
+
+Use existing daily/monthly ROME offer aggregates. The builder stores only aggregates and coverage metadata. It must never manufacture missing months as zero.
+
+- [ ] **Step 4: Verify**
+
+Run:
+```bash
+node --test functions/test/occupation-history.test.cjs
+node --check functions/build-occupation-history-stats.cjs
+```
+
+Expected: PASS / exit 0.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add functions/lib/occupation-history.cjs functions/test/occupation-history.test.cjs functions/build-occupation-history-stats.cjs
+git commit -m "feat: derive occupation trend and seasonality (#38)"
+```
+
+### Task 4: Versioned pure vigilance engine
 
 **Files:**
 - Create: `functions/lib/occupation-vigilance.cjs`
@@ -163,7 +213,7 @@ git add functions/lib/occupation-vigilance.cjs functions/test/occupation-vigilan
 git commit -m "feat: add deterministic ROME vigilance engine (#38)"
 ```
 
-### Task 4: Calibration artifact builder
+### Task 5: Calibration artifact builder
 
 **Files:**
 - Create: `functions/lib/occupation-calibration.cjs`
@@ -206,7 +256,7 @@ git add functions/lib/occupation-calibration.cjs functions/test/occupation-calib
 git commit -m "feat: derive versioned occupation calibration (#38)"
 ```
 
-### Task 5: Full verification and Issue evidence
+### Task 6: Full verification and Issue evidence
 
 - [ ] Run `npm run lint`, `npm run build`, `node --check functions/index.js`, and `npm run test:unit --prefix functions`.
 - [ ] Confirm no AI/OpenAI dependency is imported by the engine/config/calibration modules.
