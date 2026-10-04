@@ -1,0 +1,52 @@
+name: Deploy formations batch importer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-formations-batch-importer
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy importLbaFormationsBatchHttp
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout deployment source branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/apprentifr-next
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Validate Functions syntax
+        run: node --check functions/index.js
+
+      - name: Run Functions unit tests
+        run: npm run test:unit --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Deploy importLbaFormationsBatchHttp only
+        run: >-
+          npx --yes firebase-tools@latest deploy
+          --project meteo-apprentissage
+          --only "functions:importLbaFormationsBatchHttp"
+          --non-interactive
