@@ -9,6 +9,7 @@ import {
 } from '../../services/vigilanceService.js';
 import { normalizeDepartmentCode } from '../../utils/departmentUtils.js';
 import { getPublicFormationDepartmentStats } from '../../services/formationPublicService.js';
+import { getPublicDepartmentOffers } from '../../services/publicOffersService.js';
 
 function formatNumber(value) {
   if (value === null || value === undefined || value === '') return '—';
@@ -17,6 +18,19 @@ function formatNumber(value) {
   if (Number.isNaN(number)) return String(value);
 
   return new Intl.NumberFormat('fr-FR').format(number);
+}
+
+function formatDate(value) {
+  if (!value) return null;
+
+  const date = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat('fr-FR', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
 }
 
 function getMetric(metrics, keys) {
@@ -37,6 +51,8 @@ export default function PublicDepartmentPage({ departmentCode }) {
   const [sectors, setSectors] = useState([]);
   const [formationStats, setFormationStats] = useState(null);
   const [formationStatsError, setFormationStatsError] = useState('');
+  const [offersData, setOffersData] = useState(null);
+  const [offersError, setOffersError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -48,17 +64,23 @@ export default function PublicDepartmentPage({ departmentCode }) {
         setLoading(true);
         setError('');
         setFormationStatsError('');
+        setOffersError('');
 
         const index = await getLatestPublicVigilanceIndex();
         const targetDate = index.latestDate;
 
-        const [departmentResult, sectorResults, formationResult] = await Promise.all([
+        const [departmentResult, sectorResults, formationResult, offersResult] = await Promise.all([
           getPublishedDepartmentVigilance(code, targetDate),
           getPublishedDepartmentSectorVigilances(code, targetDate),
           getPublicFormationDepartmentStats(code).catch((formationError) => ({
             exists: false,
             data: null,
             error: formationError?.message || 'Statistiques formations indisponibles',
+          })),
+          getPublicDepartmentOffers(code, 20).catch((offersLoadError) => ({
+            exists: false,
+            data: null,
+            error: offersLoadError?.message || 'Offres indisponibles',
           })),
         ]);
 
@@ -69,6 +91,8 @@ export default function PublicDepartmentPage({ departmentCode }) {
         setSectors(sectorResults);
         setFormationStats(formationResult?.data || null);
         setFormationStatsError(formationResult?.error || '');
+        setOffersData(offersResult?.data || null);
+        setOffersError(offersResult?.error || '');
       } catch (currentError) {
         if (alive) {
           setError(currentError?.message || 'Erreur inconnue');
@@ -197,12 +221,18 @@ export default function PublicDepartmentPage({ departmentCode }) {
             <div className="metrics-grid">
               <MetricCard
                 label="Offres actives"
-                value={formatNumber(getMetric(metrics, ['activeOffers', 'offers', 'totalOffers']))}
+                value={formatNumber(
+                  offersData?.totalOffers ??
+                    getMetric(metrics, ['activeOffers', 'offers', 'totalOffers'])
+                )}
                 detail="Offres observées dans le département"
               />
               <MetricCard
                 label="Postes à pourvoir"
-                value={formatNumber(getMetric(metrics, ['openingCountTotal', 'openingCount', 'postsToFill']))}
+                value={formatNumber(
+                  offersData?.totalOpenings ??
+                    getMetric(metrics, ['openingCountTotal', 'openingCount', 'postsToFill'])
+                )}
                 detail="Volume déclaré dans les offres"
               />
               <MetricCard
@@ -216,6 +246,98 @@ export default function PublicDepartmentPage({ departmentCode }) {
                 detail="Qualité du signal disponible"
               />
             </div>
+          </section>
+
+          <section className="public-offers-section">
+            <div className="section-title-row">
+              <div>
+                <p className="eyebrow">Opportunités</p>
+                <h2>Offres d’apprentissage disponibles</h2>
+              </div>
+              <p className="section-note">
+                {offersData?.date
+                  ? `Offres observées le ${formatDate(offersData.date)}.`
+                  : 'Dernier snapshot récent disponible pour ce département.'}
+              </p>
+            </div>
+
+            {offersData?.offers?.length > 0 ? (
+              <>
+                <div className="offer-cards-grid">
+                  {offersData.offers.slice(0, 8).map((offer, index) => (
+                    <article
+                      className="public-offer-card"
+                      key={`${offer.title || 'offre'}_${offer.companyName || 'entreprise'}_${index}`}
+                    >
+                      <div className="public-offer-card-head">
+                        <span className="soft-pill">
+                          {formatNumber(offer.openingCount)} poste{Number(offer.openingCount) > 1 ? 's' : ''}
+                        </span>
+                        {offer.sectorLabel ? (
+                          <span className="offer-sector">{offer.sectorLabel}</span>
+                        ) : null}
+                      </div>
+
+                      <h3>{offer.title || 'Offre d’apprentissage'}</h3>
+
+                      <div className="offer-company-line">
+                        <strong>{offer.companyName || 'Employeur non renseigné'}</strong>
+                        {offer.city ? <span>{offer.city}</span> : null}
+                      </div>
+
+                      <dl className="offer-meta-list">
+                        {offer.contractTypes?.length ? (
+                          <div>
+                            <dt>Contrat</dt>
+                            <dd>{offer.contractTypes.join(', ')}</dd>
+                          </div>
+                        ) : null}
+                        {offer.contractStartDate ? (
+                          <div>
+                            <dt>Début</dt>
+                            <dd>{formatDate(offer.contractStartDate)}</dd>
+                          </div>
+                        ) : null}
+                        {offer.publicationExpirationDate ? (
+                          <div>
+                            <dt>Expire le</dt>
+                            <dd>{formatDate(offer.publicationExpirationDate)}</dd>
+                          </div>
+                        ) : null}
+                      </dl>
+
+                      {offer.applyUrl ? (
+                        <a
+                          className="offer-apply-link"
+                          href={offer.applyUrl}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >
+                          Voir l’offre
+                          <span aria-hidden="true">↗</span>
+                        </a>
+                      ) : (
+                        <span className="offer-link-unavailable">Lien de candidature indisponible</span>
+                      )}
+                    </article>
+                  ))}
+                </div>
+
+                {offersData.totalOffers > offersData.offers.slice(0, 8).length ? (
+                  <p className="offers-disclaimer">
+                    Aperçu de 8 offres sur {formatNumber(offersData.totalOffers)} observées dans le département.
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <div className="empty-state">
+                <strong>Aucune offre récente disponible.</strong>
+                <p>
+                  {offersError ||
+                    'Aucun snapshot récent d’offres n’est disponible pour ce département.'}
+                </p>
+              </div>
+            )}
           </section>
 
           <section className="department-content-grid">
