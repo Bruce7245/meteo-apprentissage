@@ -2,6 +2,8 @@ name: Check formation national status
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "*/10 * * * *"
 
 permissions:
   contents: read
@@ -165,7 +167,7 @@ jobs:
           cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish status in Issues 7 and 9
-        if: always()
+        if: ${{ always() && (github.event_name == 'workflow_dispatch' || steps.status.outputs.failed == 'true' || steps.status.outputs.backend_status != 'done') }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
