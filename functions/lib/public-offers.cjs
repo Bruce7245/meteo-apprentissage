@@ -111,8 +111,41 @@ function buildRecentDateCandidates(baseDate, lookbackDays = 14) {
   });
 }
 
+
+function buildPublicOffersHistory(snapshots = []) {
+  return safeArray(snapshots)
+    .filter((snapshot) => {
+      return (
+        cleanText(snapshot?.date) &&
+        snapshot?.strictSummary &&
+        typeof snapshot.strictSummary === 'object'
+      );
+    })
+    .map((snapshot) => ({
+      date: cleanText(snapshot.date),
+      totalOffers: toNonNegativeNumber(snapshot.strictSummary.totalOffers),
+      totalOpenings: toNonNegativeNumber(snapshot.strictSummary.totalOpenings),
+    }))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+function computePublicTrend(values = []) {
+  const usable = safeArray(values).map(Number).filter(Number.isFinite);
+
+  if (usable.length < 2) return null;
+
+  const opening = usable[0];
+  const closing = usable[usable.length - 1];
+
+  if (opening <= 0) return null;
+
+  return Number(((closing - opening) / opening).toFixed(4));
+}
+
 module.exports = {
   sanitizePublicOffer,
   buildPublicOffersPayload,
   buildRecentDateCandidates,
+  buildPublicOffersHistory,
+  computePublicTrend,
 };
