@@ -137,3 +137,42 @@ test('mergeOccupationSearchResults keeps all validated ROME choices for a traini
   assert.deepEqual(results[0].romeCodes, ['M1604', 'M1607']);
   assert.equal('siret' in results[0], false);
 });
+
+
+test('createPublicRateLimiter limits bursts without persisting request identifiers', () => {
+  assert.equal(typeof publicSearch.createPublicRateLimiter, 'function');
+
+  let now = 1000;
+  const check = publicSearch.createPublicRateLimiter({
+    windowMs: 1000,
+    maxRequests: 2,
+    now: () => now,
+    salt: 'test-salt',
+  });
+
+  assert.deepEqual(check('203.0.113.4'), {
+    allowed: true,
+    remaining: 1,
+    retryAfterSeconds: 0,
+  });
+
+  assert.deepEqual(check('203.0.113.4'), {
+    allowed: true,
+    remaining: 0,
+    retryAfterSeconds: 0,
+  });
+
+  assert.deepEqual(check('203.0.113.4'), {
+    allowed: false,
+    remaining: 0,
+    retryAfterSeconds: 1,
+  });
+
+  now = 2001;
+
+  assert.deepEqual(check('203.0.113.4'), {
+    allowed: true,
+    remaining: 1,
+    retryAfterSeconds: 0,
+  });
+});
