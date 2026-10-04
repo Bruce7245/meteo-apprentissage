@@ -90,24 +90,35 @@ export default function VigilanceMap({
 
   return (
     <section className="panel map-panel">
-      <div className="section-heading">
-        <div>
-          <p className="kicker">Carte</p>
-          <h2>{title}</h2>
-
-          {latestDate ? (
-            <p className="date-line">
-              Date publiée : {latestDate}
-            </p>
-          ) : null}
+      {mode === 'public' ? (
+        <div className="map-toolbar">
+          <span>
+            {latestDate ? `Publication du ${latestDate}` : 'Dernière publication disponible'}
+          </span>
+          <span>
+            {loading ? 'Chargement…' : `${departments.length} département(s)`}
+          </span>
         </div>
+      ) : (
+        <div className="section-heading">
+          <div>
+            <p className="kicker">Carte</p>
+            <h2>{title}</h2>
 
-        <span className="soft-pill">
-          {loading
-            ? 'Chargement'
-            : `${departments.length} département(s)`}
-        </span>
-      </div>
+            {latestDate ? (
+              <p className="date-line">
+                Date publiée : {latestDate}
+              </p>
+            ) : null}
+          </div>
+
+          <span className="soft-pill">
+            {loading
+              ? 'Chargement'
+              : `${departments.length} département(s)`}
+          </span>
+        </div>
+      )}
 
       {error ? (
         <div className="state-box error-box">

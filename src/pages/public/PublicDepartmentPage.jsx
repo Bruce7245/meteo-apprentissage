@@ -10,7 +10,7 @@ import {
 import { normalizeDepartmentCode } from '../../utils/departmentUtils.js';
 
 function formatNumber(value) {
-  if (value === null || value === undefined || value === '') return '-';
+  if (value === null || value === undefined || value === '') return '—';
 
   const number = Number(value);
   if (Number.isNaN(number)) return String(value);
@@ -91,16 +91,26 @@ export default function PublicDepartmentPage({ departmentCode }) {
 
   return (
     <PublicLayout>
-      <section className="hero department-hero">
-        <div>
-          <p className="kicker">Département {code}</p>
+      <nav className="breadcrumb" aria-label="Fil d’Ariane">
+        <a href="/">France</a>
+        <span aria-hidden="true">/</span>
+        <span>Département {code}</span>
+      </nav>
+
+      <section className="department-overview">
+        <div className="department-overview-copy">
+          <p className="eyebrow">Département {code}</p>
           <h1>{departmentName}</h1>
-          <p>
-            Situation publiée au {latestIndex?.latestDate || detail?.date || '-'}.
+          <p className="department-overview-intro">
+            Lecture de la situation du marché de l’apprentissage à partir des données publiées au {latestIndex?.latestDate || detail?.date || '—'}.
           </p>
         </div>
 
-        <VigilanceBadge level={level} />
+        <div className="department-status-card">
+          <span className="department-status-label">Niveau publié</span>
+          <VigilanceBadge level={level} />
+          <small>Situation observée à la date de publication.</small>
+        </div>
       </section>
 
       {error ? (
@@ -110,107 +120,123 @@ export default function PublicDepartmentPage({ departmentCode }) {
       ) : null}
 
       {loading ? (
-        <section className="panel">
-          Chargement de la situation publiée...
+        <section className="panel state-box">
+          Chargement de la situation publiée…
         </section>
       ) : null}
 
       {!loading && !error ? (
         <>
-          <section className="metrics-grid">
-            <MetricCard
-              label="Offres actives"
-              value={formatNumber(getMetric(metrics, ['activeOffers', 'offers', 'totalOffers']))}
-              detail="Offres observées dans le département"
-            />
-            <MetricCard
-              label="Postes à pourvoir"
-              value={formatNumber(getMetric(metrics, ['openingCountTotal', 'openingCount', 'postsToFill']))}
-              detail="Volume déclaré dans les offres"
-            />
-            <MetricCard
-              label="Score brut"
-              value={formatNumber(data.rawScore)}
-              detail="Indicateur technique publié"
-            />
-            <MetricCard
-              label="Confiance"
-              value={formatNumber(data.confidenceScore)}
-              detail="Qualité du signal observé"
-            />
-          </section>
-
-          <section className="panel">
-            <p className="kicker">Bulletin</p>
-            <h2>Bulletin de situation</h2>
-
-            {data.publicTitle ? <h3 className="subheading">{data.publicTitle}</h3> : null}
-
-            <p>
-              {data.publicSummary ||
-                fallback.publicSummary ||
-                'Aucun bulletin public détaillé n’est disponible pour ce département.'}
-            </p>
-
-            {data.publicAdvice ? (
-              <div className="advice-box">
-                {data.publicAdvice}
-              </div>
-            ) : null}
-
-            {reasons.length > 0 ? (
-              <ul className="reason-list">
-                {reasons.slice(0, 5).map((reason, index) => (
-                  <li key={`${reason}_${index}`}>{reason}</li>
-                ))}
-              </ul>
-            ) : null}
-          </section>
-
-          <section className="panel">
-            <div className="section-heading">
+          <section className="department-metrics-section">
+            <div className="section-title-row">
               <div>
-                <p className="kicker">Secteurs</p>
+                <p className="eyebrow">Indicateurs</p>
+                <h2>Repères essentiels</h2>
+              </div>
+              <p className="section-note">Les valeurs disponibles reflètent la dernière publication.</p>
+            </div>
+
+            <div className="metrics-grid">
+              <MetricCard
+                label="Offres actives"
+                value={formatNumber(getMetric(metrics, ['activeOffers', 'offers', 'totalOffers']))}
+                detail="Offres observées dans le département"
+              />
+              <MetricCard
+                label="Postes à pourvoir"
+                value={formatNumber(getMetric(metrics, ['openingCountTotal', 'openingCount', 'postsToFill']))}
+                detail="Volume déclaré dans les offres"
+              />
+              <MetricCard
+                label="Score d’analyse"
+                value={formatNumber(data.rawScore)}
+                detail="Indicateur technique de synthèse"
+              />
+              <MetricCard
+                label="Indice de confiance"
+                value={formatNumber(data.confidenceScore)}
+                detail="Qualité du signal disponible"
+              />
+            </div>
+          </section>
+
+          <section className="department-content-grid">
+            <article className="bulletin-card">
+              <p className="eyebrow">Bulletin de situation</p>
+              <h2>{data.publicTitle || 'Analyse territoriale'}</h2>
+              <p className="bulletin-summary">
+                {data.publicSummary ||
+                  fallback.publicSummary ||
+                  'Aucun bulletin public détaillé n’est disponible pour ce département.'}
+              </p>
+
+              {data.publicAdvice ? (
+                <div className="advice-box">
+                  <strong>Point d’attention</strong>
+                  <p>{data.publicAdvice}</p>
+                </div>
+              ) : null}
+
+              {reasons.length > 0 ? (
+                <div className="bulletin-reasons">
+                  <h3>Éléments observés</h3>
+                  <ul className="reason-list">
+                    {reasons.slice(0, 5).map((reason, index) => (
+                      <li key={`${reason}_${index}`}>{reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </article>
+
+            <aside className="department-context-card">
+              <p className="eyebrow">À retenir</p>
+              <h3>Comment interpréter ce niveau ?</h3>
+              <p>
+                La vigilance traduit une situation observée à un instant donné. Elle doit être lue avec les indicateurs, le bulletin et le contexte sectoriel du département.
+              </p>
+              <a className="text-link" href="/">Revenir à la carte nationale</a>
+            </aside>
+          </section>
+
+          <section className="sector-section">
+            <div className="section-title-row">
+              <div>
+                <p className="eyebrow">Analyse sectorielle</p>
                 <h2>Secteurs sous vigilance</h2>
               </div>
               <span className="soft-pill">{sectors.length} secteur(s)</span>
             </div>
 
             {sectors.length === 0 ? (
-              <p>Aucune vigilance sectorielle publiée pour ce département.</p>
+              <div className="empty-state">
+                <strong>Aucune vigilance sectorielle publiée.</strong>
+                <p>Aucun signal sectoriel détaillé n’est disponible pour ce département à cette date.</p>
+              </div>
             ) : (
               <div className="table-wrapper">
-                <table className="simple-table">
+                <table className="simple-table sector-table">
                   <thead>
                     <tr>
                       <th>Secteur</th>
                       <th>Vigilance</th>
-                      <th>Résumé</th>
+                      <th>Lecture publiée</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sectors.map((sector) => (
                       <tr key={sector.id}>
-                        <td>{sector.sectorLabel}</td>
+                        <td className="sector-name">{sector.sectorLabel}</td>
                         <td>
                           <VigilanceBadge level={sector.level} />
                         </td>
-                        <td>{sector.publicSummary || sector.publicAdvice || '-'}</td>
+                        <td>{sector.publicSummary || sector.publicAdvice || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             )}
-          </section>
-
-          <section className="panel">
-            <p className="kicker">Offres</p>
-            <h2>Offres du département</h2>
-            <p>
-              Les offres seront branchées après validation du modèle public :
-              probablement depuis les observations LBA ou une vue dédiée aux offres publiables.
-            </p>
           </section>
         </>
       ) : null}
