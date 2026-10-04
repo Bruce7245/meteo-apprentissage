@@ -74,7 +74,7 @@ jobs:
           cat > /tmp/formation-national-activation.md <<EOF
           ## Automatisation nationale activée
 
-          ✅ `resumeFormationNationalBackgroundJob` et `getFormationNationalBackgroundJobStatusHttp` ont été déployés.
+          ✅ **resumeFormationNationalBackgroundJob** et **getFormationNationalBackgroundJobStatusHttp** ont été déployés.
 
           Fonctionnement :
           - exécution Firebase toutes les 5 minutes ;
