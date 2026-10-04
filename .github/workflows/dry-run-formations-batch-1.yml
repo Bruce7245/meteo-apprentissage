@@ -1,0 +1,160 @@
+name: Dry-run formation batch 1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: dry-run-formation-batch-1
+  cancel-in-progress: false
+
+jobs:
+  dry-run:
+    name: Dry-run departments 01 to 10
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: meteo-apprentissage
+
+      - name: Run batch 1 without writes
+        id: dryrun
+        shell: bash
+        run: |
+          set -u
+
+          RESPONSE="/tmp/formation-batch-1-dry-run.json"
+          SUMMARY="/tmp/formation-batch-1-dry-run.md"
+          CHECKED_AT="$(TZ=Europe/Paris date '+%Y-%m-%d %H:%M:%S %Z')"
+
+          KEY="$(gcloud secrets versions access latest             --secret=BACKFILL_ADMIN_KEY             --project=meteo-apprentissage)"
+          echo "::add-mask::$KEY"
+
+          CURL_EXIT=0
+          HTTP_CODE="$(curl --silent --show-error             --max-time 500             --output "$RESPONSE"             --write-out "%{http_code}"             -H "x-admin-key: $KEY"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/importLbaFormationsBatchHttp?batch=1&write=0&pageSize=100&maxPages=30&maxRunSeconds=420&delayMs=300&retryCount=2")" || CURL_EXIT=$?
+
+          unset KEY
+
+          if [ "$CURL_EXIT" -ne 0 ] || [[ ! "$HTTP_CODE" =~ ^2 ]]; then
+            cat > "$SUMMARY" <<EOF
+          ### Dry-run formations — lot 1
+
+          **Vérification :** $CHECKED_AT
+
+          ❌ Échec de l'appel du dry-run.
+
+          - curl : `$CURL_EXIT`
+          - HTTP : `$HTTP_CODE`
+          - écriture Firestore demandée : **non** (`write=0`)
+
+          **Run Actions :** https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+            cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! python - "$RESPONSE" "$SUMMARY" "$CHECKED_AT" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}" <<'PY'
+          import json
+          import sys
+
+          response_path, summary_path, checked_at, repository, run_id = sys.argv[1:]
+
+          with open(response_path, "r", encoding="utf-8") as handle:
+              payload = json.load(handle)
+
+          batch = payload.get("batch") or {}
+          totals = payload.get("totals") or {}
+          rows = payload.get("runRows") or []
+          department_states = payload.get("departmentStates") or {}
+
+          items = batch.get("items") or []
+          codes = [str(item.get("code")) for item in items if item.get("code")]
+
+          with open(summary_path, "w", encoding="utf-8") as out:
+              out.write("### Dry-run formations — lot 1\n\n")
+              out.write(f"**Vérification :** {checked_at}\n\n")
+              out.write(f"**Statut :** `{payload.get('status', 'unknown')}`\n\n")
+              out.write(f"- Écriture Firestore demandée : **non** (`write=0`)\n")
+              out.write(f"- Départements du lot : **{', '.join(codes) or 'non renseignés'}**\n")
+              out.write(f"- Pages traitées sur ce run : **{payload.get('pagesThisRun', 0)}**\n")
+              out.write(f"- Reçus : **{totals.get('receivedCount', 0)}**\n")
+              out.write(f"- Écrits : **{totals.get('writtenCount', 0)}**\n")
+              out.write(f"- Ignorés sans identifiant : **{totals.get('skippedNoId', 0)}**\n")
+              out.write(f"- Ignorés hors département : **{totals.get('skippedOutsideDepartment', 0)}**\n")
+              out.write(f"- Département courant (index) : **{payload.get('currentDepartmentIndex')}**\n")
+              out.write(f"- Page courante : **{payload.get('currentPageIndex')}**\n")
+              out.write(f"- Raison d'arrêt : **{payload.get('stoppedReason') or '—'}**\n\n")
+
+              if rows:
+                  out.write("#### Résultats observés\n\n")
+                  out.write("| Département | Page | Reçus | Écrits | Hors département |\n")
+                  out.write("|---|---:|---:|---:|---:|\n")
+                  for row in rows[:40]:
+                      out.write(
+                          f"| {row.get('departmentCode', '—')} | "
+                          f"{row.get('pageIndex', '—')} | "
+                          f"{row.get('receivedCount', row.get('received', '—'))} | "
+                          f"{row.get('writtenCount', row.get('written', '—'))} | "
+                          f"{row.get('skippedOutsideDepartment', '—')} |\n"
+                      )
+                  out.write("\n")
+
+              failed_departments = []
+              for code, state in department_states.items():
+                  if isinstance(state, dict) and state.get("status") == "failed":
+                      failed_departments.append(code)
+
+              if failed_departments:
+                  out.write(f"❌ Départements en échec : **{', '.join(failed_departments)}**\n\n")
+              else:
+                  out.write("✅ Aucun département marqué en échec dans la réponse.\n\n")
+
+              out.write(f"**Run Actions :** https://github.com/{repository}/actions/runs/{run_id}\n")
+
+          if payload.get("ok") is False:
+              raise SystemExit("API returned ok=false")
+          PY
+          then
+            if [ ! -f "$SUMMARY" ]; then
+              cat > "$SUMMARY" <<EOF
+          ### Dry-run formations — lot 1
+
+          **Vérification :** $CHECKED_AT
+
+          ❌ La réponse n'a pas pu être interprétée.
+
+          **Run Actions :** https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+            fi
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          cat "$SUMMARY"
+          cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish result in Issue 7
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 7             --repo "${GITHUB_REPOSITORY}"             --body-file /tmp/formation-batch-1-dry-run.md
+
+      - name: Fail workflow when dry-run failed
+        if: steps.dryrun.outputs.failed == 'true'
+        run: exit 1
