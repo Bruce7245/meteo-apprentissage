@@ -1125,3 +1125,136 @@ h2 {
     padding: 22px;
   }
 }
+
+
+/* Public department offers (#34) */
+.public-offers-section {
+  padding-top: 48px;
+}
+
+.offer-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.public-offer-card {
+  display: flex;
+  min-height: 280px;
+  flex-direction: column;
+  padding: 22px;
+  border: 1px solid #dfe5ec;
+  border-radius: 18px;
+  background: #ffffff;
+}
+
+.public-offer-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 26px;
+}
+
+.offer-sector {
+  color: #708096;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.public-offer-card h3 {
+  margin: 22px 0 12px;
+  color: #13233a;
+  font-size: 1.18rem;
+  line-height: 1.3;
+  letter-spacing: -0.025em;
+}
+
+.offer-company-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 14px;
+  color: #405168;
+  font-size: 0.9rem;
+}
+
+.offer-company-line span {
+  color: #7a8798;
+}
+
+.offer-meta-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 22px 0;
+  padding: 16px 0;
+  border-top: 1px solid #e5eaf0;
+  border-bottom: 1px solid #e5eaf0;
+}
+
+.offer-meta-list div {
+  min-width: 0;
+}
+
+.offer-meta-list dt {
+  margin-bottom: 4px;
+  color: #8994a5;
+  font-size: 0.67rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.offer-meta-list dd {
+  margin: 0;
+  color: #334155;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.offer-apply-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: auto;
+  color: #244e78;
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.offer-apply-link:hover {
+  text-decoration: underline;
+}
+
+.offer-link-unavailable {
+  margin-top: auto;
+  color: #98a2b1;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.offers-disclaimer {
+  margin: 16px 0 0;
+  color: #7b8797;
+  font-size: 0.82rem;
+}
+
+@media (max-width: 760px) {
+  .offer-cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .public-offers-section {
+    padding-top: 34px;
+  }
+
+  .offer-meta-list {
+    grid-template-columns: 1fr;
+  }
+
+  .public-offer-card {
+    min-height: 0;
+  }
+}
