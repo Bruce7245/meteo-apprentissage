@@ -134,3 +134,35 @@ test('buildOccupationIndexEntry indexes official ROME employment aliases', () =>
   assert.equal(result.searchPrefixes.includes('developpeur web'), true);
   assert.equal(result.searchPrefixes.includes('developpeuse web'), true);
 });
+
+
+test('buildTrainingSearchAliases derives common deterministic training acronyms', () => {
+  assert.equal(typeof searchIndex.buildTrainingSearchAliases, 'function');
+
+  assert.deepEqual(
+    searchIndex.buildTrainingSearchAliases('BTS Gestion de la PME'),
+    ['BTS GPME', 'BTSGPME', 'GPME']
+  );
+
+  assert.deepEqual(
+    searchIndex.buildTrainingSearchAliases('BPJEPS Activités de la Forme'),
+    ['AF', 'BPJEPS AF', 'BPJEPSAF']
+  );
+});
+
+test('buildTrainingIndexEntries makes BTS GPME searchable from its long title', () => {
+  const [result] = searchIndex.buildTrainingIndexEntries([
+    {
+      intitule: 'BTS Gestion de la PME',
+      rncp: 'RNCP38363',
+      romeCodes: ['M1604'],
+    },
+  ], {
+    source: 'formationDetails',
+    sourceVersion: 'v1',
+    asOfDate: '2026-10-04',
+  });
+
+  assert.equal(result.searchPrefixes.includes('bts gpme'), true);
+  assert.equal(result.searchPrefixes.includes('gpme'), true);
+});
