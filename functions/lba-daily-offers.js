@@ -7,6 +7,16 @@ const {
   getOfferBackfillWindow,
   registerOfferBackfillFailure,
 } = require("./lib/offer-backfill-job.cjs");
+const {
+  normalizeDepartmentCode: normalizePublicDepartmentCode,
+  isValidDepartmentCode: isValidPublicDepartmentCode,
+} = require("./lib/public-formation-stats.cjs");
+const {
+  buildPublicOffersPayload,
+  buildRecentDateCandidates,
+  buildPublicOffersHistory,
+  computePublicTrend,
+} = require("./lib/public-offers.cjs");
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -1072,6 +1082,129 @@ exports.backfillDailyOffers = onRequest(
     });
   }
 );
+
+async function findRecentPublicOfferSnapshots(departmentCode) {
+  const dates = buildRecentDateCandidates(todayParis(), 14);
+
+  const snapshots = await Promise.all(
+    dates.map(async (date) => {
+      const ref = db
+        .collection("dailyOfferSnapshots")
+        .doc(date)
+        .collection("departments")
+        .doc(departmentCode);
+
+      const snapshot = await ref.get();
+
+      return {
+        date,
+        ref,
+        snapshot,
+      };
+    })
+  );
+
+  return snapshots.filter((item) => item.snapshot.exists);
+}
+
+exports.getPublicDepartmentOffersHttp = onRequest(
+  {
+    region: REGION,
+    timeoutSeconds: 60,
+    memory: "256MiB",
+    cors: true,
+  },
+  async (req, res) => {
+    try {
+      const departmentCode = normalizePublicDepartmentCode(
+        cleanText(req.query.department)
+      );
+
+      if (
+        !isValidPublicDepartmentCode(departmentCode) ||
+        !DEPARTMENT_CODES.includes(departmentCode)
+      ) {
+        res.status(400).json({
+          ok: false,
+          error: "INVALID_DEPARTMENT",
+        });
+        return;
+      }
+
+      const limit = Math.min(Math.max(toInt(req.query.limit, 20), 1), 20);
+      const recentSnapshots = await findRecentPublicOfferSnapshots(departmentCode);
+      const latest = recentSnapshots[0] || null;
+
+      if (!latest) {
+        res.status(404).json({
+          ok: false,
+          exists: false,
+          departmentCode,
+          data: null,
+        });
+        return;
+      }
+
+      const meta = latest.snapshot.data() || {};
+      const activeRunId = cleanText(meta.activeRunId);
+
+      if (!activeRunId) {
+        res.status(404).json({
+          ok: false,
+          exists: false,
+          departmentCode,
+          data: null,
+        });
+        return;
+      }
+
+      const offersSnapshot = await latest.ref
+        .collection("offers")
+        .where("runId", "==", activeRunId)
+        .limit(1000)
+        .get();
+
+      const payload = buildPublicOffersPayload({
+        date: latest.date,
+        departmentCode,
+        strictSummary: meta.strictSummary || {},
+        offers: offersSnapshot.docs.map((document) => document.data()),
+        limit,
+      });
+
+      const history = buildPublicOffersHistory(
+        recentSnapshots.map((item) => ({
+          date: item.date,
+          strictSummary: item.snapshot.data()?.strictSummary || null,
+        }))
+      );
+
+      payload.history = history;
+      payload.trends = {
+        offers: computePublicTrend(history.map((item) => item.totalOffers)),
+        openings: computePublicTrend(history.map((item) => item.totalOpenings)),
+      };
+
+      res.set("Cache-Control", "public, max-age=300, s-maxage=600");
+      res.json({
+        ok: true,
+        exists: true,
+        departmentCode,
+        data: payload,
+      });
+    } catch (error) {
+      logger.error("getPublicDepartmentOffersHttp error", {
+        message: error?.message || String(error),
+      });
+
+      res.status(500).json({
+        ok: false,
+        error: "PUBLIC_OFFERS_UNAVAILABLE",
+      });
+    }
+  }
+);
+
 
 exports.adminDailyOffers = onRequest(
   {

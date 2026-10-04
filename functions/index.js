@@ -13720,6 +13720,7 @@ const lbaDailyOffers = require("./lba-daily-offers");
 exports.backfillDailyOffers = lbaDailyOffers.backfillDailyOffers;
 exports.adminDailyOffers = lbaDailyOffers.adminDailyOffers;
 exports.adminNationalDailyOffers = lbaDailyOffers.adminNationalDailyOffers;
+exports.getPublicDepartmentOffersHttp = lbaDailyOffers.getPublicDepartmentOffersHttp;
 exports.startOfferBackfillJobHttp = lbaDailyOffers.startOfferBackfillJobHttp;
 exports.resumeOfferBackfillJob = lbaDailyOffers.resumeOfferBackfillJob;
 exports.getOfferBackfillJobStatusHttp = lbaDailyOffers.getOfferBackfillJobStatusHttp;

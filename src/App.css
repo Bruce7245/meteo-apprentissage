@@ -1125,3 +1125,416 @@ h2 {
     padding: 22px;
   }
 }
+
+
+/* Public department offers (#34) */
+.public-offers-section {
+  padding-top: 48px;
+}
+
+.offer-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.public-offer-card {
+  display: flex;
+  min-height: 280px;
+  flex-direction: column;
+  padding: 22px;
+  border: 1px solid #dfe5ec;
+  border-radius: 18px;
+  background: #ffffff;
+}
+
+.public-offer-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 26px;
+}
+
+.offer-sector {
+  color: #708096;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.public-offer-card h3 {
+  margin: 22px 0 12px;
+  color: #13233a;
+  font-size: 1.18rem;
+  line-height: 1.3;
+  letter-spacing: -0.025em;
+}
+
+.offer-company-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 14px;
+  color: #405168;
+  font-size: 0.9rem;
+}
+
+.offer-company-line span {
+  color: #7a8798;
+}
+
+.offer-meta-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 22px 0;
+  padding: 16px 0;
+  border-top: 1px solid #e5eaf0;
+  border-bottom: 1px solid #e5eaf0;
+}
+
+.offer-meta-list div {
+  min-width: 0;
+}
+
+.offer-meta-list dt {
+  margin-bottom: 4px;
+  color: #8994a5;
+  font-size: 0.67rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.offer-meta-list dd {
+  margin: 0;
+  color: #334155;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.offer-apply-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: auto;
+  color: #244e78;
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.offer-apply-link:hover {
+  text-decoration: underline;
+}
+
+.offer-link-unavailable {
+  margin-top: auto;
+  color: #98a2b1;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.offers-disclaimer {
+  margin: 16px 0 0;
+  color: #7b8797;
+  font-size: 0.82rem;
+}
+
+@media (max-width: 760px) {
+  .offer-cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .public-offers-section {
+    padding-top: 34px;
+  }
+
+  .offer-meta-list {
+    grid-template-columns: 1fr;
+  }
+
+  .public-offer-card {
+    min-height: 0;
+  }
+}
+
+
+/* Department observatory — shape, Chakra KPI and tabs (#34) */
+.department-overview-main {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 28px;
+  align-items: center;
+}
+
+.department-shape {
+  width: 150px;
+  height: 150px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #dfe5ec;
+  border-radius: 24px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.department-shape-svg {
+  width: 118px;
+  height: 118px;
+  display: block;
+  overflow: visible;
+}
+
+.department-shape-svg path {
+  stroke: #ffffff;
+  stroke-width: 1.8;
+  vector-effect: non-scaling-stroke;
+}
+
+.department-shape-vert .department-shape-svg path,
+.department-shape-fallback.department-shape-vert {
+  fill: #6fb98f;
+  background: #6fb98f;
+}
+
+.department-shape-jaune .department-shape-svg path,
+.department-shape-fallback.department-shape-jaune {
+  fill: #e5c65b;
+  background: #e5c65b;
+}
+
+.department-shape-orange .department-shape-svg path,
+.department-shape-fallback.department-shape-orange {
+  fill: #dd8b45;
+  background: #dd8b45;
+}
+
+.department-shape-rouge .department-shape-svg path,
+.department-shape-fallback.department-shape-rouge {
+  fill: #cb5a5a;
+  background: #cb5a5a;
+}
+
+.department-shape-fallback {
+  color: #ffffff;
+  font-size: 2rem;
+  font-weight: 900;
+}
+
+.department-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.department-kpi-grid-compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.department-kpi-card {
+  border: 1px solid #dde3eb !important;
+  border-radius: 18px !important;
+  background: #ffffff !important;
+  box-shadow: none !important;
+  overflow: hidden;
+}
+
+.department-kpi-card-body {
+  min-height: 164px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 20px !important;
+}
+
+.department-kpi-value {
+  display: block;
+  margin-top: 5px;
+  color: #13233a;
+  font-size: clamp(1.65rem, 3vw, 2.25rem);
+  font-weight: 900;
+  letter-spacing: -0.045em;
+  line-height: 1;
+}
+
+.department-kpi-trend {
+  margin-top: 7px;
+  white-space: normal;
+  text-align: left;
+}
+
+.department-kpi-history-note {
+  margin-top: 7px;
+  color: #8b96a6;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.kpi-sparkline {
+  width: 112px;
+  min-width: 112px;
+  height: 48px;
+  align-self: center;
+}
+
+.kpi-sparkline svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.kpi-sparkline polyline {
+  fill: none;
+  stroke: #718096;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.kpi-sparkline-up polyline {
+  stroke: #2f855a;
+}
+
+.kpi-sparkline-down polyline {
+  stroke: #b63b3b;
+}
+
+.department-tabs-section {
+  padding-top: 48px;
+}
+
+.department-tabs {
+  width: 100%;
+}
+
+.department-tabs-list {
+  display: flex;
+  width: 100%;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid #dfe5ec;
+  border-radius: 16px;
+  background: #eef2f6;
+}
+
+.department-tab-trigger {
+  flex: 1;
+  min-height: 48px;
+  justify-content: center;
+  border-radius: 11px !important;
+  color: #59697f !important;
+  font-weight: 900 !important;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.department-tab-trigger[data-selected],
+.department-tab-trigger[aria-selected="true"] {
+  background: #ffffff !important;
+  color: #13233a !important;
+  box-shadow: 0 4px 16px rgba(19, 35, 58, 0.08);
+}
+
+.department-tab-content {
+  padding-top: 26px;
+  outline: none;
+}
+
+.offers-tab-heading {
+  margin-top: 8px;
+}
+
+.department-tab-content .sector-section {
+  margin-top: 20px;
+}
+
+@media (max-width: 980px) {
+  .department-overview-main {
+    grid-template-columns: 120px minmax(0, 1fr);
+  }
+
+  .department-shape {
+    width: 120px;
+    height: 120px;
+    border-radius: 20px;
+  }
+
+  .department-shape-svg {
+    width: 94px;
+    height: 94px;
+  }
+
+  .department-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .department-overview-main {
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .department-shape {
+    width: 92px;
+    height: 92px;
+    border-radius: 18px;
+  }
+
+  .department-shape-svg {
+    width: 72px;
+    height: 72px;
+  }
+
+  .department-kpi-grid,
+  .department-kpi-grid-compact {
+    grid-template-columns: 1fr;
+  }
+
+  .department-kpi-card-body {
+    min-height: 145px;
+  }
+
+  .department-tabs-section {
+    padding-top: 34px;
+  }
+
+  .department-tabs-list {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .department-tab-trigger {
+    width: 100%;
+  }
+}
+
+@media (max-width: 440px) {
+  .department-overview-main {
+    grid-template-columns: 1fr;
+  }
+
+  .department-shape {
+    width: 108px;
+    height: 108px;
+  }
+
+  .department-shape-svg {
+    width: 84px;
+    height: 84px;
+  }
+
+  .department-kpi-card-body {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .kpi-sparkline {
+    width: 100%;
+    min-width: 0;
+  }
+}
