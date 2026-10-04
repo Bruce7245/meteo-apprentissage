@@ -13247,6 +13247,10 @@ async function importDailyOffersForDepartments({
     ? allDepartments.filter((department) => wanted.has(String(department.code || '').toUpperCase()))
     : allDepartments;
 
+  const dailyStatsSchemaVersion = executionMode === 'scheduled'
+    ? 'departmentDailyStats.lba.scheduled.v1'
+    : 'departmentDailyStats.lba.manual.v1';
+
   let successCount = 0;
   let errorCount = 0;
   const rows = [];
@@ -13312,7 +13316,7 @@ async function importDailyOffersForDepartments({
         source: 'api-apprentissage-job-v1-search',
         limitedResults: true,
         importedAt: admin.firestore.FieldValue.serverTimestamp(),
-        schemaVersion: 'departmentDailyStats.lba.manual.v1',
+        schemaVersion: dailyStatsSchemaVersion,
       };
 
       const sectorStats = buildDepartmentSectorStats(todayJobs, department, targetDate);
@@ -13404,7 +13408,7 @@ async function importDailyOffersForDepartments({
               departmentName: department.name,
               lastError: row.error,
               importedAt: admin.firestore.FieldValue.serverTimestamp(),
-              schemaVersion: 'departmentDailyStats.lba.manual.v1',
+              schemaVersion: dailyStatsSchemaVersion,
             },
             { merge: true }
           );
