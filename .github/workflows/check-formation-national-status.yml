@@ -91,7 +91,7 @@ jobs:
           }
           icon = icons.get(status, "ℹ️")
 
-          total_departments = sum(len(batch.get("departmentCodes") or []) for batch in batches)
+          total_departments = 101
           current_batch = job.get("currentBatchNumber")
           completed_batches = int(summary.get("completedBatches") or 0)
           completed_departments = int(summary.get("completedDepartments") or 0)
@@ -101,7 +101,7 @@ jobs:
               out.write(f"**Vérification :** {checked_at}\n\n")
               out.write(f"{icon} **Statut global :** `{status}`\n\n")
               out.write(f"- Lots terminés : **{completed_batches} / {summary.get('totalBatches', 11)}**\n")
-              out.write(f"- Départements terminés : **{completed_departments} / {total_departments or 101}**\n")
+              out.write(f"- Départements terminés : **{completed_departments} / {total_departments}**\n")
               out.write(f"- Lot courant : **{current_batch if current_batch is not None else '—'}**\n")
               out.write(f"- Dernier lot terminé : **{job.get('lastCompletedBatchNumber') if job.get('lastCompletedBatchNumber') is not None else '—'}**\n")
               out.write(f"- Statut du dernier lot : **{job.get('lastBatchStatus') or '—'}**\n")
