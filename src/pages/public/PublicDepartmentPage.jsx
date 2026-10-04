@@ -8,6 +8,7 @@ import {
   getPublishedDepartmentVigilance,
 } from '../../services/vigilanceService.js';
 import { normalizeDepartmentCode } from '../../utils/departmentUtils.js';
+import { getPublicFormationDepartmentStats } from '../../services/formationPublicService.js';
 
 function formatNumber(value) {
   if (value === null || value === undefined || value === '') return '—';
@@ -34,6 +35,8 @@ export default function PublicDepartmentPage({ departmentCode }) {
   const [latestIndex, setLatestIndex] = useState(null);
   const [detail, setDetail] = useState(null);
   const [sectors, setSectors] = useState([]);
+  const [formationStats, setFormationStats] = useState(null);
+  const [formationStatsError, setFormationStatsError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -44,13 +47,19 @@ export default function PublicDepartmentPage({ departmentCode }) {
       try {
         setLoading(true);
         setError('');
+        setFormationStatsError('');
 
         const index = await getLatestPublicVigilanceIndex();
         const targetDate = index.latestDate;
 
-        const [departmentResult, sectorResults] = await Promise.all([
+        const [departmentResult, sectorResults, formationResult] = await Promise.all([
           getPublishedDepartmentVigilance(code, targetDate),
           getPublishedDepartmentSectorVigilances(code, targetDate),
+          getPublicFormationDepartmentStats(code).catch((formationError) => ({
+            exists: false,
+            data: null,
+            error: formationError?.message || 'Statistiques formations indisponibles',
+          })),
         ]);
 
         if (!alive) return;
@@ -58,6 +67,8 @@ export default function PublicDepartmentPage({ departmentCode }) {
         setLatestIndex(index);
         setDetail(departmentResult);
         setSectors(sectorResults);
+        setFormationStats(formationResult?.data || null);
+        setFormationStatsError(formationResult?.error || '');
       } catch (currentError) {
         if (alive) {
           setError(currentError?.message || 'Erreur inconnue');
@@ -128,6 +139,53 @@ export default function PublicDepartmentPage({ departmentCode }) {
       {!loading && !error ? (
         <>
           <section className="department-metrics-section">
+            <div className="section-title-row">
+              <div>
+                <p className="eyebrow">Données formations</p>
+                <h2>Couverture de l’offre de formation</h2>
+              </div>
+              <p className="section-note">
+                {formationStats?.asOfDate
+                  ? `Données agrégées au ${formationStats.asOfDate}.`
+                  : 'Agrégats disponibles lorsque le département a été importé.'}
+              </p>
+            </div>
+
+            {formationStats ? (
+              <div className="metrics-grid">
+                <MetricCard
+                  label="Formations"
+                  value={formatNumber(formationStats.formationsCount)}
+                  detail="Formations recensées dans le département"
+                />
+                <MetricCard
+                  label="Sessions"
+                  value={formatNumber(formationStats.sessionsCount)}
+                  detail="Sessions rattachées aux formations"
+                />
+                <MetricCard
+                  label="Sessions à venir"
+                  value={formatNumber(formationStats.upcomingSessionsCount)}
+                  detail="Sessions dont le démarrage est à venir"
+                />
+                <MetricCard
+                  label="Secteurs couverts"
+                  value={formatNumber(formationStats.sectorsCount)}
+                  detail="Secteurs représentés dans les données importées"
+                />
+              </div>
+            ) : (
+              <div className="empty-state">
+                <strong>Données de formation non disponibles.</strong>
+                <p>
+                  {formationStatsError ||
+                    'Aucun agrégat de formation n’est encore disponible pour ce département.'}
+                </p>
+              </div>
+            )}
+          </section>
+
+          <section className="department-metrics-section vigilance-metrics-section">
             <div className="section-title-row">
               <div>
                 <p className="eyebrow">Indicateurs</p>
