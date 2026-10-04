@@ -119,3 +119,42 @@ test('sanitizePublicOffer rejects non-http application links', () => {
 
   assert.equal(result.applyUrl, null);
 });
+
+
+test('buildPublicOffersHistory keeps real snapshots in chronological order', () => {
+  assert.equal(typeof publicOffers.buildPublicOffersHistory, 'function');
+
+  const history = publicOffers.buildPublicOffersHistory([
+    {
+      date: '2026-10-04',
+      strictSummary: { totalOffers: 120, totalOpenings: 150 },
+    },
+    {
+      date: '2026-10-02',
+      strictSummary: { totalOffers: 100, totalOpenings: 125 },
+    },
+    {
+      date: '2026-10-03',
+      strictSummary: { totalOffers: 110, totalOpenings: 140 },
+    },
+    {
+      date: '2026-10-01',
+      strictSummary: null,
+    },
+  ]);
+
+  assert.deepEqual(history, [
+    { date: '2026-10-02', totalOffers: 100, totalOpenings: 125 },
+    { date: '2026-10-03', totalOffers: 110, totalOpenings: 140 },
+    { date: '2026-10-04', totalOffers: 120, totalOpenings: 150 },
+  ]);
+});
+
+test('computePublicTrend returns a percentage only with two usable observations', () => {
+  assert.equal(typeof publicOffers.computePublicTrend, 'function');
+
+  assert.equal(publicOffers.computePublicTrend([100]), null);
+  assert.equal(publicOffers.computePublicTrend([0, 10]), null);
+  assert.equal(publicOffers.computePublicTrend([100, 110, 120]), 0.2);
+  assert.equal(publicOffers.computePublicTrend([200, 150]), -0.25);
+});
