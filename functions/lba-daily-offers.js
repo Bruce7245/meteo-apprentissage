@@ -14,6 +14,8 @@ const {
 const {
   buildPublicOffersPayload,
   buildRecentDateCandidates,
+  buildPublicOffersHistory,
+  computePublicTrend,
 } = require("./lib/public-offers.cjs");
 
 if (!admin.apps.length) {
@@ -1081,7 +1083,7 @@ exports.backfillDailyOffers = onRequest(
   }
 );
 
-async function findLatestPublicOfferSnapshot(departmentCode) {
+async function findRecentPublicOfferSnapshots(departmentCode) {
   const dates = buildRecentDateCandidates(todayParis(), 14);
 
   const snapshots = await Promise.all(
@@ -1102,7 +1104,7 @@ async function findLatestPublicOfferSnapshot(departmentCode) {
     })
   );
 
-  return snapshots.find((item) => item.snapshot.exists) || null;
+  return snapshots.filter((item) => item.snapshot.exists);
 }
 
 exports.getPublicDepartmentOffersHttp = onRequest(
@@ -1130,7 +1132,8 @@ exports.getPublicDepartmentOffersHttp = onRequest(
       }
 
       const limit = Math.min(Math.max(toInt(req.query.limit, 20), 1), 20);
-      const latest = await findLatestPublicOfferSnapshot(departmentCode);
+      const recentSnapshots = await findRecentPublicOfferSnapshots(departmentCode);
+      const latest = recentSnapshots[0] || null;
 
       if (!latest) {
         res.status(404).json({
@@ -1168,6 +1171,19 @@ exports.getPublicDepartmentOffersHttp = onRequest(
         offers: offersSnapshot.docs.map((document) => document.data()),
         limit,
       });
+
+      const history = buildPublicOffersHistory(
+        recentSnapshots.map((item) => ({
+          date: item.date,
+          strictSummary: item.snapshot.data()?.strictSummary || null,
+        }))
+      );
+
+      payload.history = history;
+      payload.trends = {
+        offers: computePublicTrend(history.map((item) => item.totalOffers)),
+        openings: computePublicTrend(history.map((item) => item.totalOpenings)),
+      };
 
       res.set("Cache-Control", "public, max-age=300, s-maxage=600");
       res.json({
