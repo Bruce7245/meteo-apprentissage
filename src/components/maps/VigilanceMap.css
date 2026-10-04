@@ -167,3 +167,47 @@
     flex-direction: column;
   }
 }
+
+
+/* Public observatory refresh (#30) */
+.public-map-grid .map-panel {
+  margin: 0;
+  padding: 20px;
+  border-radius: 18px;
+  box-shadow: none;
+}
+
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+  color: #748197;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.france-map-canvas {
+  border-color: #dfe5ec;
+  border-radius: 16px;
+  background: #f8fafc;
+}
+
+.map-inspector {
+  border-color: #dfe5ec;
+  border-radius: 16px;
+  box-shadow: none;
+}
+
+.france-map-vert { fill: #6fb98f; }
+.france-map-jaune { fill: #e5c65b; }
+.france-map-orange { fill: #dd8b45; }
+.france-map-rouge { fill: #cb5a5a; }
+
+@media (max-width: 620px) {
+  .map-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
