@@ -1226,127 +1226,22 @@ exports.importDailyOffers = onSchedule(
   async () => {
     const token = API_APPRENTISSAGE_TOKEN.value();
     const today = parisDateString(new Date());
-    const departments = await loadDepartments();
 
-    let successCount = 0;
-    let errorCount = 0;
+    console.log(`Import quotidien planifié ${today}.`);
 
-    console.log(`Import quotidien ${today} pour ${departments.length} départements.`);
+    const result = await importDailyOffersForDepartments({
+      targetDate: today,
+      departmentCodes: [],
+      token,
+      write: true,
+      publish: true,
+      delayMs: 1200,
+      executionMode: 'scheduled',
+    });
 
-    for (const department of departments) {
-      try {
-        const result = await fetchDepartment(department.code, token);
-
-        const todayJobs = result.jobs.filter((job) => {
-          return getJobCreationDate(job) === today;
-        });
-
-        const expiringSoonJobs = result.jobs.filter((job) => {
-          const expirationDate = getJobExpirationDate(job);
-          return (
-            expirationDate &&
-            expirationDate >= today &&
-            expirationDate <= parisDateWithOffset(7)
-          );
-        });
-
-        const activeOfferIds = result.jobs.map(getJobId).filter(Boolean);
-
-      const offerObservations = result.jobs
-        .map((job) => normalizeJobOfferObservation(job, department, targetDate))
-        .filter((item) => item.offerId);
-        const previousActiveIds = await getPreviousActiveIds(department.code);
-        const activeSet = new Set(activeOfferIds);
-        const notSeenSinceYesterdayIds = previousActiveIds.filter(
-          (id) => !activeSet.has(id)
-        );
-
-        const aggregation = aggregateJobs(todayJobs);
-
-        const dailyDocument = {
-          date: today,
-          code: department.code,
-          name: department.name,
-
-          period: 'today',
-          returnedActiveJobsCount: result.jobs.length,
-          jobsCount: todayJobs.length,
-          openingCount: countOpening(todayJobs),
-          recruitersCount: result.recruiters.length,
-          warningsCount: result.warnings.length,
-          expiringSoonCount: expiringSoonJobs.length,
-
-          activeOfferIds,
-          todayOfferIds: todayJobs.map(getJobId).filter(Boolean),
-          notSeenSinceYesterdayCount: notSeenSinceYesterdayIds.length,
-          notSeenSinceYesterdayIds,
-
-          ...aggregation,
-
-          source: 'api-apprentissage-job-v1-search',
-          limitedResults: true,
-          importedAt: admin.firestore.FieldValue.serverTimestamp(),
-        };
-
-        await db
-          .collection('departmentDailyStats')
-          .doc(`${today}_${department.code}`)
-          .set(dailyDocument, { merge: true });
-
-        const sectorStats = buildDepartmentSectorStats(todayJobs, department, today);
-
-        const batch = db.batch();
-
-        sectorStats.forEach((sector) => {
-          const documentId = `${department.code}_${sector.sectorCode}`;
-          const reference = db.collection('departmentSectorStats').doc(documentId);
-          batch.set(reference, sector, { merge: true });
-        });
-
-        if (sectorStats.length > 0) {
-          await batch.commit();
-        }
-
-        successCount += 1;
-        console.log(`OK ${department.code}: ${todayJobs.length} offre(s) du jour`);
-      } catch (error) {
-        errorCount += 1;
-        console.error(`Erreur ${department.code}:`, error.message);
-
-        await db
-          .collection('departmentDailyStats')
-          .doc(`${today}_${department.code}`)
-          .set(
-            {
-              date: today,
-              code: department.code,
-              name: department.name,
-              lastError: error.message,
-              importedAt: admin.firestore.FieldValue.serverTimestamp(),
-            },
-            { merge: true }
-          );
-      }
-
-      await sleep(1200);
-    }
-
-    await db.collection('apiImports').doc(`daily_${today}`).set(
-      {
-        type: 'daily_scheduled_import',
-        date: today,
-        departmentsCount: departments.length,
-        successCount,
-        errorCount,
-        finishedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
+    console.log(
+      `Import quotidien terminé. Succès: ${result.successCount}, erreurs: ${result.errorCount}`
     );
-
-    await publishDepartmentVigilanceDaily(today);
-    await publishVigilancePublicIndexLatest(today);
-
-    console.log(`Import quotidien terminé. Succès: ${successCount}, erreurs: ${errorCount}`);
   }
 );
 
@@ -13343,6 +13238,7 @@ async function importDailyOffersForDepartments({
   write = true,
   publish = false,
   delayMs = 1200,
+  executionMode = 'manual',
 }) {
   const allDepartments = await loadDepartments();
   const wanted = new Set(departmentCodes || []);
@@ -13521,9 +13417,21 @@ async function importDailyOffersForDepartments({
   }
 
   if (write) {
-    await db.collection('apiImports').doc(`daily_manual_${targetDate}`).set(
+    const isScheduled = executionMode === 'scheduled';
+    const importDocumentId = isScheduled
+      ? `daily_${targetDate}`
+      : `daily_manual_${targetDate}`;
+    const importType = isScheduled
+      ? 'daily_scheduled_import'
+      : 'daily_manual_import';
+    const schemaVersion = isScheduled
+      ? 'daily_scheduled_import.v1'
+      : 'daily_manual_import.v1';
+
+    await db.collection('apiImports').doc(importDocumentId).set(
       {
-        type: 'daily_manual_import',
+        type: importType,
+        executionMode,
         date: targetDate,
         source: 'api-apprentissage-job-v1-search',
         departmentsCount: departments.length,
@@ -13531,7 +13439,7 @@ async function importDailyOffersForDepartments({
         successCount,
         errorCount,
         finishedAt: admin.firestore.FieldValue.serverTimestamp(),
-        schemaVersion: 'daily_manual_import.v1',
+        schemaVersion,
       },
       { merge: true }
     );
