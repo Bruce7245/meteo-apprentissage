@@ -23,11 +23,16 @@ const {
   validatePublicOccupationQuery,
   mergeOccupationSearchResults,
   buildPublicOccupationLookup,
+  createPublicRateLimiter,
 } = require('./lib/public-occupation-search.cjs');
 
 admin.initializeApp();
 
 const db = admin.firestore();
+const publicOccupationSearchRateLimit = createPublicRateLimiter({
+  windowMs: 60_000,
+  maxRequests: 60,
+});
 const API_APPRENTISSAGE_TOKEN = defineSecret('API_APPRENTISSAGE_TOKEN');
 const INSEE_API_KEY = defineSecret('INSEE_API_KEY');
 const BACKFILL_ADMIN_KEY = defineSecret('BACKFILL_ADMIN_KEY');
@@ -7519,6 +7524,21 @@ exports.getPublicOccupationSearchHttp = onRequest(
         response.status(405).json({
           ok: false,
           error: 'Method not allowed',
+        });
+        return;
+      }
+
+      const forwardedFor = String(request.get('x-forwarded-for') || '')
+        .split(',')[0]
+        .trim();
+      const requesterKey = request.ip || forwardedFor || 'anonymous';
+      const rateLimit = publicOccupationSearchRateLimit(requesterKey);
+
+      if (!rateLimit.allowed) {
+        response.set('Retry-After', String(rateLimit.retryAfterSeconds));
+        response.status(429).json({
+          ok: false,
+          error: 'Too many search requests',
         });
         return;
       }
