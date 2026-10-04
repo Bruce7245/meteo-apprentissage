@@ -42,6 +42,97 @@ function scoreLabelKey(key, label) {
   return score;
 }
 
+function isUsefulSearchTerm(value) {
+  const text = cleanText(value);
+
+  if (!text || text.length < 2 || text.length > 160) return false;
+  if (normalizeRomeCode(text)) return false;
+  if (/^https?:\/\//i.test(text)) return false;
+
+  return true;
+}
+
+function collectOfficialSearchTerms(node, canonicalLabel) {
+  const terms = new Map();
+  const canonicalKey = normalizeOccupationSearchText(canonicalLabel);
+
+  function add(value) {
+    if (!isUsefulSearchTerm(value)) return;
+
+    const label = cleanText(value);
+    const key = normalizeOccupationSearchText(label);
+
+    if (!key || key === canonicalKey) return;
+
+    const previous = terms.get(key);
+
+    if (
+      !previous ||
+      label.length < previous.length ||
+      (
+        label.length === previous.length &&
+        label.localeCompare(previous, 'fr') < 0
+      )
+    ) {
+      terms.set(key, label);
+    }
+  }
+
+  function walk(value, aliasContext = false, depth = 0) {
+    if (!value || depth > 12) return;
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        walk(item, aliasContext, depth + 1);
+      }
+      return;
+    }
+
+    if (typeof value !== 'object') return;
+
+    for (const [key, item] of Object.entries(value)) {
+      const normalizedKey = normalizeKey(key);
+      const keySignalsAlias =
+        normalizedKey.includes('appellation') ||
+        normalizedKey === 'emploi' ||
+        normalizedKey === 'emplois' ||
+        normalizedKey.includes('emploi_metier') ||
+        normalizedKey === 'metier' ||
+        normalizedKey === 'metiers';
+
+      if (item && typeof item === 'object') {
+        walk(item, aliasContext || keySignalsAlias, depth + 1);
+        continue;
+      }
+
+      const scalarAliasKey =
+        normalizedKey.includes('appellation') ||
+        normalizedKey === 'emploi' ||
+        normalizedKey === 'metier';
+
+      const contextualLabelKey =
+        aliasContext &&
+        (
+          normalizedKey.includes('libelle') ||
+          normalizedKey.includes('intitule') ||
+          normalizedKey === 'label' ||
+          normalizedKey === 'titre' ||
+          normalizedKey === 'nom'
+        );
+
+      if (scalarAliasKey || contextualLabelKey) {
+        add(item);
+      }
+    }
+  }
+
+  walk(node);
+
+  return Array.from(terms.entries())
+    .sort(([a], [b]) => a.localeCompare(b, 'fr'))
+    .map(([, label]) => label);
+}
+
 function findRomeCodes(object) {
   if (!object || typeof object !== 'object' || Array.isArray(object)) return [];
 
@@ -107,6 +198,7 @@ function collectCandidates(node, output, depth = 0) {
         romeCode,
         label: bestLabel.label,
         score: bestLabel.score,
+        searchTerms: collectOfficialSearchTerms(node, bestLabel.label),
       });
     }
   }
@@ -126,6 +218,15 @@ function extractRomeReferenceEntries(payload, sourceMeta = {}) {
 
   for (const candidate of candidates) {
     const previous = byCode.get(candidate.romeCode);
+    const mergedSearchTerms = new Map();
+
+    for (const item of [
+      ...(previous?.searchTerms || []),
+      ...(candidate.searchTerms || []),
+    ]) {
+      const key = normalizeOccupationSearchText(item);
+      if (key) mergedSearchTerms.set(key, cleanText(item));
+    }
 
     const shouldReplace =
       !previous ||
@@ -140,9 +241,18 @@ function extractRomeReferenceEntries(payload, sourceMeta = {}) {
         candidate.label.localeCompare(previous.label, 'fr') < 0
       );
 
-    if (shouldReplace) {
-      byCode.set(candidate.romeCode, candidate);
-    }
+    const selected = shouldReplace
+      ? { ...candidate }
+      : { ...previous };
+
+    const canonicalKey = normalizeOccupationSearchText(selected.label);
+
+    selected.searchTerms = Array.from(mergedSearchTerms.entries())
+      .filter(([key]) => key !== canonicalKey)
+      .sort(([a], [b]) => a.localeCompare(b, 'fr'))
+      .map(([, label]) => label);
+
+    byCode.set(candidate.romeCode, selected);
   }
 
   const source = cleanText(sourceMeta.source) || null;
@@ -154,6 +264,7 @@ function extractRomeReferenceEntries(payload, sourceMeta = {}) {
       romeCode: item.romeCode,
       label: item.label,
       normalizedLabel: normalizeOccupationSearchText(item.label),
+      searchTerms: Array.isArray(item.searchTerms) ? item.searchTerms : [],
       source,
       sourceVersion,
     }));
