@@ -12,6 +12,24 @@ function toNonNegativeNumber(value) {
   return Number.isFinite(number) && number >= 0 ? number : 0;
 }
 
+function sanitizePublicUrl(value) {
+  const cleaned = cleanText(value);
+
+  if (!cleaned) return null;
+
+  try {
+    const url = new URL(cleaned);
+
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      return null;
+    }
+
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 function sanitizePublicOffer(source = {}) {
   return {
     title: cleanText(source.title),
@@ -25,7 +43,7 @@ function sanitizePublicOffer(source = {}) {
     contractTypes: safeArray(source.contractTypes)
       .map(cleanText)
       .filter(Boolean),
-    applyUrl: cleanText(source.applyUrl),
+    applyUrl: sanitizePublicUrl(source.applyUrl),
   };
 }
 
