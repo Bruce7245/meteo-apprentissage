@@ -6226,6 +6226,107 @@ exports.resumeFormationNationalBackgroundJob = onSchedule(
   }
 );
 
+exports.getFormationNationalBackgroundJobStatusHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    secrets: [BACKFILL_ADMIN_KEY],
+  },
+  async (request, response) => {
+    try {
+      const adminKey = request.get('x-admin-key') || '';
+      const expectedKey = BACKFILL_ADMIN_KEY.value();
+
+      if (!expectedKey || adminKey !== expectedKey) {
+        response.status(403).json({
+          ok: false,
+          error: 'Forbidden',
+        });
+        return;
+      }
+
+      const [jobSnapshot, batchStates] = await Promise.all([
+        db.collection(FORMATION_AUTO_JOB_COLLECTION)
+          .doc(FORMATION_AUTO_JOB_ID)
+          .get(),
+        formationAutoLoadBatchStates(),
+      ]);
+
+      const batches = [];
+      const summary = {
+        totalBatches: FORMATION_AUTO_TOTAL_BATCHES,
+        completedBatches: 0,
+        completedDepartments: 0,
+        failedDepartments: 0,
+        pagesProcessed: 0,
+        receivedCount: 0,
+        writtenCount: 0,
+        skippedNoId: 0,
+        skippedOutsideDepartment: 0,
+      };
+
+      for (let batchNumber = 1; batchNumber <= FORMATION_AUTO_TOTAL_BATCHES; batchNumber += 1) {
+        const state = batchStates[batchNumber] || { status: 'pending' };
+        const departmentStates = state.departmentStates || {};
+        const departmentCodes = Array.isArray(state.departmentCodes)
+          ? state.departmentCodes
+          : [];
+
+        const completedDepartments = Object.values(departmentStates)
+          .filter((item) => item && item.status === 'completed')
+          .length;
+        const failedDepartments = Object.values(departmentStates)
+          .filter((item) => item && item.status === 'failed')
+          .length;
+
+        if (state.status === 'completed') {
+          summary.completedBatches += 1;
+        }
+
+        summary.completedDepartments += completedDepartments;
+        summary.failedDepartments += failedDepartments;
+        summary.pagesProcessed += Number(state.pagesProcessed || 0);
+        summary.receivedCount += Number(state.receivedCount || 0);
+        summary.writtenCount += Number(state.writtenCount || 0);
+        summary.skippedNoId += Number(state.skippedNoId || 0);
+        summary.skippedOutsideDepartment += Number(state.skippedOutsideDepartment || 0);
+
+        batches.push({
+          batchNumber,
+          status: state.status || 'pending',
+          departmentCodes,
+          completedDepartments,
+          failedDepartments,
+          currentDepartmentIndex: Number(state.currentDepartmentIndex || 0),
+          currentPageIndex: Number(state.currentPageIndex || 0),
+          pagesProcessed: Number(state.pagesProcessed || 0),
+          receivedCount: Number(state.receivedCount || 0),
+          writtenCount: Number(state.writtenCount || 0),
+          skippedNoId: Number(state.skippedNoId || 0),
+          skippedOutsideDepartment: Number(state.skippedOutsideDepartment || 0),
+          stoppedReason: state.stoppedReason || null,
+          lastError: state.lastError || null,
+        });
+      }
+
+      response.json({
+        ok: true,
+        exists: jobSnapshot.exists,
+        job: jobSnapshot.exists ? jobSnapshot.data() : null,
+        summary,
+        batches,
+      });
+    } catch (error) {
+      console.error('getFormationNationalBackgroundJobStatusHttp error', error);
+      response.status(500).json({
+        ok: false,
+        error: String(error.message || error),
+      });
+    }
+  }
+);
+
 function mvNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
