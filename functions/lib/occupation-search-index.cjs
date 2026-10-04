@@ -45,7 +45,11 @@ function buildOccupationIndexEntry(reference = {}, options = {}) {
     romeCode,
     label,
     normalizedLabel,
-    searchPrefixes: buildSearchPrefixes([label, romeCode]),
+    searchPrefixes: buildSearchPrefixes([
+      label,
+      romeCode,
+      ...(Array.isArray(reference.searchTerms) ? reference.searchTerms : []),
+    ]),
     source: cleanText(reference.source) || null,
     sourceVersion: cleanText(reference.sourceVersion) || null,
     asOfDate: cleanText(options.asOfDate) || null,
