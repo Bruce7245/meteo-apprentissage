@@ -5657,6 +5657,14 @@ exports.importLbaFormationsBatchHttp = onRequest(
       const batchNumber = Math.max(1, Number.parseInt(String(request.query.batch || '1'), 10));
       const shouldWrite = String(request.query.write || '') === '1';
       const reset = String(request.query.reset || '0') === '1';
+      const dryRunStartDepartmentIndex = Math.max(
+        0,
+        Number.parseInt(String(request.query.startDepartmentIndex || '0'), 10) || 0
+      );
+      const dryRunStartPageIndex = Math.max(
+        0,
+        Number.parseInt(String(request.query.startPageIndex || '0'), 10) || 0
+      );
       const pageSize = Math.min(Math.max(Number(request.query.pageSize || 100), 1), 100);
       const maxPagesPerRun = Math.min(Math.max(Number(request.query.maxPages || 30), 1), 60);
       const maxRunMs = Math.min(
@@ -5704,6 +5712,19 @@ exports.importLbaFormationsBatchHttp = onRequest(
         status: 'pending',
         schemaVersion: 'formationImportBatch.v1',
       };
+
+      if (!shouldWrite) {
+        if (dryRunStartDepartmentIndex >= batchDefinition.items.length) {
+          response.status(400).json({
+            ok: false,
+            error: `startDepartmentIndex out of range for batch ${batchNumber}`,
+          });
+          return;
+        }
+
+        state.currentDepartmentIndex = dryRunStartDepartmentIndex;
+        state.currentPageIndex = dryRunStartPageIndex;
+      }
 
       if (shouldWrite && !reset) {
         const stateSnapshot = await stateRef.get();
@@ -5954,6 +5975,12 @@ exports.importLbaFormationsBatchHttp = onRequest(
         durationMs: Date.now() - startedAtMs,
         currentDepartmentIndex: state.currentDepartmentIndex,
         currentPageIndex: state.currentPageIndex,
+        nextCursor: completed
+          ? null
+          : {
+              departmentIndex: state.currentDepartmentIndex,
+              pageIndex: state.currentPageIndex,
+            },
         totals: {
           pagesProcessed: state.pagesProcessed,
           receivedCount: state.receivedCount,
