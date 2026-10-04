@@ -1,0 +1,190 @@
+name: Check formation national status
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: check-formation-national-status
+  cancel-in-progress: false
+
+jobs:
+  status:
+    name: Check national formation import status
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: meteo-apprentissage
+
+      - name: Fetch and format formation import status
+        id: status
+        shell: bash
+        run: |
+          set -u
+
+          RESPONSE="/tmp/formation-national-status.json"
+          SUMMARY="/tmp/formation-national-status.md"
+          CHECKED_AT="$(TZ=Europe/Paris date '+%Y-%m-%d %H:%M:%S %Z')"
+
+          KEY="$(gcloud secrets versions access latest             --secret=BACKFILL_ADMIN_KEY             --project=meteo-apprentissage)"
+          echo "::add-mask::$KEY"
+
+          CURL_EXIT=0
+          HTTP_CODE="$(curl --silent --show-error             --max-time 60             --output "$RESPONSE"             --write-out "%{http_code}"             -H "x-admin-key: $KEY"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getFormationNationalBackgroundJobStatusHttp")" || CURL_EXIT=$?
+
+          unset KEY
+
+          if [ "$CURL_EXIT" -ne 0 ] || [[ ! "$HTTP_CODE" =~ ^2 ]]; then
+            cat > "$SUMMARY" <<EOF
+          ### État de l'import national des formations
+
+          **Vérification :** $CHECKED_AT
+
+          ❌ Impossible de lire l'état du job national.
+
+          - curl : `$CURL_EXIT`
+          - HTTP : `$HTTP_CODE`
+
+          **Run Actions :** https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+            cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! python - "$RESPONSE" "$SUMMARY" "$CHECKED_AT" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}" <<'PY'
+          import json
+          import sys
+
+          response_path, summary_path, checked_at, repository, run_id = sys.argv[1:]
+
+          with open(response_path, "r", encoding="utf-8") as handle:
+              payload = json.load(handle)
+
+          if payload.get("ok") is False:
+              raise SystemExit(payload.get("error") or "API returned ok=false")
+
+          job = payload.get("job") or {}
+          summary = payload.get("summary") or {}
+          batches = payload.get("batches") or []
+
+          status = job.get("status") or ("pending" if not payload.get("exists") else "unknown")
+          icons = {
+              "done": "✅",
+              "running": "🔄",
+              "error": "❌",
+              "paused": "⏸️",
+              "pending": "⏳",
+          }
+          icon = icons.get(status, "ℹ️")
+
+          total_departments = 101
+          current_batch = job.get("currentBatchNumber")
+          completed_batches = int(summary.get("completedBatches") or 0)
+          completed_departments = int(summary.get("completedDepartments") or 0)
+
+          with open(summary_path, "w", encoding="utf-8") as out:
+              out.write("### État de l'import national des formations\n\n")
+              out.write(f"**Vérification :** {checked_at}\n\n")
+              out.write(f"{icon} **Statut global :** `{status}`\n\n")
+              out.write(f"- Lots terminés : **{completed_batches} / {summary.get('totalBatches', 11)}**\n")
+              out.write(f"- Départements terminés : **{completed_departments} / {total_departments}**\n")
+              out.write(f"- Lot courant : **{current_batch if current_batch is not None else '—'}**\n")
+              out.write(f"- Dernier lot terminé : **{job.get('lastCompletedBatchNumber') if job.get('lastCompletedBatchNumber') is not None else '—'}**\n")
+              out.write(f"- Statut du dernier lot : **{job.get('lastBatchStatus') or '—'}**\n")
+              out.write(f"- Pages traitées : **{summary.get('pagesProcessed', 0)}**\n")
+              out.write(f"- Résultats API reçus : **{summary.get('receivedCount', 0)}**\n")
+              out.write(f"- Formations écrites/mergées : **{summary.get('writtenCount', 0)}**\n")
+              out.write(f"- Ignorés sans identifiant : **{summary.get('skippedNoId', 0)}**\n")
+              out.write(f"- Ignorés hors département : **{summary.get('skippedOutsideDepartment', 0)}**\n")
+              out.write(f"- Départements en échec : **{summary.get('failedDepartments', 0)}**\n")
+              out.write(f"- Échecs consécutifs : **{job.get('consecutiveFailures', 0)}**\n")
+              out.write(f"- Dernière raison d'arrêt : **{job.get('lastStoppedReason') or '—'}**\n")
+              out.write(f"- Erreur : **{job.get('errorMessage') or '—'}**\n\n")
+
+              out.write("#### Détail des lots\n\n")
+              out.write("| Lot | Statut | Départements terminés | Position | Pages | Formations écrites |\n")
+              out.write("|---:|---|---:|---|---:|---:|\n")
+
+              for batch in batches:
+                  codes = batch.get("departmentCodes") or []
+                  total = len(codes) or (1 if int(batch.get("batchNumber") or 0) == 11 else 10)
+                  position = f"{batch.get('currentDepartmentIndex', 0)} / {total}, page {batch.get('currentPageIndex', 0)}"
+                  out.write(
+                      f"| {batch.get('batchNumber', '—')} | "
+                      f"`{batch.get('status') or 'pending'}` | "
+                      f"{batch.get('completedDepartments', 0)} / {total} | "
+                      f"{position} | "
+                      f"{batch.get('pagesProcessed', 0)} | "
+                      f"{batch.get('writtenCount', 0)} |\n"
+                  )
+
+              out.write("\n")
+              out.write(f"**Run Actions :** https://github.com/{repository}/actions/runs/{run_id}\n")
+
+          print(f"backend_status={status}")
+          PY
+          then
+            cat > "$SUMMARY" <<EOF
+          ### État de l'import national des formations
+
+          **Vérification :** $CHECKED_AT
+
+          ❌ La réponse de statut n'a pas pu être interprétée.
+
+          **Run Actions :** https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          else
+            BACKEND_STATUS="$(python - "$RESPONSE" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              payload = json.load(handle)
+          job = payload.get("job") or {}
+          print(job.get("status") or ("pending" if not payload.get("exists") else "unknown"))
+          PY
+          )"
+            echo "backend_status=$BACKEND_STATUS" >> "$GITHUB_OUTPUT"
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          cat "$SUMMARY"
+          cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish status in Issues 7 and 9
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f /tmp/formation-national-status.md ]; then
+            echo "No status summary was generated."
+            exit 1
+          fi
+
+          gh issue comment 7             --repo "${GITHUB_REPOSITORY}"             --body-file /tmp/formation-national-status.md
+
+          gh issue comment 9             --repo "${GITHUB_REPOSITORY}"             --body-file /tmp/formation-national-status.md
+
+      - name: Fail when status could not be read
+        if: steps.status.outputs.failed == 'true'
+        run: exit 1
+
+      - name: Mark backend error in Actions
+        if: steps.status.outputs.failed != 'true' && steps.status.outputs.backend_status == 'error'
+        run: |
+          echo "The national formation import is in error state."
+          exit 1

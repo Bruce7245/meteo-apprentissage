@@ -1,6 +1,11 @@
 name: Enable formation national automation
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/enable-formation-national-automation.yml"
   workflow_run:
     workflows:
       - Import formation batch 1
@@ -18,8 +23,8 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy formation national scheduler
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    name: Deploy formation national automation
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 20
@@ -51,11 +56,11 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
 
-      - name: Deploy national formation scheduler only
+      - name: Deploy national formation scheduler and status endpoint
         run: >-
           npx --yes firebase-tools@latest deploy
           --project meteo-apprentissage
-          --only "functions:resumeFormationNationalBackgroundJob"
+          --only "functions:resumeFormationNationalBackgroundJob,functions:getFormationNationalBackgroundJobStatusHttp"
           --non-interactive
 
       - name: Publish activation in Issues
@@ -69,7 +74,7 @@ jobs:
           cat > /tmp/formation-national-activation.md <<EOF
           ## Automatisation nationale activée
 
-          ✅ `resumeFormationNationalBackgroundJob` a été déployé.
+          ✅ `resumeFormationNationalBackgroundJob` et `getFormationNationalBackgroundJobStatusHttp` ont été déployés.
 
           Fonctionnement :
           - exécution Firebase toutes les 5 minutes ;
