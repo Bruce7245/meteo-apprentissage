@@ -16,6 +16,66 @@ function normalizeRncp(value) {
   return match ? `RNCP${match[1]}` : null;
 }
 
+const TRAINING_ACRONYM_STOPWORDS = new Set([
+  'a', 'au', 'aux', 'd', 'de', 'des', 'du',
+  'en', 'et', 'l', 'la', 'le', 'les', 'pour',
+]);
+
+function buildTrainingSearchAliases(label) {
+  const text = cleanText(label);
+  if (!text) return [];
+
+  const tokens = text.match(/[\p{L}\p{N}]+/gu) || [];
+  const significant = tokens.filter((token) => {
+    const normalized = normalizeOccupationSearchText(token);
+    return normalized && !TRAINING_ACRONYM_STOPWORDS.has(normalized);
+  });
+
+  if (significant.length < 2) return [];
+
+  function acronymPart(token) {
+    const normalized = normalizeOccupationSearchText(token)
+      .replace(/\s+/g, '')
+      .toUpperCase();
+
+    const isExistingAcronym =
+      token === token.toUpperCase() &&
+      normalized.length >= 2 &&
+      normalized.length <= 10;
+
+    return isExistingAcronym ? normalized : normalized.slice(0, 1);
+  }
+
+  const aliases = new Set();
+  const allParts = significant.map(acronymPart);
+  const fullAcronym = allParts.join('');
+
+  if (fullAcronym.length >= 2 && fullAcronym.length <= 20) {
+    aliases.add(fullAcronym);
+  }
+
+  const firstToken = significant[0];
+  const firstPart = acronymPart(firstToken);
+  const firstIsAcronym =
+    firstToken === firstToken.toUpperCase() &&
+    firstPart.length >= 2;
+
+  if (firstIsAcronym && significant.length > 1) {
+    const restAcronym = allParts.slice(1).join('');
+
+    if (restAcronym.length >= 2 && restAcronym.length <= 16) {
+      aliases.add(restAcronym);
+      aliases.add(`${firstPart} ${restAcronym}`);
+    }
+  }
+
+  const normalizedLabel = normalizeOccupationSearchText(text);
+
+  return Array.from(aliases)
+    .filter((alias) => normalizeOccupationSearchText(alias) !== normalizedLabel)
+    .sort((a, b) => a.localeCompare(b, 'fr'));
+}
+
 function choosePreferredLabel(current, candidate) {
   const next = cleanText(candidate);
   if (!next) return current || '';
@@ -117,6 +177,8 @@ function buildTrainingIndexEntries(formations, options = {}) {
           .digest('hex')
           .slice(0, 16)}`;
 
+      const searchAliases = buildTrainingSearchAliases(group.label);
+
       return {
         entryId: `training_${publicId}`,
         type: 'training',
@@ -128,6 +190,7 @@ function buildTrainingIndexEntries(formations, options = {}) {
           group.label,
           group.rncp,
           ...romeCodes,
+          ...searchAliases,
         ].filter(Boolean)),
         romeCodes,
         source,
@@ -143,6 +206,7 @@ function buildTrainingIndexEntries(formations, options = {}) {
 
 module.exports = {
   normalizeRncp,
+  buildTrainingSearchAliases,
   buildOccupationIndexEntry,
   buildTrainingIndexEntries,
 };
