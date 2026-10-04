@@ -117,3 +117,20 @@ test('buildTrainingIndexEntries removes formations without a usable label or ROM
 
   assert.deepEqual(results, []);
 });
+
+
+test('buildOccupationIndexEntry indexes official ROME employment aliases', () => {
+  const result = searchIndex.buildOccupationIndexEntry({
+    romeCode: 'M1805',
+    label: 'Études et développement informatique',
+    normalizedLabel: 'etudes et developpement informatique',
+    searchTerms: ['Développeur web', 'Développeuse web'],
+    source: 'france-travail-rome',
+    sourceVersion: 'v2',
+  }, {
+    asOfDate: '2026-10-04',
+  });
+
+  assert.equal(result.searchPrefixes.includes('developpeur web'), true);
+  assert.equal(result.searchPrefixes.includes('developpeuse web'), true);
+});
