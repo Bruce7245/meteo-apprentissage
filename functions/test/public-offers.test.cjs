@@ -97,3 +97,13 @@ test('buildPublicOffersPayload keeps only in-department offers and caps the publ
   assert.equal(payload.offers[0].title, 'Offre 25');
   assert.equal(payload.offers.some((offer) => offer.title === 'Offre 1'), false);
 });
+
+
+test('buildRecentDateCandidates returns newest dates first for snapshot fallback', () => {
+  assert.equal(typeof publicOffers.buildRecentDateCandidates, 'function');
+
+  assert.deepEqual(
+    publicOffers.buildRecentDateCandidates('2026-10-04', 3),
+    ['2026-10-04', '2026-10-03', '2026-10-02', '2026-10-01']
+  );
+});
