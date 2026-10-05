@@ -124,3 +124,82 @@ test('buildDepartmentPopulationFromWorksheetRows reads an INSEE-style quinquenni
   assert.equal(result.get('2A').population15To29, 42000);
   assert.equal(result.get('976').population15To29, 102000);
 });
+
+
+test('buildDepartmentPopulationFromWorksheetRows reads the real INSEE two-row Ensemble header', () => {
+  const groupHeader = Array(44).fill(null);
+  groupHeader[0] = 'Départements';
+  groupHeader[2] = 'Ensemble';
+  groupHeader[23] = 'Hommes';
+
+  const ageHeader = Array(44).fill(null);
+  [
+    '0 à 4 ans',
+    '5 à 9 ans',
+    '10 à 14 ans',
+    '15 à 19 ans',
+    '20 à 24 ans',
+    '25 à 29 ans',
+    '30 à 34 ans',
+    '35 à 39 ans',
+    '40 à 44 ans',
+    '45 à 49 ans',
+    '50 à 54 ans',
+    '55 à 59 ans',
+    '60 à 64 ans',
+    '65 à 69 ans',
+    '70 à 74 ans',
+    '75 à 79 ans',
+    '80 à 84 ans',
+    '85 à 89 ans',
+    '90 à 94 ans',
+    '95 ans et plus',
+    'Total',
+  ].forEach((label, offset) => {
+    ageHeader[2 + offset] = label;
+  });
+
+  const ain = Array(44).fill(null);
+  ain[0] = '01';
+  ain[1] = 'Ain';
+  ain[5] = 42894;
+  ain[6] = 31632;
+  ain[7] = 37404;
+  ain[22] = 698810;
+
+  const mayotte = Array(44).fill(null);
+  mayotte[0] = '976';
+  mayotte[1] = 'Mayotte';
+  mayotte[5] = 30000;
+  mayotte[6] = 31000;
+  mayotte[7] = 29000;
+  mayotte[22] = 330000;
+
+  const worksheetRows = [
+    ['Estimation de population au 1er janvier, par département, sexe et âge quinquennal'],
+    ['Année 2026'],
+    [],
+    groupHeader,
+    ageHeader,
+    ain,
+    mayotte,
+  ];
+
+  const result = population.buildDepartmentPopulationFromWorksheetRows(
+    worksheetRows,
+    2026
+  );
+
+  assert.deepEqual(result.get('01'), {
+    departmentCode: '01',
+    populationTotal: 698810,
+    population15To29: 111930,
+    referenceYear: 2026,
+  });
+  assert.deepEqual(result.get('976'), {
+    departmentCode: '976',
+    populationTotal: 330000,
+    population15To29: 90000,
+    referenceYear: 2026,
+  });
+});
