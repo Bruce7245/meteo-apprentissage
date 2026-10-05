@@ -7,6 +7,8 @@ on:
     paths:
       - .github/workflows/import-insee-population.yml
       - scripts/import-insee-population.mjs
+      - functions/lib/insee-population.cjs
+      - functions/test/insee-population.test.cjs
 
 permissions:
   contents: read
@@ -41,39 +43,6 @@ jobs:
 
       - name: Run INSEE parser tests
         run: node --test functions/test/insee-population.test.cjs
-
-      - name: Inspect INSEE workbook structure
-        env:
-          INSEE_POPULATION_URL: "https://www.insee.fr/fr/statistiques/fichier/8721456/estim-pop-dep-sexe-aq-1975-2026.xlsx"
-        run: |
-          node --input-type=module <<'NODE'
-          import XLSX from 'xlsx';
-
-          const response = await fetch(process.env.INSEE_POPULATION_URL);
-          if (!response.ok) throw new Error(`INSEE HTTP ${response.status}`);
-          const buffer = Buffer.from(await response.arrayBuffer());
-          const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
-
-          console.log('SHEETS=' + JSON.stringify(workbook.SheetNames));
-
-          const target = workbook.SheetNames.find((name) => String(name).trim() === '2026');
-          if (!target) throw new Error('2026 sheet missing');
-
-          const sheet = workbook.Sheets[target];
-          console.log('REF=' + String(sheet['!ref'] || ''));
-          console.log('MERGES=' + JSON.stringify((sheet['!merges'] || []).slice(0, 20)));
-
-          const rows = XLSX.utils.sheet_to_json(sheet, {
-            header: 1,
-            raw: true,
-            defval: null,
-          });
-
-          rows.slice(0, 50).forEach((row, index) => {
-            const preview = Array.isArray(row) ? row.slice(0, 24) : row;
-            console.log(`ROW_${index + 1}=${JSON.stringify(preview)}`);
-          });
-          NODE
 
       - name: Dry-run INSEE population import
         env:
