@@ -394,3 +394,63 @@ module.exports = {
   buildDailyOccupationVigilanceRun,
   createFirestoreOccupationVigilanceRepository,
 };
+
+
+async function executeOccupationVigilanceForDate({ date, db, FieldValue } = {}) {
+  const repository = createFirestoreOccupationVigilanceRepository(db, FieldValue);
+  const buildResult = await buildDailyOccupationVigilanceRun({ date, repository });
+
+  if (buildResult.status === 'failed' || buildResult.status === 'published') {
+    return buildResult;
+  }
+
+  const {
+    createFirestoreOccupationVigilancePublisher,
+    publishOccupationRun,
+  } = require('./lib/occupation-vigilance-publish.cjs');
+
+  const publisher = createFirestoreOccupationVigilancePublisher(db, FieldValue);
+  return publishOccupationRun(publisher, buildResult.runId);
+}
+
+async function handleOccupationVigilanceAdminRequest({
+  request,
+  response,
+  expectedAdminKey,
+  execute,
+} = {}) {
+  const providedKey = request?.get?.('x-admin-key') || request?.query?.key || '';
+
+  if (!expectedAdminKey || providedKey !== expectedAdminKey) {
+    response.status(403).json({ ok: false, error: 'Forbidden' });
+    return;
+  }
+
+  const date = String(request?.query?.date || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    response.status(400).json({
+      ok: false,
+      error: 'Parametre date requis au format YYYY-MM-DD',
+    });
+    return;
+  }
+
+  try {
+    const result = await execute(date);
+    const status = result?.status === 'failed' ? 409 : 200;
+    response.status(status).json({
+      ok: status === 200,
+      date,
+      result,
+    });
+  } catch (error) {
+    response.status(500).json({
+      ok: false,
+      date,
+      error: String(error?.message || error).slice(0, 1000),
+    });
+  }
+}
+
+module.exports.executeOccupationVigilanceForDate = executeOccupationVigilanceForDate;
+module.exports.handleOccupationVigilanceAdminRequest = handleOccupationVigilanceAdminRequest;
