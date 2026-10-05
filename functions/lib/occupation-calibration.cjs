@@ -172,7 +172,6 @@ function buildCalibration(history, options = {}) {
         expectedOffersAtReferencePopulation: round(
           expectedOffersAtReferencePopulation
         ),
-        sampleCount: normalizedOffers.length,
       };
     }
   }
@@ -291,6 +290,11 @@ function buildCalibration(history, options = {}) {
         q50: round(yellowMinRatio),
         q75: round(greenMinRatio),
       },
+      romeSampleCounts: Object.fromEntries(
+        Array.from(byRome.entries())
+          .sort(([a], [b]) => a.localeCompare(b, 'fr'))
+          .map(([romeCode, romeSamples]) => [romeCode, romeSamples.length])
+      ),
     },
   };
 
