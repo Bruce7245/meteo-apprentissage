@@ -203,3 +203,81 @@ test('buildDepartmentPopulationFromWorksheetRows reads the real INSEE two-row En
     referenceYear: 2026,
   });
 });
+
+
+test('buildDepartmentPopulationFromWorksheetRows continues past the metropolitan summary to DROM rows', () => {
+  const groupHeader = Array(23).fill(null);
+  groupHeader[0] = 'Départements';
+  groupHeader[2] = 'Ensemble';
+
+  const ageHeader = Array(23).fill(null);
+  [
+    '0 à 4 ans',
+    '5 à 9 ans',
+    '10 à 14 ans',
+    '15 à 19 ans',
+    '20 à 24 ans',
+    '25 à 29 ans',
+    '30 à 34 ans',
+    '35 à 39 ans',
+    '40 à 44 ans',
+    '45 à 49 ans',
+    '50 à 54 ans',
+    '55 à 59 ans',
+    '60 à 64 ans',
+    '65 à 69 ans',
+    '70 à 74 ans',
+    '75 à 79 ans',
+    '80 à 84 ans',
+    '85 à 89 ans',
+    '90 à 94 ans',
+    '95 ans et plus',
+    'Total',
+  ].forEach((label, offset) => {
+    ageHeader[2 + offset] = label;
+  });
+
+  const valDOise = Array(23).fill(null);
+  valDOise[0] = '95';
+  valDOise[1] = "Val-d'Oise";
+  valDOise[5] = 50000;
+  valDOise[6] = 51000;
+  valDOise[7] = 52000;
+  valDOise[22] = 1260000;
+
+  const metropolitanSummary = Array(23).fill(null);
+  metropolitanSummary[0] = 'France métropolitaine';
+
+  const guadeloupe = Array(23).fill(null);
+  guadeloupe[0] = '971';
+  guadeloupe[1] = 'Guadeloupe';
+  guadeloupe[5] = 22000;
+  guadeloupe[6] = 21000;
+  guadeloupe[7] = 20000;
+  guadeloupe[22] = 375000;
+
+  const mayotte = Array(23).fill(null);
+  mayotte[0] = '976';
+  mayotte[1] = 'Mayotte';
+  mayotte[5] = 30000;
+  mayotte[6] = 31000;
+  mayotte[7] = 29000;
+  mayotte[22] = 330000;
+
+  const result = population.buildDepartmentPopulationFromWorksheetRows(
+    [
+      groupHeader,
+      ageHeader,
+      valDOise,
+      metropolitanSummary,
+      guadeloupe,
+      mayotte,
+    ],
+    2026
+  );
+
+  assert.equal(result.has('95'), true);
+  assert.equal(result.has('971'), true);
+  assert.equal(result.has('976'), true);
+  assert.equal(result.get('976').population15To29, 90000);
+});
