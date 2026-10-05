@@ -1,6 +1,6 @@
 const crypto = require('node:crypto');
 
-const CALCULATION_VERSION = 'occupationVigilance.v1';
+const CALCULATION_VERSION = 'occupationVigilance.v1.1';
 const SECONDARY_SIGNAL_COUNT = 4;
 
 function finiteNumber(value) {
@@ -142,7 +142,14 @@ function buildCalibration(history, options = {}) {
   }
 
   const populationValues = samples.map((sample) => sample.population15To29);
+  const positiveActiveOfferValues = samples
+    .map((sample) => sample.activeOffersCount)
+    .filter((value) => value > 0);
   const referencePopulation15To29 = median(populationValues);
+  const minimumGreenActiveOffers = Math.max(
+    1,
+    Math.ceil(quantile(positiveActiveOfferValues, 0.25) || 1)
+  );
 
   if (!(referencePopulation15To29 > 0)) {
     blockers.push('REFERENCE_POPULATION_UNAVAILABLE');
@@ -243,6 +250,7 @@ function buildCalibration(history, options = {}) {
     calculationVersion: CALCULATION_VERSION,
     referencePopulation15To29: round(referencePopulation15To29),
     expectedOffersFloor: round(expectedOffersFloor),
+    minimumGreenActiveOffers,
     baselines,
     factorBounds: {
       population: {
