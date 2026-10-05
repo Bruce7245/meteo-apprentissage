@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import admin from 'firebase-admin';
+import { getApps, initializeApp } from 'firebase-admin/app';
+import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import XLSX from 'xlsx';
 import populationLib from '../functions/lib/insee-population.cjs';
 
@@ -15,11 +16,11 @@ const SOURCE_DATASET = 'estim-pop-dep-sexe-aq-1975-2026';
 const EXPECTED_DEPARTMENT_COUNT = 101;
 const DRY_RUN = process.env.DRY_RUN === '1';
 
-if (!DRY_RUN && !admin.apps.length) {
-  admin.initializeApp();
+if (!DRY_RUN && getApps().length === 0) {
+  initializeApp({ projectId: 'meteo-apprentissage' });
 }
 
-const db = DRY_RUN ? null : admin.firestore();
+const db = DRY_RUN ? null : getFirestore();
 
 function hashBuffer(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
@@ -100,7 +101,7 @@ async function writeStagedRun(runId, rows, sourceVersion) {
     sourceUrl: SOURCE_URL,
     sourceVersion,
     expectedDepartments: EXPECTED_DEPARTMENT_COUNT,
-    startedAt: admin.firestore.FieldValue.serverTimestamp(),
+    startedAt: FieldValue.serverTimestamp(),
     schemaVersion: 'departmentPopulationReferenceRun.v1',
   });
 
@@ -115,7 +116,7 @@ async function writeStagedRun(runId, rows, sourceVersion) {
       sourceVersion,
       runId,
       schemaVersion: 'departmentPopulationReference.v1',
-      importedAt: admin.firestore.FieldValue.serverTimestamp(),
+      importedAt: FieldValue.serverTimestamp(),
     });
 
     pending += 1;
@@ -147,7 +148,7 @@ async function publishAtomically(runRef, runId, populationMap, sourceVersion) {
         sourceVersion,
         runId,
         schemaVersion: 'departmentPopulationReference.v1',
-        importedAt: admin.firestore.FieldValue.serverTimestamp(),
+        importedAt: FieldValue.serverTimestamp(),
       }
     );
   }
@@ -160,14 +161,14 @@ async function publishAtomically(runRef, runId, populationMap, sourceVersion) {
     sourceUrl: SOURCE_URL,
     sourceVersion,
     departmentsCount: populationMap.size,
-    publishedAt: admin.firestore.FieldValue.serverTimestamp(),
+    publishedAt: FieldValue.serverTimestamp(),
     schemaVersion: 'departmentPopulationReferenceMeta.v1',
   });
 
   batch.set(runRef, {
     status: 'published',
     writtenDepartments: populationMap.size,
-    completedAt: admin.firestore.FieldValue.serverTimestamp(),
+    completedAt: FieldValue.serverTimestamp(),
   }, { merge: true });
 
   await batch.commit();
@@ -226,7 +227,7 @@ async function main() {
     await runRef.set({
       status: 'failed',
       error: String(error?.message || error).slice(0, 1000),
-      failedAt: admin.firestore.FieldValue.serverTimestamp(),
+      failedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
 
     throw error;
