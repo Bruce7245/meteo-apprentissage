@@ -35,6 +35,7 @@ function extractOfferCount(value) {
   return finiteNonNegative(
     value?.activeOffersCount ??
     value?.offersCount ??
+    value?.offers ??
     value?.totalOffers ??
     value?.jobsCount ??
     value?.count
@@ -53,7 +54,7 @@ function extractDailyRomeObservations(data = {}) {
   const date = validDateOnly(data.date || data.asOfDate);
   if (!date) return [];
 
-  const raw = data.byRome ?? data.summary?.byRome ?? data.strictSummary?.byRome;
+  const raw = data.byRome ?? data.strictSummary?.byRome ?? data.summary?.byRome;
   const candidates = [];
 
   if (normalizeRomeCode(data.romeCode || data.code) && extractOfferCount(data) !== null) {
@@ -78,7 +79,7 @@ function extractDailyRomeObservations(data = {}) {
       const activeOffersCount = extractOfferCount(item);
       if (!romeCode || activeOffersCount === null) return null;
       const openingsCount = finiteNonNegative(
-        item?.openingsCount ?? item?.totalOpenings ?? item?.openingCount
+        item?.openingsCount ?? item?.openings ?? item?.totalOpenings ?? item?.openingCount
       );
       return openingsCount === null
         ? { date, romeCode, activeOffersCount }
