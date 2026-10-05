@@ -103,3 +103,24 @@ test('publishOccupationRun marks run ready then performs one atomic pointer publ
   ]);
   assert.deepEqual(pointer, { runId: run().runId });
 });
+
+
+test('publishOccupationRun can resume a ready run after validation completed previously', async () => {
+  const actions = [];
+  const readyRun = run({ status: 'ready' });
+  const repository = {
+    getRun: async () => readyRun,
+    getStagedCounts: async () => counts(),
+    markFailed: async () => { throw new Error('must not fail'); },
+    setRunReady: async () => { throw new Error('must not mark ready twice'); },
+    publishAtomic: async (runId) => actions.push(['publish', runId]),
+  };
+
+  const result = await publish.publishOccupationRun(
+    repository,
+    readyRun.runId
+  );
+
+  assert.equal(result.status, 'published');
+  assert.deepEqual(actions, [['publish', readyRun.runId]]);
+});
