@@ -182,3 +182,41 @@ test('markCalibrationValidated requires an eligible draft and performs the expli
   assert.equal(validated.status, 'validated');
   assert.equal(validated.version, draft.config.version);
 });
+
+
+test('calibration output stays compatible with the versioned config schema surface', () => {
+  const schema = require('../config/occupation-vigilance.v1.schema.json');
+  const history = [];
+
+  for (const [romeCode, offers] of [
+    ['D1108', [8, 12, 16, 20, 24, 28]],
+    ['M1607', [4, 6, 8, 10, 12, 14]],
+  ]) {
+    offers.forEach((activeOffersCount, index) => {
+      history.push({
+        date: `2026-0${index + 1}-01`,
+        departmentCode: index % 2 === 0 ? '72' : '44',
+        romeCode,
+        activeOffersCount,
+        population15To29: 100000,
+      });
+    });
+  }
+
+  const result = calibration.buildCalibration(history, {
+    minimumSamplesPerRome: 6,
+    minimumTotalSamples: 12,
+  });
+
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(schema.properties, 'calibration'),
+    true
+  );
+
+  for (const baseline of Object.values(result.config.baselines)) {
+    assert.deepEqual(
+      Object.keys(baseline).sort(),
+      ['expectedOffersAtReferencePopulation']
+    );
+  }
+});
