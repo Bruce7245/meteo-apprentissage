@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import admin from 'firebase-admin';
+import { getApps, initializeApp } from 'firebase-admin/app';
+import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import AdmZip from 'adm-zip';
 import romeOpenData from '../functions/lib/rome-open-data.cjs';
 
@@ -34,11 +35,11 @@ const SOURCES = [
 const MINIMUM_ENTRIES = 1000;
 const DRY_RUN = process.env.DRY_RUN === '1';
 
-if (!DRY_RUN && !admin.apps.length) {
-  admin.initializeApp();
+if (!DRY_RUN && getApps().length === 0) {
+  initializeApp();
 }
 
-const db = DRY_RUN ? null : admin.firestore();
+const db = DRY_RUN ? null : getFirestore();
 
 function cleanText(value) {
   if (value === null || value === undefined) return '';
@@ -231,7 +232,7 @@ async function commitEntryBatches(runId, sourceResult) {
       ...entry,
       importRunId: runId,
       sourceUrl: sourceResult.url,
-      importedAt: admin.firestore.FieldValue.serverTimestamp(),
+      importedAt: FieldValue.serverTimestamp(),
       schemaVersion: 'occupationReference.v1',
     });
 
@@ -276,7 +277,7 @@ async function publishSource(sourceResult) {
     sourceUrl: sourceResult.url,
     sourceVersion: sourceResult.sourceVersion,
     expectedEntries: sourceResult.entries.length,
-    startedAt: admin.firestore.FieldValue.serverTimestamp(),
+    startedAt: FieldValue.serverTimestamp(),
     schemaVersion: 'occupationReferenceRun.v1',
   }, { merge: true });
 
@@ -286,7 +287,7 @@ async function publishSource(sourceResult) {
     await runRef.set({
       status: 'ready',
       writtenEntries: sourceResult.entries.length,
-      completedAt: admin.firestore.FieldValue.serverTimestamp(),
+      completedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
 
     await db.collection('occupationReferenceMeta').doc('current').set({
@@ -296,7 +297,7 @@ async function publishSource(sourceResult) {
       sourceUrl: sourceResult.url,
       sourceVersion: sourceResult.sourceVersion,
       entriesCount: sourceResult.entries.length,
-      importedAt: admin.firestore.FieldValue.serverTimestamp(),
+      importedAt: FieldValue.serverTimestamp(),
       schemaVersion: 'occupationReferenceMeta.v1',
     });
 
@@ -312,7 +313,7 @@ async function publishSource(sourceResult) {
     await runRef.set({
       status: 'failed',
       error: String(error?.message || error).slice(0, 1000),
-      failedAt: admin.firestore.FieldValue.serverTimestamp(),
+      failedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
 
     throw error;
