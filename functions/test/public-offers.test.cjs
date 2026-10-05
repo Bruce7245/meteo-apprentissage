@@ -158,3 +158,82 @@ test('computePublicTrend returns a percentage only with two usable observations'
   assert.equal(publicOffers.computePublicTrend([100, 110, 120]), 0.2);
   assert.equal(publicOffers.computePublicTrend([200, 150]), -0.25);
 });
+
+
+test('buildPublicOffersPayload filters exact ROME before limit and recomputes occupation totals', () => {
+  const offers = [
+    {
+      title: 'Unrelated high-volume offer',
+      openingCount: 99,
+      locationQuality: 'in_department',
+      romeCodes: ['M1607'],
+    },
+    {
+      title: 'D1108 one',
+      openingCount: 1,
+      locationQuality: 'in_department',
+      romeCodes: ['D1108'],
+    },
+    {
+      title: 'D1108 two',
+      openingCount: 3,
+      locationQuality: 'in_department',
+      romeCodes: ['D1108', 'D1106'],
+    },
+    {
+      title: 'D1108 outside',
+      openingCount: 20,
+      locationQuality: 'out_of_department',
+      romeCodes: ['D1108'],
+    },
+  ];
+
+  const payload = publicOffers.buildPublicOffersPayload({
+    date: '2026-10-05',
+    departmentCode: '72',
+    strictSummary: {
+      totalOffers: 500,
+      totalOpenings: 900,
+    },
+    offers,
+    limit: 1,
+    romeCode: 'd1108',
+  });
+
+  assert.equal(payload.romeCode, 'D1108');
+  assert.equal(payload.totalOffers, 2);
+  assert.equal(payload.totalOpenings, 4);
+  assert.equal(payload.offers.length, 1);
+  assert.equal(payload.offers[0].title, 'D1108 two');
+});
+
+test('buildPublicOffersHistory reads ROME aggregates without substituting global history', () => {
+  const history = publicOffers.buildPublicOffersHistory([
+    {
+      date: '2026-10-03',
+      strictSummary: {
+        totalOffers: 100,
+        totalOpenings: 140,
+        byRome: [
+          { code: 'D1108', offers: 4, openings: 5 },
+          { code: 'M1607', offers: 10, openings: 12 },
+        ],
+      },
+    },
+    {
+      date: '2026-10-04',
+      strictSummary: {
+        totalOffers: 120,
+        totalOpenings: 160,
+        byRome: [
+          { code: 'D1108', offers: 6, openings: 8 },
+        ],
+      },
+    },
+  ], 'd1108');
+
+  assert.deepEqual(history, [
+    { date: '2026-10-03', totalOffers: 4, totalOpenings: 5 },
+    { date: '2026-10-04', totalOffers: 6, totalOpenings: 8 },
+  ]);
+});
