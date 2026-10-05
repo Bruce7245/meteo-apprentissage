@@ -220,3 +220,33 @@ test('calibration output stays compatible with the versioned config schema surfa
     );
   }
 });
+
+
+test('calibration derives the absolute green offer floor from observed positive volumes', () => {
+  const history = [];
+
+  for (const [romeCode, offers] of [
+    ['D1108', [2, 4, 6, 8, 10, 12]],
+    ['M1607', [1, 3, 5, 7, 9, 11]],
+  ]) {
+    offers.forEach((activeOffersCount, index) => {
+      history.push({
+        date: `2026-0${index + 1}-01`,
+        departmentCode: index % 2 === 0 ? '72' : '44',
+        romeCode,
+        activeOffersCount,
+        population15To29: 100000,
+      });
+    });
+  }
+
+  const result = calibration.buildCalibration(history, {
+    minimumSamplesPerRome: 6,
+    minimumTotalSamples: 12,
+  });
+
+  assert.equal(result.eligibleForValidation, true);
+  assert.equal(Number.isInteger(result.config.minimumGreenActiveOffers), true);
+  assert.equal(result.config.minimumGreenActiveOffers >= 1, true);
+  assert.equal(result.config.minimumGreenActiveOffers, 4);
+});
