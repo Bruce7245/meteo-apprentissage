@@ -359,12 +359,12 @@ function createFirestoreOccupationVigilanceRepository(db, FieldValue) {
         );
         batch.set(
           db.collection('publicOccupationVigilanceMaps').doc(runId).collection('entries').doc(item.key),
-          { ...item.mapEntry, runId, schemaVersion: 'publicOccupationVigilanceMapEntry.v1' },
+          { ...item.mapEntry, schemaVersion: 'publicOccupationVigilanceMapEntry.v1' },
           { merge: false }
         );
         batch.set(
           db.collection('publicOccupationVigilanceDetails').doc(runId).collection('entries').doc(item.key),
-          { ...item.detail, runId, schemaVersion: 'publicOccupationVigilanceDetail.v1' },
+          { ...item.detail, schemaVersion: 'publicOccupationVigilanceDetail.v1' },
           { merge: false }
         );
       }
