@@ -1,10 +1,11 @@
 const admin = require('firebase-admin');
 const {
   aggregateOccupationContext,
-  extractOfferDetailsFromSnapshot,
+  summarizeStrictOffersByRome,
 } = require('./lib/occupation-context.cjs');
 const { extractDailyRomeObservations } = require('./lib/occupation-history.cjs');
 const { normalizeRomeCode } = require('./lib/occupation-search.cjs');
+const { dailyDepartmentSnapshotPath } = require('./lib/occupation-source-layout.cjs');
 
 if (!admin.apps.length) {
   admin.initializeApp({ projectId: process.env.GCLOUD_PROJECT || 'meteo-apprentissage' });
@@ -47,54 +48,46 @@ async function loadFormations() {
   return snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
 }
 
-async function loadOfferAggregateDocuments() {
-  const snapshots = [];
+async function loadDailyOfferSnapshot() {
+  const ref = db.doc(dailyDepartmentSnapshotPath(asOfDate, departmentCode));
+  const snapshot = await ref.get();
+  return { ref, exists: snapshot.exists, data: snapshot.exists ? snapshot.data() || {} : null };
+}
 
-  for (const collectionName of ['lbaOfferStatsDaily', 'dailyOfferSnapshots']) {
-    const snapshot = await db
-      .collection(collectionName)
-      .where('departmentCode', '==', departmentCode)
-      .where('date', '==', asOfDate)
-      .get();
+async function loadRawOffers(departmentRef) {
+  const offers = [];
+  let lastDoc = null;
+
+  while (true) {
+    let query = departmentRef
+      .collection('offers')
+      .orderBy(admin.firestore.FieldPath.documentId())
+      .limit(1000);
+    if (lastDoc) query = query.startAfter(lastDoc);
+
+    const snapshot = await query.get();
+    if (snapshot.empty) break;
+
     for (const doc of snapshot.docs) {
-      snapshots.push({ collectionName, id: doc.id, data: doc.data() || {} });
+      offers.push({ id: doc.id, ...(doc.data() || {}) });
     }
+
+    lastDoc = snapshot.docs[snapshot.docs.length - 1];
+    if (snapshot.size < 1000) break;
   }
 
-  return snapshots;
+  return offers;
 }
 
-function buildOfferSummaryByRome(documents) {
-  const byRome = new Map();
-  for (const document of documents) {
-    for (const observation of extractDailyRomeObservations(document.data)) {
-      if (observation.date !== asOfDate) continue;
-      const previous = byRome.get(observation.romeCode);
-      if (previous && previous.activeOffersCount !== observation.activeOffersCount) {
-        throw new Error(
-          `Conflicting offer totals for ${departmentCode}/${observation.romeCode}/${asOfDate}`
-        );
-      }
-      byRome.set(observation.romeCode, {
-        activeOffersCount: observation.activeOffersCount,
-        openingsCount: observation.openingsCount ?? previous?.openingsCount ?? null,
-      });
-    }
+function fallbackSummaryByRome(snapshotData) {
+  const map = new Map();
+  for (const item of extractDailyRomeObservations(snapshotData || {})) {
+    map.set(item.romeCode, {
+      activeOffersCount: item.activeOffersCount,
+      openingsCount: item.openingsCount ?? null,
+    });
   }
-  return byRome;
-}
-
-function collectRawOffers(documents) {
-  const byId = new Map();
-  for (const document of documents) {
-    for (const [index, offer] of extractOfferDetailsFromSnapshot(document.data).entries()) {
-      const id = String(
-        offer?.offerId || offer?.id || offer?.partnerJobId || `${document.id}:${index}`
-      );
-      if (!byId.has(id)) byId.set(id, offer);
-    }
-  }
-  return [...byId.values()];
+  return map;
 }
 
 function collectRomeCodes(formations, offerSummaryByRome, rawOffers) {
@@ -134,14 +127,17 @@ async function commitDocuments(documents) {
 }
 
 async function main() {
-  const [population, formations, offerDocuments] = await Promise.all([
+  const [population, formations, dailySnapshot] = await Promise.all([
     loadPopulation(),
     loadFormations(),
-    loadOfferAggregateDocuments(),
+    loadDailyOfferSnapshot(),
   ]);
 
-  const offerSummaryByRome = buildOfferSummaryByRome(offerDocuments);
-  const rawOffers = collectRawOffers(offerDocuments);
+  const rawOffers = dailySnapshot.exists ? await loadRawOffers(dailySnapshot.ref) : [];
+  const exactSummary = summarizeStrictOffersByRome(rawOffers);
+  const offerSummaryByRome = exactSummary.size > 0
+    ? exactSummary
+    : fallbackSummaryByRome(dailySnapshot.data);
   const romeCodes = collectRomeCodes(formations, offerSummaryByRome, rawOffers);
   const computedAt = admin.firestore.FieldValue.serverTimestamp();
 
@@ -150,14 +146,15 @@ async function main() {
       departmentCode,
       romeCode,
       asOfDate,
-      offerSummary: offerSummaryByRome.get(romeCode) || null,
+      offerSummary: dailySnapshot.exists
+        ? (offerSummaryByRome.get(romeCode) || { activeOffersCount: 0, openingsCount: 0 })
+        : null,
       offers: rawOffers,
       formations,
       population,
     }),
     sourceCollections: [
-      'lbaOfferStatsDaily',
-      'dailyOfferSnapshots',
+      'dailyOfferSnapshots/{date}/departments/{department}/offers',
       'formationDetails',
       'departmentPopulationReference',
     ],
@@ -173,7 +170,7 @@ async function main() {
     asOfDate,
     romeCodesCount: output.length,
     formationsRead: formations.length,
-    offerAggregateDocumentsRead: offerDocuments.length,
+    dailyOfferSnapshotAvailable: dailySnapshot.exists,
     rawOfferDetailsRead: rawOffers.length,
     populationAvailable: Boolean(population),
   }, null, 2));
