@@ -14,7 +14,9 @@ function validateOccupationRun(run, stagedCounts) {
     return { ok: false, errors: ['run is required'] };
   }
 
-  if (run.status !== 'validating') errors.push('run.status must be validating');
+  if (!['validating', 'ready'].includes(run.status)) {
+    errors.push('run.status must be validating or ready');
+  }
 
   const expectedPairs = finiteInteger(run.expectedPairs);
   const computedPairs = finiteInteger(run.computedPairs);
@@ -75,7 +77,9 @@ async function publishOccupationRun(repository, runId) {
     };
   }
 
-  await repository.setRunReady(runId, { stagedCounts });
+  if (run.status === 'validating') {
+    await repository.setRunReady(runId, { stagedCounts });
+  }
   await repository.publishAtomic(runId, run);
 
   return {
