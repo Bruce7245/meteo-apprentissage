@@ -1,6 +1,7 @@
 import React from 'react';
 import PublicMapPage from './pages/public/PublicMapPage.jsx';
 import PublicDepartmentPage from './pages/public/PublicDepartmentPage.jsx';
+import PublicOccupationMapPage from './pages/public/PublicOccupationMapPage.jsx';
 import AdminHomePage from './pages/admin/AdminHomePage.jsx';
 import AdminBulletinsPage from './pages/admin/AdminBulletinsPage.jsx';
 import AdminPublishedMapPage from './pages/admin/AdminPublishedMapPage.jsx';
@@ -34,6 +35,7 @@ function App() {
   const path = normalizePath(window.location.pathname);
 
   if (path === '/') return <PublicMapPage />;
+  if (path === '/metiers') return <PublicOccupationMapPage />;
 
   const departmentMatch = path.match(/^\/departement\/([^/]+)$/);
 
