@@ -15,6 +15,7 @@ function validConfig(overrides = {}) {
     calculationVersion: 'occupationVigilance.v1',
     referencePopulation15To29: 100000,
     expectedOffersFloor: 0.5,
+    minimumGreenActiveOffers: 3,
     baselines: {
       D1108: {
         expectedOffersAtReferencePopulation: 20,
