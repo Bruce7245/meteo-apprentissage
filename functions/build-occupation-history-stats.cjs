@@ -5,6 +5,7 @@ const {
   computeRecentOfferTrend,
 } = require('./lib/occupation-history.cjs');
 const { normalizeRomeCode } = require('./lib/occupation-search.cjs');
+const { dailyOccupationContextCollection } = require('./lib/occupation-source-layout.cjs');
 
 if (!admin.apps.length) {
   admin.initializeApp({ projectId: process.env.GCLOUD_PROJECT || 'meteo-apprentissage' });
@@ -47,7 +48,7 @@ async function loadMonthly() {
 
 async function loadDaily() {
   const snapshot = await db
-    .collection('dailyOfferSnapshots')
+    .collection(dailyOccupationContextCollection())
     .where('departmentCode', '==', departmentCode)
     .get();
   return snapshot.docs.map((doc) => doc.data() || {});
@@ -108,7 +109,7 @@ async function main() {
       recentTrend,
       sourceCollections: [
         'lbaOfferStatsByMonthDepartmentRome',
-        'dailyOfferSnapshots',
+        'occupationContextStats',
       ],
       computedAt,
       schemaVersion: 'occupationHistoryStats.v1',
@@ -122,7 +123,7 @@ async function main() {
     ok: true,
     departmentCode,
     monthlyDocumentsRead: monthlyDocs.length,
-    dailyDocumentsRead: dailyDocs.length,
+    dailyContextDocumentsRead: dailyDocs.length,
     occupationHistoryDocumentsWritten: output.length,
   }, null, 2));
 }
