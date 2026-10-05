@@ -25,6 +25,12 @@ const {
   buildPublicOccupationLookup,
   createPublicRateLimiter,
 } = require('./lib/public-occupation-search.cjs');
+const {
+  normalizePublicRomeCode,
+  resolvePublishedOccupationRun,
+  sanitizePublicOccupationMap,
+  sanitizePublicOccupationDepartment,
+} = require('./lib/public-occupation-vigilance.cjs');
 
 admin.initializeApp();
 
@@ -7663,6 +7669,211 @@ exports.getPublicOccupationSearchHttp = onRequest(
       response.status(500).json({
         ok: false,
         error: 'Unable to search occupations and training',
+      });
+    }
+  }
+);
+
+
+
+async function loadCurrentPublishedOccupationRun() {
+  const pointerSnapshot = await db
+    .collection('publicOccupationVigilanceIndex')
+    .doc('current')
+    .get();
+
+  if (!pointerSnapshot.exists) {
+    return {
+      ok: false,
+      error: 'NO_PUBLISHED_OCCUPATION_RUN',
+    };
+  }
+
+  const pointer = pointerSnapshot.data() || {};
+  const runId = String(pointer.runId || '').trim();
+
+  if (!runId) {
+    return {
+      ok: false,
+      error: 'NO_PUBLISHED_OCCUPATION_RUN',
+    };
+  }
+
+  const runSnapshot = await db
+    .collection('occupationVigilanceRuns')
+    .doc(runId)
+    .get();
+
+  const run = runSnapshot.exists
+    ? { runId: runSnapshot.id, ...runSnapshot.data() }
+    : null;
+
+  return resolvePublishedOccupationRun(pointer, run);
+}
+
+exports.getPublicOccupationMapHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    try {
+      const romeCode = normalizePublicRomeCode(request.query.rome);
+
+      if (!romeCode) {
+        response.status(400).json({
+          ok: false,
+          error: 'INVALID_ROME',
+        });
+        return;
+      }
+
+      const published = await loadCurrentPublishedOccupationRun();
+
+      if (!published.ok) {
+        response.status(503).json({
+          ok: false,
+          exists: false,
+          error: published.error,
+        });
+        return;
+      }
+
+      const entriesSnapshot = await db
+        .collection('publicOccupationVigilanceMaps')
+        .doc(published.runId)
+        .collection('entries')
+        .where('romeCode', '==', romeCode)
+        .get();
+
+      if (entriesSnapshot.empty) {
+        response.status(404).json({
+          ok: false,
+          exists: false,
+          romeCode,
+          data: null,
+        });
+        return;
+      }
+
+      const entries = entriesSnapshot.docs.map((document) => document.data() || {});
+      const first = entries[0] || {};
+      const data = sanitizePublicOccupationMap({
+        date: published.date || first.date || null,
+        romeCode,
+        romeLabel: first.romeLabel || romeCode,
+        departments: entries,
+      });
+
+      response.set('Cache-Control', 'public, max-age=300, s-maxage=600');
+      response.json({
+        ok: true,
+        exists: true,
+        romeCode,
+        data,
+      });
+    } catch (error) {
+      console.error('getPublicOccupationMapHttp error', {
+        message: String(error?.message || error).slice(0, 500),
+      });
+
+      response.status(500).json({
+        ok: false,
+        error: 'PUBLIC_OCCUPATION_MAP_UNAVAILABLE',
+      });
+    }
+  }
+);
+
+exports.getPublicOccupationDepartmentHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    try {
+      const romeCode = normalizePublicRomeCode(request.query.rome);
+      const departmentCode = normalizePublicFormationDepartmentCode(
+        request.query.department
+      );
+
+      if (!romeCode) {
+        response.status(400).json({
+          ok: false,
+          error: 'INVALID_ROME',
+        });
+        return;
+      }
+
+      if (!isValidPublicFormationDepartmentCode(departmentCode)) {
+        response.status(400).json({
+          ok: false,
+          error: 'INVALID_DEPARTMENT',
+        });
+        return;
+      }
+
+      const published = await loadCurrentPublishedOccupationRun();
+
+      if (!published.ok) {
+        response.status(503).json({
+          ok: false,
+          exists: false,
+          error: published.error,
+        });
+        return;
+      }
+
+      const entrySnapshot = await db
+        .collection('publicOccupationVigilanceDetails')
+        .doc(published.runId)
+        .collection('entries')
+        .doc(`${departmentCode}_${romeCode}`)
+        .get();
+
+      if (!entrySnapshot.exists) {
+        response.status(404).json({
+          ok: false,
+          exists: false,
+          departmentCode,
+          romeCode,
+          data: null,
+        });
+        return;
+      }
+
+      const data = sanitizePublicOccupationDepartment(
+        entrySnapshot.data() || {}
+      );
+
+      if (!data) {
+        response.status(500).json({
+          ok: false,
+          error: 'INVALID_PUBLIC_OCCUPATION_DETAIL',
+        });
+        return;
+      }
+
+      response.set('Cache-Control', 'public, max-age=300, s-maxage=600');
+      response.json({
+        ok: true,
+        exists: true,
+        departmentCode,
+        romeCode,
+        data,
+      });
+    } catch (error) {
+      console.error('getPublicOccupationDepartmentHttp error', {
+        message: String(error?.message || error).slice(0, 500),
+      });
+
+      response.status(500).json({
+        ok: false,
+        error: 'PUBLIC_OCCUPATION_DEPARTMENT_UNAVAILABLE',
       });
     }
   }
