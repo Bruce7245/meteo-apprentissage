@@ -168,3 +168,16 @@ test('extractDailyRomeObservations accepts a document already aggregated to one 
     [{ date: '2026-10-05', romeCode: 'D1401', activeOffersCount: 6, openingsCount: 9 }]
   );
 });
+
+
+test('extractDailyRomeObservations prefers strict in-department summary over the broader summary', () => {
+  const result = history.extractDailyRomeObservations({
+    date: '2026-10-05',
+    summary: { byRome: [{ code: 'D1401', offers: 9, openings: 12 }] },
+    strictSummary: { byRome: [{ code: 'D1401', offers: 4, openings: 5 }] },
+  });
+
+  assert.deepEqual(result, [
+    { date: '2026-10-05', romeCode: 'D1401', activeOffersCount: 4, openingsCount: 5 },
+  ]);
+});
