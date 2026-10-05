@@ -1,0 +1,38 @@
+name: Occupation vigilance run
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Date métier à calculer (YYYY-MM-DD)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    name: Run occupation vigilance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Validate date input
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${{ inputs.date }}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "Invalid date: ${{ inputs.date }}" >&2
+            exit 1
+          fi
+
+      - name: Run occupation vigilance pipeline
+        shell: bash
+        env:
+          BACKFILL_ADMIN_KEY: ${{ secrets.BACKFILL_ADMIN_KEY }}
+          TARGET_DATE: ${{ inputs.date }}
+        run: |
+          set -euo pipefail
+          test -n "$BACKFILL_ADMIN_KEY"
+          curl --fail-with-body --silent --show-error             --retry 2             --max-time 600             -H "x-admin-key: $BACKFILL_ADMIN_KEY"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/runOccupationVigilanceHttp?date=$TARGET_DATE"
