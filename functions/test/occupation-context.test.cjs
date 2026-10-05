@@ -178,3 +178,31 @@ test('aggregateOccupationContext does not fabricate zero openings when aggregate
   assert.equal(result.activeOffersCount, 12);
   assert.equal(result.openingsCount, null);
 });
+
+
+test('aggregateOccupationContext excludes offers explicitly located outside the requested department', () => {
+  const result = context.aggregateOccupationContext({
+    ...inputBase,
+    offers: [
+      { offerId: 'inside', romeCodes: ['D1401'], openingCount: 1, siret: '111', nafCode: '47.11A', locationQuality: 'in_department' },
+      { offerId: 'outside', romeCodes: ['D1401'], openingCount: 5, siret: '222', nafCode: '69.10Z', locationQuality: 'out_of_department' },
+    ],
+    formations: [],
+  });
+
+  assert.equal(result.activeOffersCount, 1);
+  assert.equal(result.openingsCount, 1);
+  assert.equal(result.distinctObservedEmployersCount, 1);
+  assert.equal(result.distinctObservedNafCount, 1);
+});
+
+test('summarizeStrictOffersByRome builds exact in-department offer and opening totals', () => {
+  assert.equal(typeof context.summarizeStrictOffersByRome, 'function');
+  const result = context.summarizeStrictOffersByRome([
+    { offerId: 'a', romeCodes: ['D1401'], openingCount: 2, locationQuality: 'in_department' },
+    { offerId: 'b', romeCodes: ['D1401', 'M1607'], openingCount: 1, locationQuality: 'in_department' },
+    { offerId: 'c', romeCodes: ['D1401'], openingCount: 9, locationQuality: 'out_of_department' },
+  ]);
+  assert.deepEqual(result.get('D1401'), { activeOffersCount: 2, openingsCount: 3 });
+  assert.deepEqual(result.get('M1607'), { activeOffersCount: 1, openingsCount: 1 });
+});
