@@ -1,3 +1,5 @@
+const { buildSourceFingerprint } = require('./lib/occupation-vigilance-run.cjs');
+
 function text(value) {
   if (value === null || value === undefined) return '';
   return String(value).trim();
@@ -67,7 +69,21 @@ async function prepareOccupationVigilanceInputs({
   if (!repository) throw new Error('repository is required');
 
   const status = await repository.getPreparationStatus(targetDate);
-  if (status?.contextReady && status?.historyReady) {
+  const currentOfferSourceFingerprint =
+    typeof repository.loadOfferSourceFingerprint === 'function'
+      ? await repository.loadOfferSourceFingerprint(targetDate)
+      : null;
+  const offerSourceMatches =
+    !!currentOfferSourceFingerprint &&
+    currentOfferSourceFingerprint === status?.offerSourceFingerprint;
+  const rebuildContext = !status?.contextReady || !offerSourceMatches;
+  const rebuildHistory = !status?.historyReady || rebuildContext;
+
+  if (
+    status?.contextReady &&
+    status?.historyReady &&
+    offerSourceMatches
+  ) {
     return {
       date: targetDate,
       status: 'ready',
@@ -85,7 +101,7 @@ async function prepareOccupationVigilanceInputs({
 
   let contexts;
 
-  if (!status?.contextReady) {
+  if (rebuildContext) {
     const [
       populationByDepartment,
       formationsByDepartment,
@@ -158,6 +174,7 @@ async function prepareOccupationVigilanceInputs({
       occupationContexts: contexts.length,
       populationDepartmentsAvailable:
         populationByDepartment.size ?? 0,
+      offerSourceFingerprint: currentOfferSourceFingerprint,
     });
   } else {
     contexts = await repository.loadCurrentContexts(targetDate);
@@ -167,7 +184,7 @@ async function prepareOccupationVigilanceInputs({
     throw new Error(`No occupationContextStats for ${targetDate}`);
   }
 
-  if (!status?.historyReady) {
+  if (rebuildHistory) {
     const keys = new Set(
       contexts.map((item) =>
         keyFor(item.departmentCode, item.romeCode)
@@ -336,7 +353,38 @@ function createFirestoreOccupationPrecomputeRepository(
         historiesCount: history.exists
           ? Number(history.data()?.contextsCount || 0)
           : 0,
+        offerSourceFingerprint: context.exists
+          ? context.data()?.offerSourceFingerprint || null
+          : null,
       };
+    },
+
+    async loadOfferSourceFingerprint(date) {
+      const snapshot = await db
+        .collection('dailyOfferSnapshots')
+        .doc(date)
+        .collection('departments')
+        .get();
+
+      if (snapshot.empty) return null;
+
+      const sources = snapshot.docs
+        .map((doc) => ({
+          departmentCode: normalizeDepartmentCode(doc.id),
+          activeRunId: text((doc.data() || {}).activeRunId),
+        }))
+        .filter((item) => item.departmentCode && item.activeRunId)
+        .sort((a, b) =>
+          a.departmentCode.localeCompare(
+            b.departmentCode,
+            'fr',
+            { numeric: true }
+          )
+        );
+
+      if (sources.length === 0) return null;
+
+      return buildSourceFingerprint(sources);
     },
 
     async loadPopulationByDepartment() {
