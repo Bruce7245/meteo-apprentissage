@@ -1,0 +1,103 @@
+name: Occupation vigilance preflight
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/occupation-vigilance-preflight.yml
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Check occupation vigilance prerequisites
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Check Firestore prerequisites
+        env:
+          TARGET_DATE: "2026-10-05"
+        run: |
+          node <<'NODE'
+          const { initializeApp, getApps } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
+
+          if (getApps().length === 0) initializeApp({ projectId: 'meteo-apprentissage' });
+          const db = getFirestore();
+          const date = process.env.TARGET_DATE;
+
+          async function exists(path, doc) {
+            const snap = await db.collection(path).doc(doc).get();
+            return snap.exists ? snap.data() : null;
+          }
+
+          (async () => {
+            const [
+              romeMeta,
+              searchMeta,
+              populationMeta,
+              contextRun,
+              historyRun,
+              validatedConfigs,
+              offerDepartments,
+            ] = await Promise.all([
+              exists('occupationReferenceMeta', 'current'),
+              exists('publicOccupationSearchIndexMeta', 'current'),
+              exists('departmentPopulationReferenceMeta', 'current'),
+              exists('occupationContextStatsRuns', date),
+              exists('occupationHistoryStatsRuns', date),
+              db.collection('occupationVigilanceConfigs').where('status', '==', 'validated').get(),
+              db.collection('dailyOfferSnapshots').doc(date).collection('departments').get(),
+            ]);
+
+            const summary = {
+              date,
+              occupationReference: !!romeMeta,
+              publicSearchIndex: !!searchMeta,
+              populationReference: !!populationMeta,
+              validatedCalibrationCount: validatedConfigs.size,
+              dailyOfferDepartments: offerDepartments.size,
+              contextRun: contextRun?.status || null,
+              historyRun: historyRun?.status || null,
+            };
+
+            console.log(JSON.stringify(summary, null, 2));
+
+            const blockers = [];
+            if (!romeMeta) blockers.push('occupationReferenceMeta/current missing');
+            if (!searchMeta) blockers.push('publicOccupationSearchIndexMeta/current missing');
+            if (!populationMeta) blockers.push('departmentPopulationReferenceMeta/current missing');
+            if (validatedConfigs.size === 0) blockers.push('no validated occupation vigilance config');
+            if (offerDepartments.empty) blockers.push('no daily offer snapshots for target date');
+
+            if (blockers.length) {
+              console.error('BLOCKERS: ' + blockers.join(' | '));
+              process.exitCode = 2;
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
