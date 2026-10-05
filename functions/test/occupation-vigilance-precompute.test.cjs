@@ -29,6 +29,7 @@ function fakeRepository(overrides = {}) {
     loadFormationsByDepartment: async () => new Map([
       ['72', [{ formationId: 'f1', rncp: 'RNCP1', romeCodes: ['D1108'], sessions: [] }]],
     ]),
+    loadRomeUniverse: async () => [],
     loadOfferDepartments: async () => [{
       departmentCode: '72',
       activeRunId: 'offers-72-v1',
@@ -146,4 +147,41 @@ test('prepareOccupationVigilanceInputs reuses a fully ready preparation without 
   assert.equal(result.reused, true);
   assert.equal(result.status, 'ready');
   assert.equal(loads, 0);
+});
+
+
+test('validated ROME universe creates zero-offer department contexts instead of omitting them', async () => {
+  const repository = fakeRepository({
+    loadRomeUniverse: async () => ['D1108', 'M1607', 'G1602'],
+  });
+
+  const result = await precompute.prepareOccupationVigilanceInputs({
+    date: '2026-10-05',
+    repository,
+    aggregateContext: ({ departmentCode, romeCode, offers }) => ({
+      departmentCode,
+      romeCode,
+      activeOffersCount: offers.filter((offer) =>
+        (offer.romeCodes || []).includes(romeCode)
+      ).length,
+    }),
+    computeRecentTrend: () => ({
+      status: 'unknown',
+      changeRatio: null,
+      observations: 0,
+    }),
+    computeSeasonality: () => ({
+      status: 'unavailable',
+      factor: 1,
+      sampleMonths: 0,
+      completeness: 0,
+    }),
+  });
+
+  assert.equal(result.contextsCount, 3);
+  const rows = repository.contextWrites[0].rows;
+  const missingLocalSignal = rows.find((row) => row.romeCode === 'G1602');
+
+  assert.ok(missingLocalSignal);
+  assert.equal(missingLocalSignal.activeOffersCount, 0);
 });
