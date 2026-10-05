@@ -3,9 +3,29 @@ export function normalizeRomeCode(value) {
   return /^[A-Z][0-9]{4}$/.test(code) ? code : '';
 }
 
-export function getRomeFromSearchParams(search = '') {
+export function getRomeSearchState(search = '') {
   const params = new URLSearchParams(String(search || ''));
-  return normalizeRomeCode(params.get('rome'));
+  const rawRome = params.get('rome');
+
+  if (rawRome === null) {
+    return {
+      present: false,
+      valid: true,
+      romeCode: '',
+    };
+  }
+
+  const romeCode = normalizeRomeCode(rawRome);
+
+  return {
+    present: true,
+    valid: Boolean(romeCode),
+    romeCode,
+  };
+}
+
+export function getRomeFromSearchParams(search = '') {
+  return getRomeSearchState(search).romeCode;
 }
 
 export function buildOccupationDepartmentUrl(departmentCode, romeCode) {
@@ -14,13 +34,13 @@ export function buildOccupationDepartmentUrl(departmentCode, romeCode) {
   const rome = normalizeRomeCode(romeCode);
 
   return rome
-    ? `/departement/${encodedDepartment}?rome=${encodeURIComponent(rome)}`
-    : `/departement/${encodedDepartment}`;
+    ? '/departement/' + encodedDepartment + '?rome=' + encodeURIComponent(rome)
+    : '/departement/' + encodedDepartment;
 }
 
 export function buildOccupationMapUrl(romeCode) {
   const rome = normalizeRomeCode(romeCode);
   return rome
-    ? `/metiers?rome=${encodeURIComponent(rome)}`
+    ? '/metiers?rome=' + encodeURIComponent(rome)
     : '/metiers';
 }
