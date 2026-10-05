@@ -10,6 +10,7 @@
     "calculationVersion",
     "referencePopulation15To29",
     "expectedOffersFloor",
+    "minimumGreenActiveOffers",
     "baselines",
     "factorBounds",
     "coefficients",
@@ -259,6 +260,10 @@
           }
         }
       }
+    },
+    "minimumGreenActiveOffers": {
+      "type": "integer",
+      "minimum": 1
     }
   },
   "$defs": {
