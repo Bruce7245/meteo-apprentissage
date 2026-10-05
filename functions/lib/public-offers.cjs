@@ -7,6 +7,21 @@ function safeArray(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
+function normalizePublicRomeCode(value) {
+  const code = cleanText(value)?.toUpperCase() || '';
+  return /^[A-Z][0-9]{4}$/.test(code) ? code : null;
+}
+
+function offerHasRomeCode(offer, romeCode) {
+  const target = normalizePublicRomeCode(romeCode);
+  if (!target) return false;
+
+  return safeArray(offer?.romeCodes)
+    .map(normalizePublicRomeCode)
+    .filter(Boolean)
+    .includes(target);
+}
+
 function toNonNegativeNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : 0;
@@ -53,11 +68,21 @@ function buildPublicOffersPayload({
   strictSummary = {},
   offers = [],
   limit = 20,
+  romeCode = null,
 } = {}) {
   const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 20, 1), 20);
 
+  const normalizedRomeCode = romeCode
+    ? normalizePublicRomeCode(romeCode)
+    : null;
+
   const strictOffers = safeArray(offers)
     .filter((offer) => offer?.locationQuality === 'in_department')
+    .filter((offer) =>
+      normalizedRomeCode
+        ? offerHasRomeCode(offer, normalizedRomeCode)
+        : true
+    )
     .sort((a, b) => {
       return (
         toNonNegativeNumber(b?.openingCount) - toNonNegativeNumber(a?.openingCount) ||
@@ -76,12 +101,17 @@ function buildPublicOffersPayload({
   return {
     date: cleanText(date),
     departmentCode: cleanText(departmentCode),
-    totalOffers: toNonNegativeNumber(
-      strictSummary.totalOffers ?? strictOffers.length
-    ),
-    totalOpenings: toNonNegativeNumber(
-      strictSummary.totalOpenings ?? computedOpenings
-    ),
+    ...(normalizedRomeCode ? { romeCode: normalizedRomeCode } : {}),
+    totalOffers: normalizedRomeCode
+      ? strictOffers.length
+      : toNonNegativeNumber(
+          strictSummary.totalOffers ?? strictOffers.length
+        ),
+    totalOpenings: normalizedRomeCode
+      ? computedOpenings
+      : toNonNegativeNumber(
+          strictSummary.totalOpenings ?? computedOpenings
+        ),
     offers: strictOffers.slice(0, safeLimit).map(sanitizePublicOffer),
   };
 }
@@ -112,7 +142,11 @@ function buildRecentDateCandidates(baseDate, lookbackDays = 14) {
 }
 
 
-function buildPublicOffersHistory(snapshots = []) {
+function buildPublicOffersHistory(snapshots = [], romeCode = null) {
+  const normalizedRomeCode = romeCode
+    ? normalizePublicRomeCode(romeCode)
+    : null;
+
   return safeArray(snapshots)
     .filter((snapshot) => {
       return (
@@ -121,11 +155,33 @@ function buildPublicOffersHistory(snapshots = []) {
         typeof snapshot.strictSummary === 'object'
       );
     })
-    .map((snapshot) => ({
-      date: cleanText(snapshot.date),
-      totalOffers: toNonNegativeNumber(snapshot.strictSummary.totalOffers),
-      totalOpenings: toNonNegativeNumber(snapshot.strictSummary.totalOpenings),
-    }))
+    .map((snapshot) => {
+      if (!normalizedRomeCode) {
+        return {
+          date: cleanText(snapshot.date),
+          totalOffers: toNonNegativeNumber(
+            snapshot.strictSummary.totalOffers
+          ),
+          totalOpenings: toNonNegativeNumber(
+            snapshot.strictSummary.totalOpenings
+          ),
+        };
+      }
+
+      const row = safeArray(snapshot.strictSummary.byRome).find(
+        (item) =>
+          normalizePublicRomeCode(item?.code) === normalizedRomeCode
+      );
+
+      if (!row) return null;
+
+      return {
+        date: cleanText(snapshot.date),
+        totalOffers: toNonNegativeNumber(row.offers),
+        totalOpenings: toNonNegativeNumber(row.openings),
+      };
+    })
+    .filter(Boolean)
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
 
@@ -143,6 +199,8 @@ function computePublicTrend(values = []) {
 }
 
 module.exports = {
+  normalizePublicRomeCode,
+  offerHasRomeCode,
   sanitizePublicOffer,
   buildPublicOffersPayload,
   buildRecentDateCandidates,
