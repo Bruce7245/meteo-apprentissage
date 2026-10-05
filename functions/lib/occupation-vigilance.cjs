@@ -12,6 +12,7 @@ const REASON_CODES = Object.freeze([
   'OFFERS_LOW_VS_EXPECTED',
   'OFFERS_NEAR_EXPECTED',
   'OFFERS_AT_OR_ABOVE_EXPECTED',
+  'OFFERS_ABSOLUTE_VOLUME_LOW',
   'POPULATION_CONTEXT_MISSING',
   'SEASONALITY_UNAVAILABLE',
   'EMPLOYER_DIVERSITY_LOW',
@@ -86,6 +87,14 @@ function validateOccupationVigilanceConfig(config) {
 
   if (positiveNumber(config.expectedOffersFloor) === null) {
     errors.push('expectedOffersFloor must be positive');
+  }
+
+  const minimumGreenActiveOffers = positiveNumber(config.minimumGreenActiveOffers);
+  if (
+    minimumGreenActiveOffers === null ||
+    !Number.isInteger(minimumGreenActiveOffers)
+  ) {
+    errors.push('minimumGreenActiveOffers must be a positive integer');
   }
 
   const baselines = config.baselines;
@@ -375,10 +384,18 @@ function computeOccupationVigilance(input, config) {
   const observedVsExpectedRatio = round(
     activeOffersCount / expected.expectedOffers
   );
-  const publishedLevel = levelFromRatio(
+  let publishedLevel = levelFromRatio(
     observedVsExpectedRatio,
     config.thresholds
   );
+
+  const absoluteVolumeBlocksGreen =
+    publishedLevel === 'green' &&
+    activeOffersCount < Number(config.minimumGreenActiveOffers);
+
+  if (absoluteVolumeBlocksGreen) {
+    publishedLevel = 'yellow';
+  }
 
   const confidenceScore = Math.max(
     0,
@@ -386,8 +403,14 @@ function computeOccupationVigilance(input, config) {
   );
 
   const reasonCodes = [
-    offerReasonFromLevel(publishedLevel, activeOffersCount),
+    absoluteVolumeBlocksGreen
+      ? 'OFFERS_AT_OR_ABOVE_EXPECTED'
+      : offerReasonFromLevel(publishedLevel, activeOffersCount),
   ];
+
+  if (absoluteVolumeBlocksGreen) {
+    reasonCodes.push('OFFERS_ABSOLUTE_VOLUME_LOW');
+  }
 
   if (positiveNumber(input?.population15To29) === null) {
     reasonCodes.push('POPULATION_CONTEXT_MISSING');
