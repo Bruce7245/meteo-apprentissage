@@ -238,6 +238,66 @@ function findWorksheetHeader(row) {
   };
 }
 
+function findWorksheetTwoRowHeader(groupRow, ageRow) {
+  if (!Array.isArray(groupRow) || !Array.isArray(ageRow)) return null;
+
+  const codeIndex = groupRow.findIndex((cell) => {
+    const key = normalizeKey(cell);
+    return key === 'departement' || key === 'departements';
+  });
+  const ensembleIndex = groupRow.findIndex(
+    (cell) => normalizeKey(cell) === 'ensemble'
+  );
+
+  if (codeIndex < 0 || ensembleIndex < 0) return null;
+
+  let groupEnd = groupRow.length;
+  for (let index = ensembleIndex + 1; index < groupRow.length; index += 1) {
+    if (cleanText(groupRow[index])) {
+      groupEnd = index;
+      break;
+    }
+  }
+
+  let totalIndex = -1;
+  const ageIndexes = {};
+
+  for (let index = ensembleIndex; index < groupEnd; index += 1) {
+    const key = normalizeKey(ageRow[index]);
+
+    if (
+      totalIndex < 0 &&
+      (
+        key === 'total' ||
+        key === 'ensemble' ||
+        key === 'population totale'
+      )
+    ) {
+      totalIndex = index;
+    }
+
+    const age = headerAgeKind(ageRow[index]);
+    if (age && ageIndexes[age] === undefined) {
+      ageIndexes[age] = index;
+    }
+  }
+
+  if (
+    totalIndex < 0 ||
+    ageIndexes.Y15T19 === undefined ||
+    ageIndexes.Y20T24 === undefined ||
+    ageIndexes.Y25T29 === undefined
+  ) {
+    return null;
+  }
+
+  return {
+    codeIndex,
+    totalIndex,
+    ageIndexes,
+  };
+}
+
 function isBlankRow(row) {
   return !Array.isArray(row) || row.every((cell) => cleanText(cell) === '');
 }
@@ -248,10 +308,16 @@ function buildDepartmentPopulationFromWorksheetRows(worksheetRows, referenceYear
   const rows = Array.isArray(worksheetRows) ? worksheetRows : [];
 
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-    const header = findWorksheetHeader(rows[rowIndex]);
+    const twoRowHeader = findWorksheetTwoRowHeader(
+      rows[rowIndex],
+      rows[rowIndex + 1]
+    );
+    const header = twoRowHeader || findWorksheetHeader(rows[rowIndex]);
     if (!header) continue;
 
-    for (let dataIndex = rowIndex + 1; dataIndex < rows.length; dataIndex += 1) {
+    const dataStartIndex = rowIndex + (twoRowHeader ? 2 : 1);
+
+    for (let dataIndex = dataStartIndex; dataIndex < rows.length; dataIndex += 1) {
       const row = rows[dataIndex];
 
       if (isBlankRow(row)) break;
