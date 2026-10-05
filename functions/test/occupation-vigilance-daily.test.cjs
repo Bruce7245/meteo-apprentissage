@@ -185,3 +185,89 @@ test('same date config and source fingerprint reuses a completed run without rec
   assert.equal(repository.writes.length, 0);
   assert.equal(repository.created.length, 0);
 });
+
+
+test('Firestore staged public documents do not add private runId metadata', async () => {
+  assert.equal(typeof daily.createFirestoreOccupationVigilanceRepository, 'function');
+
+  const writes = [];
+
+  function document(path) {
+    return {
+      path,
+      collection(name) {
+        return collection(`${path}/${name}`);
+      },
+    };
+  }
+
+  function collection(path) {
+    return {
+      doc(id) {
+        return document(`${path}/${id}`);
+      },
+    };
+  }
+
+  const fakeDb = {
+    collection,
+    batch() {
+      return {
+        set(ref, data) {
+          writes.push({ path: ref.path, data });
+        },
+        async commit() {},
+      };
+    },
+  };
+
+  const repository = daily.createFirestoreOccupationVigilanceRepository(
+    fakeDb,
+    { serverTimestamp: () => 'timestamp' }
+  );
+
+  await repository.writeStagedResults('run-1', [{
+    key: '72_D1108',
+    snapshot: {
+      runId: 'run-1',
+      date: '2026-10-05',
+      departmentCode: '72',
+      romeCode: 'D1108',
+      publishedLevel: 'green',
+    },
+    mapEntry: {
+      date: '2026-10-05',
+      departmentCode: '72',
+      departmentName: 'Sarthe',
+      romeCode: 'D1108',
+      romeLabel: 'Vente en alimentation',
+      publishedLevel: 'green',
+      confidenceLevel: 'high',
+      activeOffersCount: 12,
+      dataAvailable: true,
+    },
+    detail: {
+      date: '2026-10-05',
+      departmentCode: '72',
+      departmentName: 'Sarthe',
+      romeCode: 'D1108',
+      romeLabel: 'Vente en alimentation',
+      publishedLevel: 'green',
+      confidenceLevel: 'high',
+      activeOffersCount: 12,
+      openingsCount: 14,
+      formationsCount: 2,
+      reasonCodes: [],
+      dataAvailable: true,
+    },
+  }]);
+
+  const publicWrites = writes.filter((item) =>
+    item.path.startsWith('publicOccupationVigilance')
+  );
+
+  assert.equal(publicWrites.length, 2);
+  for (const item of publicWrites) {
+    assert.equal('runId' in item.data, false, item.path);
+  }
+});
