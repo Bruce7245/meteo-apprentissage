@@ -247,7 +247,7 @@ function confidenceLevel(score, config) {
 function computeOccupationVigilance(input = {}, config = {}) {
   const validation = validateOccupationVigilanceConfig(config);
   if (!validation.ok) {
-    return insufficientResult(input, [REASON_CODES.CONFIG_INVALII], config);
+    return insufficientResult(input, [REASON_CODES.CONFIG_INVALID], config);
   }
   if (config.status !== 'validated') {
     return insufficientResult(input, [REASON_CODES.CONFIG_NOT_VALIDATED], config);
