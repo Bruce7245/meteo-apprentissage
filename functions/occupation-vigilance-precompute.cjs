@@ -90,10 +90,14 @@ async function prepareOccupationVigilanceInputs({
       populationByDepartment,
       formationsByDepartment,
       offerDepartments,
+      configuredRomeUniverse,
     ] = await Promise.all([
       repository.loadPopulationByDepartment(),
       repository.loadFormationsByDepartment(),
       repository.loadOfferDepartments(targetDate),
+      typeof repository.loadRomeUniverse === 'function'
+        ? repository.loadRomeUniverse()
+        : Promise.resolve([]),
     ]);
 
     if (!Array.isArray(offerDepartments) || offerDepartments.length === 0) {
@@ -117,7 +121,13 @@ async function prepareOccupationVigilanceInputs({
         mapGet(formationsByDepartment, departmentCode) || [];
       const population =
         mapGet(populationByDepartment, departmentCode) || null;
-      const romeCodes = collectRomeCodes(offers, formations);
+      const romeCodes =
+        Array.isArray(configuredRomeUniverse) &&
+        configuredRomeUniverse.length > 0
+          ? configuredRomeUniverse
+              .map(normalizeRomeCode)
+              .filter(Boolean)
+          : collectRomeCodes(offers, formations);
 
       for (const romeCode of romeCodes) {
         const aggregate = defaults.aggregateContext({
@@ -395,6 +405,34 @@ function createFirestoreOccupationPrecomputeRepository(
       }
 
       return output;
+    },
+
+    async loadRomeUniverse() {
+      const snapshot = await db
+        .collection('occupationVigilanceConfigs')
+        .where('status', '==', 'validated')
+        .get();
+
+      const configs = snapshot.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() }))
+        .sort((a, b) => {
+          const aTime =
+            typeof a.validatedAt?.toMillis === 'function'
+              ? a.validatedAt.toMillis()
+              : 0;
+          const bTime =
+            typeof b.validatedAt?.toMillis === 'function'
+              ? b.validatedAt.toMillis()
+              : 0;
+          return bTime - aTime;
+        });
+
+      const baselines = configs[0]?.baselines || {};
+
+      return Object.keys(baselines)
+        .map(normalizeRomeCode)
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b, 'fr'));
     },
 
     async loadOfferDepartments(date) {
