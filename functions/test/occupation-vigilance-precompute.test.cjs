@@ -22,7 +22,9 @@ function fakeRepository(overrides = {}) {
     getPreparationStatus: async () => ({
       contextReady: false,
       historyReady: false,
+      offerSourceFingerprint: null,
     }),
+    loadOfferSourceFingerprint: async () => 'sha256:offers-current',
     loadPopulationByDepartment: async () => new Map([
       ['72', { populationTotal: 570000, population15To29: 95000, referenceYear: 2026, runId: 'population-v1' }],
     ]),
@@ -132,6 +134,7 @@ test('prepareOccupationVigilanceInputs reuses a fully ready preparation without 
       historyReady: true,
       contextsCount: 14,
       historiesCount: 14,
+      offerSourceFingerprint: 'sha256:offers-current',
     }),
     loadOfferDepartments: async () => {
       loads += 1;
@@ -184,4 +187,59 @@ test('validated ROME universe creates zero-offer department contexts instead of 
 
   assert.ok(missingLocalSignal);
   assert.equal(missingLocalSignal.activeOffersCount, 0);
+});
+
+
+test('ready preparation is rebuilt when the same-date offer source fingerprint changed', async () => {
+  let offerLoads = 0;
+  const repository = fakeRepository({
+    getPreparationStatus: async () => ({
+      contextReady: true,
+      historyReady: true,
+      contextsCount: 2,
+      historiesCount: 2,
+      offerSourceFingerprint: 'sha256:offers-old',
+    }),
+    loadOfferSourceFingerprint: async () => 'sha256:offers-new',
+    loadOfferDepartments: async () => {
+      offerLoads += 1;
+      return [{
+        departmentCode: '72',
+        activeRunId: 'offers-72-v2',
+        offers: [
+          {
+            offerDocId: 'new-offer',
+            romeCodes: ['D1108'],
+            openingCount: 1,
+            locationQuality: 'in_department',
+          },
+        ],
+      }];
+    },
+  });
+
+  const result = await precompute.prepareOccupationVigilanceInputs({
+    date: '2026-10-05',
+    repository,
+    aggregateContext: ({ departmentCode, romeCode, offers }) => ({
+      departmentCode,
+      romeCode,
+      activeOffersCount: offers.length,
+    }),
+    computeRecentTrend: () => ({
+      status: 'unknown',
+      changeRatio: null,
+      observations: 0,
+    }),
+    computeSeasonality: () => ({
+      status: 'unavailable',
+      factor: 1,
+      sampleMonths: 0,
+      completeness: 0,
+    }),
+  });
+
+  assert.equal(result.reused, false);
+  assert.equal(offerLoads, 1);
+  assert.equal(repository.contextRuns.at(-1).meta.offerSourceFingerprint, 'sha256:offers-new');
 });
