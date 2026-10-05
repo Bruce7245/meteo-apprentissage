@@ -37,6 +37,7 @@ jobs:
           credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
 
       - name: Check Firestore prerequisites
+        working-directory: functions
         env:
           TARGET_DATE: "2026-10-05"
         run: |
