@@ -13902,6 +13902,7 @@ exports.getOfferBackfillJobStatusHttp = lbaDailyOffers.getOfferBackfillJobStatus
 
 // OCCUPATION_VIGILANCE_DAILY_V1
 const occupationVigilanceDaily = require('./occupation-vigilance-daily.cjs');
+const occupationVigilancePrecompute = require('./occupation-vigilance-precompute.cjs');
 
 function occupationVigilanceParisDateOffset(offsetDays) {
   const date = new Date();
@@ -13916,6 +13917,20 @@ function occupationVigilanceParisDateOffset(offsetDays) {
 }
 
 async function executeOccupationVigilanceDate(date) {
+  const preparationRepository =
+    occupationVigilancePrecompute.createFirestoreOccupationPrecomputeRepository(
+      db,
+      {
+        FieldValue: admin.firestore.FieldValue,
+        FieldPath: admin.firestore.FieldPath,
+      }
+    );
+
+  await occupationVigilancePrecompute.prepareOccupationVigilanceInputs({
+    date,
+    repository: preparationRepository,
+  });
+
   return occupationVigilanceDaily.executeOccupationVigilanceForDate({
     date,
     db,
