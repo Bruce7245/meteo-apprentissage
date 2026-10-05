@@ -95,6 +95,36 @@ function calculateConcentration(counts) {
   return values.reduce((sum, value) => sum + (value / total) ** 2, 0);
 }
 
+
+function summarizeStrictOffersByRome(offers) {
+  const byRome = new Map();
+  const seenOffers = new Set();
+
+  for (const [index, offer] of (Array.isArray(offers) ? offers : []).entries()) {
+    if (offer?.locationQuality !== 'in_department') continue;
+    const id = offerId(offer, index);
+    if (seenOffers.has(id)) continue;
+    seenOffers.add(id);
+
+    const openings = Math.max(
+      0,
+      safeNumber(offer?.openingCount ?? offer?.offer?.opening_count, 0)
+    );
+
+    for (const romeCode of offerRomeCodes(offer)) {
+      const current = byRome.get(romeCode) || {
+        activeOffersCount: 0,
+        openingsCount: 0,
+      };
+      current.activeOffersCount += 1;
+      current.openingsCount += openings;
+      byRome.set(romeCode, current);
+    }
+  }
+
+  return byRome;
+}
+
 function extractOfferDetailsFromSnapshot(data = {}) {
   for (const candidate of [data.offers, data.activeOffers, data.items]) {
     if (Array.isArray(candidate)) return candidate;
@@ -119,6 +149,7 @@ function aggregateOccupationContext({
 
   const uniqueOffers = new Map();
   for (const [index, offer] of (Array.isArray(offers) ? offers : []).entries()) {
+    if (offer?.locationQuality && offer.locationQuality !== 'in_department') continue;
     if (!offerRomeCodes(offer).has(rome)) continue;
     const key = offerId(offer, index);
     if (!uniqueOffers.has(key)) uniqueOffers.set(key, offer);
@@ -212,5 +243,6 @@ function aggregateOccupationContext({
 
 module.exports = {
   extractOfferDetailsFromSnapshot,
+  summarizeStrictOffersByRome,
   aggregateOccupationContext,
 };
