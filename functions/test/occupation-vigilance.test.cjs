@@ -15,6 +15,7 @@ function validConfig(overrides = {}) {
     calculationVersion: 'occupationVigilance.v1',
     referencePopulation15To29: 100000,
     expectedOffersFloor: 0.5,
+    minimumGreenActiveOffers: 3,
     baselines: {
       D1108: {
         expectedOffersAtReferencePopulation: 20,
@@ -275,4 +276,41 @@ test('degrading trend and concentrated employers add deterministic reason codes 
   for (const reason of result.reasonCodes) {
     assert.equal(vigilance.REASON_CODES.includes(reason), true, reason);
   }
+});
+
+
+test('a very low absolute offer volume cannot be green even when the ratio is favorable', () => {
+  const result = vigilance.computeOccupationVigilance(
+    baseInput({
+      activeOffersCount: 2,
+      population15To29: 100000,
+    }),
+    validConfig({
+      minimumGreenActiveOffers: 3,
+      baselines: {
+        D1108: {
+          expectedOffersAtReferencePopulation: 2,
+        },
+      },
+    })
+  );
+
+  assert.equal(result.observedVsExpectedRatio, 1);
+  assert.equal(result.publishedLevel, 'yellow');
+  assert.equal(result.reasonCodes.includes('OFFERS_ABSOLUTE_VOLUME_LOW'), true);
+});
+
+test('minimumGreenActiveOffers must be a positive whole offer count', () => {
+  assert.equal(
+    vigilance.validateOccupationVigilanceConfig(
+      validConfig({ minimumGreenActiveOffers: 2.5 })
+    ).ok,
+    false
+  );
+  assert.equal(
+    vigilance.validateOccupationVigilanceConfig(
+      validConfig({ minimumGreenActiveOffers: 0 })
+    ).ok,
+    false
+  );
 });
