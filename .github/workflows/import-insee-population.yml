@@ -1,0 +1,93 @@
+name: Import INSEE population
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/import-insee-population.yml
+      - scripts/import-insee-population.mjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: import-insee-population
+  cancel-in-progress: false
+
+jobs:
+  import:
+    name: Import INSEE population reference
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Validate importer syntax
+        run: node --check scripts/import-insee-population.mjs
+
+      - name: Run INSEE parser tests
+        run: node --test functions/test/insee-population.test.cjs
+
+      - name: Dry-run INSEE population import
+        env:
+          DRY_RUN: "1"
+          POPULATION_REFERENCE_YEAR: "2026"
+        run: node scripts/import-insee-population.mjs
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Import and publish INSEE population
+        env:
+          POPULATION_REFERENCE_YEAR: "2026"
+        run: node scripts/import-insee-population.mjs
+
+      - name: Verify published population metadata
+        run: |
+          node --input-type=module <<'NODE'
+          import { getApps, initializeApp } from 'firebase-admin/app';
+          import { getFirestore } from 'firebase-admin/firestore';
+
+          if (getApps().length === 0) initializeApp({ projectId: 'meteo-apprentissage' });
+          const db = getFirestore();
+          const snap = await db.collection('departmentPopulationReferenceMeta').doc('current').get();
+
+          if (!snap.exists) {
+            throw new Error('departmentPopulationReferenceMeta/current is missing after import');
+          }
+
+          const data = snap.data() || {};
+          const summary = {
+            runId: data.runId || null,
+            referenceYear: data.referenceYear || null,
+            departmentsCount: data.departmentsCount || null,
+            sourceDataset: data.sourceDataset || null,
+            sourceVersion: data.sourceVersion || null,
+          };
+
+          console.log(JSON.stringify(summary, null, 2));
+
+          if (Number(data.referenceYear) !== 2026) {
+            throw new Error('Published population reference year is not 2026');
+          }
+
+          if (Number(data.departmentsCount) !== 101) {
+            throw new Error('Published population departments count is not 101');
+          }
+          NODE
