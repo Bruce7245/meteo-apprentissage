@@ -13898,3 +13898,70 @@ exports.getPublicDepartmentOffersHttp = lbaDailyOffers.getPublicDepartmentOffers
 exports.startOfferBackfillJobHttp = lbaDailyOffers.startOfferBackfillJobHttp;
 exports.resumeOfferBackfillJob = lbaDailyOffers.resumeOfferBackfillJob;
 exports.getOfferBackfillJobStatusHttp = lbaDailyOffers.getOfferBackfillJobStatusHttp;
+
+
+// OCCUPATION_VIGILANCE_DAILY_V1
+const occupationVigilanceDaily = require('./occupation-vigilance-daily.cjs');
+
+function occupationVigilanceParisDateOffset(offsetDays) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + Number(offsetDays || 0));
+
+  return new Intl.DateTimeFormat('fr-CA', {
+    timeZone: 'Europe/Paris',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+async function executeOccupationVigilanceDate(date) {
+  return occupationVigilanceDaily.executeOccupationVigilanceForDate({
+    date,
+    db,
+    FieldValue: admin.firestore.FieldValue,
+  });
+}
+
+exports.buildDailyOccupationVigilance = onSchedule(
+  {
+    schedule: '30 3 * * *',
+    timeZone: 'Europe/Paris',
+    region: 'europe-west1',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+  },
+  async () => {
+    const date = occupationVigilanceParisDateOffset(-1);
+    const result = await executeOccupationVigilanceDate(date);
+
+    if (result?.status === 'failed') {
+      throw new Error(
+        `Occupation vigilance daily run failed for ${date}: ${result.errorCode || 'unknown'}`
+      );
+    }
+
+    console.log(
+      `Occupation vigilance daily run ${date}: ${JSON.stringify(result)}`
+    );
+
+    return result;
+  }
+);
+
+exports.runOccupationVigilanceHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    secrets: [BACKFILL_ADMIN_KEY],
+  },
+  async (request, response) => {
+    await occupationVigilanceDaily.handleOccupationVigilanceAdminRequest({
+      request,
+      response,
+      expectedAdminKey: BACKFILL_ADMIN_KEY.value(),
+      execute: executeOccupationVigilanceDate,
+    });
+  }
+);
