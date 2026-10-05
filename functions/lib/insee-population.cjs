@@ -325,7 +325,6 @@ function buildDepartmentPopulationFromWorksheetRows(worksheetRows, referenceYear
 
       const departmentCode = normalizeDepartmentCode(row?.[header.codeIndex]);
       if (!departmentCode) {
-        if (cleanText(row?.[header.codeIndex])) break;
         continue;
       }
 
