@@ -1,6 +1,31 @@
 import React from 'react';
+import '../occupation.css';
+
+function getNavigationState() {
+  if (typeof window === 'undefined') {
+    return {
+      mapActive: true,
+      occupationActive: false,
+    };
+  }
+
+  const path = window.location.pathname;
+  const departmentPath = path.startsWith('/departement/');
+  const hasRome = new URLSearchParams(window.location.search).has('rome');
+
+  return {
+    mapActive:
+      path === '/' ||
+      (departmentPath && !hasRome),
+    occupationActive:
+      path === '/metiers' ||
+      (departmentPath && hasRome),
+  };
+}
 
 export default function PublicLayout({ children }) {
+  const navigation = getNavigationState();
+
   return (
     <div className="site-shell public-shell">
       <header className="public-header">
@@ -12,6 +37,31 @@ export default function PublicLayout({ children }) {
               <small>Observatoire territorial de l’apprentissage</small>
             </span>
           </a>
+
+          <nav className="public-primary-nav" aria-label="Navigation publique">
+            <a
+              className={
+                navigation.mapActive
+                  ? 'public-nav-link is-active'
+                  : 'public-nav-link'
+              }
+              href="/"
+              aria-current={navigation.mapActive ? 'page' : undefined}
+            >
+              Carte nationale
+            </a>
+            <a
+              className={
+                navigation.occupationActive
+                  ? 'public-nav-link is-active'
+                  : 'public-nav-link'
+              }
+              href="/metiers"
+              aria-current={navigation.occupationActive ? 'page' : undefined}
+            >
+              Métiers & formations
+            </a>
+          </nav>
 
           <div className="public-header-context" aria-label="Nature du service">
             <span className="status-dot" aria-hidden="true" />

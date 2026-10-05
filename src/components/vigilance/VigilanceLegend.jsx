@@ -1,7 +1,13 @@
 import React from 'react';
 import VigilanceBadge from './VigilanceBadge.jsx';
 
-const levels = ['Vert', 'Jaune', 'Orange', 'Rouge'];
+const levels = [
+  'green',
+  'yellow',
+  'orange',
+  'red',
+  'insufficient_data',
+];
 
 export default function VigilanceLegend() {
   return (

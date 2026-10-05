@@ -2,17 +2,37 @@ import React, { useMemo, useState } from 'react';
 import franceDepartments from '@svg-maps/france.departments';
 import VigilanceBadge from '../vigilance/VigilanceBadge.jsx';
 import { getLevelCss, getLevelLabel } from '../../utils/levelUtils.js';
+import {
+  buildDepartmentVigilanceLabel,
+  normalizeDisplayedVigilanceLevel,
+} from '../../utils/vigilanceDisplayUtils.js';
 import './VigilanceMap.css';
 
 function normalizeCode(value) {
   return String(value || '').trim().toUpperCase();
 }
 
-function getDepartmentLevel(department) {
-  return department?.level || department?.publishedLevel || 'green';
+function getDepartmentLevel(department, missingLevel) {
+  const candidate =
+    department?.publishedLevel ||
+    department?.level ||
+    missingLevel;
+
+  return normalizeDisplayedVigilanceLevel(
+    candidate,
+    missingLevel
+  );
 }
 
-function getDepartmentHref(mode, code) {
+function getDepartmentHref(
+  mode,
+  code,
+  departmentHrefBuilder
+) {
+  if (typeof departmentHrefBuilder === 'function') {
+    return departmentHrefBuilder(code);
+  }
+
   if (mode === 'admin-draft') {
     return '/admin/carte-a-publier';
   }
@@ -21,7 +41,7 @@ function getDepartmentHref(mode, code) {
     return '/admin/carte-publiee';
   }
 
-  return `/departement/${encodeURIComponent(code)}`;
+  return '/departement/' + encodeURIComponent(code);
 }
 
 export default function VigilanceMap({
@@ -30,14 +50,22 @@ export default function VigilanceMap({
   loading = false,
   error = null,
   latestDate = null,
+  contextLabel = '',
+  departmentHrefBuilder = null,
+  missingLevel = '',
 }) {
   const [activeDepartment, setActiveDepartment] = useState(null);
+  const effectiveMissingLevel =
+    missingLevel ||
+    (mode === 'occupation' ? 'insufficient_data' : 'green');
 
   const title = mode === 'admin-draft'
     ? 'Carte à publier'
     : mode === 'admin-published'
       ? 'Carte publiée'
-      : 'Carte des vigilances';
+      : mode === 'occupation'
+        ? 'Carte des vigilances métier'
+        : 'Carte des vigilances';
 
   const departmentsByCode = useMemo(() => {
     return new Map(
@@ -72,8 +100,8 @@ export default function VigilanceMap({
         code,
         departmentCode: code,
         name: location.name,
-        level: 'green',
-        publishedLevel: 'green',
+        level: effectiveMissingLevel,
+        publishedLevel: effectiveMissingLevel,
       };
 
       return {
@@ -82,21 +110,32 @@ export default function VigilanceMap({
           ...department,
           code,
           departmentCode: code,
-          name: department.name || location.name,
+          name:
+            department.name ||
+            department.departmentName ||
+            location.name,
         },
       };
     });
-  }, [departmentsByCode]);
+  }, [departmentsByCode, effectiveMissingLevel]);
+
+  const publicMode =
+    mode === 'public' ||
+    mode === 'occupation';
 
   return (
     <section className="panel map-panel">
-      {mode === 'public' ? (
+      {publicMode ? (
         <div className="map-toolbar">
           <span>
-            {latestDate ? `Publication du ${latestDate}` : 'Dernière publication disponible'}
+            {latestDate
+              ? 'Publication du ' + latestDate
+              : 'Dernière publication disponible'}
           </span>
           <span>
-            {loading ? 'Chargement…' : `${departments.length} département(s)`}
+            {loading
+              ? 'Chargement…'
+              : String(departments.length) + ' département(s)'}
           </span>
         </div>
       ) : (
@@ -115,7 +154,7 @@ export default function VigilanceMap({
           <span className="soft-pill">
             {loading
               ? 'Chargement'
-              : `${departments.length} département(s)`}
+              : String(departments.length) + ' département(s)'}
           </span>
         </div>
       )}
@@ -148,21 +187,30 @@ export default function VigilanceMap({
                 role="img"
                 aria-labelledby="france-map-title france-map-description"
               >
-                <title id="france-map-title">
-                  Carte des vigilances apprentissage
-                </title>
+                <title id="france-map-title">{title}</title>
 
                 <desc id="france-map-description">
-                  Chaque département est coloré selon son niveau de vigilance.
+                  Chaque département est identifié par un niveau de vigilance,
+                  également annoncé en texte.
                 </desc>
 
                 {mappedDepartments.map(({ location, department }) => {
-                  const level = getDepartmentLevel(department);
+                  const level = getDepartmentLevel(
+                    department,
+                    effectiveMissingLevel
+                  );
                   const levelCss = getLevelCss(level);
-                  const href = getDepartmentHref(mode, department.code);
-                  const label =
-                    `${department.name} (${department.code}) : ` +
-                    `vigilance ${getLevelLabel(level)}`;
+                  const href = getDepartmentHref(
+                    mode,
+                    department.code,
+                    departmentHrefBuilder
+                  );
+                  const label = buildDepartmentVigilanceLabel({
+                    departmentName: department.name,
+                    departmentCode: department.code,
+                    level,
+                    contextLabel,
+                  });
 
                   return (
                     <a
@@ -175,8 +223,10 @@ export default function VigilanceMap({
                       onBlur={() => setActiveDepartment(null)}
                     >
                       <path
-                        id={`department-${department.code}`}
-                        className={`france-map-path france-map-${levelCss}`}
+                        id={'department-' + department.code}
+                        className={
+                          'france-map-path france-map-' + levelCss
+                        }
                         d={location.path}
                       >
                         <title>{label}</title>
@@ -199,24 +249,36 @@ export default function VigilanceMap({
                     {activeDepartment.code} · {activeDepartment.name}
                   </strong>
 
+                  {contextLabel ? (
+                    <p>{contextLabel}</p>
+                  ) : null}
+
                   <VigilanceBadge
-                    level={getDepartmentLevel(activeDepartment)}
+                    level={getDepartmentLevel(
+                      activeDepartment,
+                      effectiveMissingLevel
+                    )}
                   />
 
                   <p>
                     {activeDepartment.publicSummary ||
-                      'Cliquez sur le département pour consulter le bulletin détaillé.'}
+                      (mode === 'occupation'
+                        ? 'Ouvrez le département pour consulter les indicateurs de ce métier.'
+                        : 'Cliquez sur le département pour consulter le bulletin détaillé.')}
                   </p>
 
-                  {mode === 'public' ? (
+                  {publicMode ? (
                     <a
                       className="button-link map-inspector-link"
                       href={getDepartmentHref(
                         mode,
-                        activeDepartment.code
+                        activeDepartment.code,
+                        departmentHrefBuilder
                       )}
                     >
-                      Consulter le bulletin
+                      {mode === 'occupation'
+                        ? 'Consulter le détail métier'
+                        : 'Consulter le bulletin'}
                     </a>
                   ) : null}
                 </>
@@ -229,8 +291,9 @@ export default function VigilanceMap({
                   </strong>
 
                   <p>
-                    La couleur indique le niveau de vigilance publié.
-                    Cliquez sur un département pour ouvrir son bulletin.
+                    {mode === 'occupation'
+                      ? 'Le niveau textuel accompagne toujours la couleur. Les zones grises correspondent à des données insuffisantes.'
+                      : 'La couleur indique le niveau de vigilance publié. Cliquez sur un département pour ouvrir son bulletin.'}
                   </p>
                 </>
               )}
@@ -255,21 +318,38 @@ export default function VigilanceMap({
                   const code = normalizeCode(
                     department.code || department.departmentCode
                   );
+                  const level = getDepartmentLevel(
+                    department,
+                    effectiveMissingLevel
+                  );
 
                   return (
                     <a
                       key={department.id || code}
                       className="overseas-card"
-                      href={getDepartmentHref(mode, code)}
+                      href={getDepartmentHref(
+                        mode,
+                        code,
+                        departmentHrefBuilder
+                      )}
+                      aria-label={buildDepartmentVigilanceLabel({
+                        departmentName:
+                          department.name ||
+                          department.departmentName,
+                        departmentCode: code,
+                        level,
+                        contextLabel,
+                      })}
                     >
                       <span>
                         <strong>{code}</strong>
-                        <small>{department.name}</small>
+                        <small>
+                          {department.name ||
+                            department.departmentName}
+                        </small>
                       </span>
 
-                      <VigilanceBadge
-                        level={getDepartmentLevel(department)}
-                      />
+                      <VigilanceBadge level={level} />
                     </a>
                   );
                 })}
