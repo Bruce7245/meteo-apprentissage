@@ -6,6 +6,8 @@ on:
       - feat/occupation-search-37
     paths:
       - .github/workflows/import-rome-and-build-search-index.yml
+      - scripts/import-rome-reference.mjs
+      - functions/build-occupation-search-index.cjs
 
 permissions:
   contents: read
