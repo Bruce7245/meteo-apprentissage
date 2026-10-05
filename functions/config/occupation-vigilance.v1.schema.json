@@ -17,18 +17,37 @@
     "confidence"
   ],
   "properties": {
-    "version": { "type": "string", "minLength": 1 },
-    "status": { "enum": ["draft", "validated"] },
-    "calculationVersion": { "type": "string", "minLength": 1 },
-    "referencePopulation15To29": { "type": "number", "exclusiveMinimum": 0 },
-    "expectedOffersFloor": { "type": "number", "exclusiveMinimum": 0 },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "validated"
+      ]
+    },
+    "calculationVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "referencePopulation15To29": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "expectedOffersFloor": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
     "baselines": {
       "type": "object",
       "minProperties": 1,
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["expectedOffersAtReferencePopulation"],
+        "required": [
+          "expectedOffersAtReferencePopulation"
+        ],
         "properties": {
           "expectedOffersAtReferencePopulation": {
             "type": "number",
@@ -47,10 +66,18 @@
         "seasonality"
       ],
       "properties": {
-        "population": { "$ref": "#/$defs/bounds" },
-        "trainingPressure": { "$ref": "#/$defs/bounds" },
-        "diversityFragility": { "$ref": "#/$defs/bounds" },
-        "seasonality": { "$ref": "#/$defs/bounds" }
+        "population": {
+          "$ref": "#/$defs/bounds"
+        },
+        "trainingPressure": {
+          "$ref": "#/$defs/bounds"
+        },
+        "diversityFragility": {
+          "$ref": "#/$defs/bounds"
+        },
+        "seasonality": {
+          "$ref": "#/$defs/bounds"
+        }
       }
     },
     "coefficients": {
@@ -62,13 +89,19 @@
         "lowDiversityFactor"
       ],
       "properties": {
-        "trainingPressurePerFormation": { "type": "number", "minimum": 0 },
+        "trainingPressurePerFormation": {
+          "type": "number",
+          "minimum": 0
+        },
         "lowDiversityConcentrationThreshold": {
           "type": "number",
           "minimum": 0,
           "maximum": 1
         },
-        "lowDiversityFactor": { "type": "number", "minimum": 1 }
+        "lowDiversityFactor": {
+          "type": "number",
+          "minimum": 1
+        }
       }
     },
     "thresholds": {
@@ -80,18 +113,39 @@
         "orangeMinRatio"
       ],
       "properties": {
-        "greenMinRatio": { "type": "number", "exclusiveMinimum": 0 },
-        "yellowMinRatio": { "type": "number", "exclusiveMinimum": 0 },
-        "orangeMinRatio": { "type": "number", "exclusiveMinimum": 0 }
+        "greenMinRatio": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "yellowMinRatio": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "orangeMinRatio": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
       }
     },
     "confidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["highMin", "mediumMin", "penalties"],
+      "required": [
+        "highMin",
+        "mediumMin",
+        "penalties"
+      ],
       "properties": {
-        "highMin": { "type": "number", "minimum": 0, "maximum": 100 },
-        "mediumMin": { "type": "number", "minimum": 0, "maximum": 100 },
+        "highMin": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "mediumMin": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
         "penalties": {
           "type": "object",
           "additionalProperties": false,
@@ -102,10 +156,106 @@
             "missingTraining"
           ],
           "properties": {
-            "missingPopulation": { "type": "number", "minimum": 0 },
-            "missingSeasonality": { "type": "number", "minimum": 0 },
-            "missingDiversity": { "type": "number", "minimum": 0 },
-            "missingTraining": { "type": "number", "minimum": 0 }
+            "missingPopulation": {
+              "type": "number",
+              "minimum": 0
+            },
+            "missingSeasonality": {
+              "type": "number",
+              "minimum": 0
+            },
+            "missingDiversity": {
+              "type": "number",
+              "minimum": 0
+            },
+            "missingTraining": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "windowStart",
+        "windowEnd",
+        "inputSamplesCount",
+        "validSamplesCount",
+        "invalidSamplesCount",
+        "romeCount",
+        "minimumSamplesPerRome",
+        "minimumTotalSamples",
+        "ratioQuantiles",
+        "romeSampleCounts"
+      ],
+      "properties": {
+        "windowStart": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "windowEnd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "inputSamplesCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "validSamplesCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalidSamplesCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "romeCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "minimumSamplesPerRome": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minimumTotalSamples": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ratioQuantiles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "q25",
+            "q50",
+            "q75"
+          ],
+          "properties": {
+            "q25": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "q50": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "q75": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "romeSampleCounts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       }
@@ -115,10 +265,19 @@
     "bounds": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["min", "max"],
+      "required": [
+        "min",
+        "max"
+      ],
       "properties": {
-        "min": { "type": "number", "exclusiveMinimum": 0 },
-        "max": { "type": "number", "exclusiveMinimum": 0 }
+        "min": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "max": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
       }
     }
   }
