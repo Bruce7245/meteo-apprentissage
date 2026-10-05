@@ -107,3 +107,17 @@ test('admin occupation vigilance handler validates date then executes exactly on
   assert.equal(sent[0].status, 200);
   assert.equal(sent[0].payload.ok, true);
 });
+
+
+test('scheduled occupation pipeline prepares context and history before calculating vigilance', () => {
+  const marker = source.indexOf('// OCCUPATION_VIGILANCE_DAILY_V1');
+  assert.notEqual(marker, -1);
+
+  const block = source.slice(marker);
+  const prepareIndex = block.indexOf('prepareOccupationVigilanceInputs');
+  const executeIndex = block.indexOf('executeOccupationVigilanceForDate');
+
+  assert.notEqual(prepareIndex, -1);
+  assert.notEqual(executeIndex, -1);
+  assert.ok(prepareIndex < executeIndex);
+});
