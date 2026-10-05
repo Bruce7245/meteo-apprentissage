@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apprentifr.example/schemas/occupation-vigilance.v1.schema.json",
+  "title": "ApprentiFR occupation vigilance configuration v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "status",
+    "configVersion",
+    "calculationVersion",
+    "minimumExpectedOffers",
+    "minimumGreenActiveOffers",
+    "thresholds",
+    "factorBounds",
+    "factorWeights",
+    "seasonality",
+    "confidence",
+    "romeBaselines"
+  ],
+  "properties": {
+    "status": { "enum": ["draft", "validated"] },
+    "configVersion": { "type": "string", "minLength": 1 },
+    "calculationVersion": { "const": "occupationVigilance.engine.v1" },
+    "minimumExpectedOffers": { "type": "number", "exclusiveMinimum": 0 },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["greenMinRatio", "yellowMinRatio", "orangeMinRatio"],
+      "properties": {
+        "greenMinRatio": { "type": "number", "minimum": 0 },
+        "yellowMinRatio": { "type": "number", "minimum": 0 },
+        "orangeMinRatio": { "type": "number", "minimum": 0 }
+      }
+    },
+    "factorBounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["population", "employer", "training", "seasonality"],
+      "properties": {
+        "population": { "$ref": "#/$defs/bounds" },
+        "employer": { "$ref": "#/$defs/bounds" },
+        "training": { "$ref": "#/$defs/bounds" },
+        "seasonality": { "$ref": "#/$defs/bounds" }
+      }
+    },
+    "factorWeights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["population", "employer", "training"],
+      "properties": {
+        "population": { "type": "number", "minimum": 0, "maximum": 1 },
+        "employer": { "type": "number", "minimum": 0, "maximum": 1 },
+        "training": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["highMin", "mediumMin", "penalties", "minimumEmployerCoverage", "highConcentrationThreshold"],
+      "properties": {
+        "highMin": { "type": "number", "minimum": 0, "maximum": 1 },
+        "mediumMin": { "type": "number", "minimum": 0, "maximum": 1 },
+        "minimumEmployerCoverage": { "type": "number", "minimum": 0, "maximum": 1 },
+        "highConcentrationThreshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "penalties": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["missingPopulation", "missingEmployer", "lowEmployerCoverage", "missingTraining", "missingSeasonality"],
+          "properties": {
+            "missingPopulation": { "$ref": "#/$defs/probability" },
+            "missingEmployer": { "$ref": "#/$defs/probability" },
+            "lowEmployerCoverage": { "$ref": "#/$defs/probability" },
+            "missingTraining": { "$ref": "#/$defs/probability" },
+            "missingSeasonality": { "$ref": "#/$defs/probability" }
+          }
+        }
+      }
+    },
+    "romeBaselines": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[A-Z][0-9]{4}$": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["baseExpectedOffers", "referencePopulation15To29", "referenceObservedEmployers", "referenceUpcomingSessions"],
+          "properties": {
+            "baseExpectedOffers": { "type": "number", "exclusiveMinimum": 0 },
+            "referencePopulation15To29": { "type": "number", "exclusiveMinimum": 0 },
+            "referenceObservedEmployers": { "type": "number", "minimum": 0 },
+            "referenceUpcomingSessions": { "type": "number", "minimum": 0 },
+            "sampleCount": { "type": "integer", "minimum": 1 }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "minimumGreenActiveOffers": { "type": "integer", "minimum": 1 },
+    "seasonality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimumActiveMonths", "completenessThreshold"],
+      "properties": {
+        "minimumActiveMonths": { "type": "integer", "minimum": 24 },
+        "completenessThreshold": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min", "max"],
+      "properties": {
+        "min": { "type": "number", "exclusiveMinimum": 0 },
+        "max": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "probability": { "type": "number", "minimum": 0, "maximum": 1 }
+  }
+}
