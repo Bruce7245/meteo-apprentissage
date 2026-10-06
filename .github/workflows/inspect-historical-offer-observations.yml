@@ -63,6 +63,14 @@ jobs:
               const romeCodes = new Set();
               let withRome = 0;
               let openings = 0;
+              let withZipcode = 0;
+              let withAddress = 0;
+              let withWorkplaceDepartment = 0;
+              let withWorkplaceCity = 0;
+              let withSiret = 0;
+              const departmentSamples = new Set();
+              const addressSamples = new Set();
+              const zipcodeSamples = new Set();
 
               for (const doc of obsSnap.docs) {
                 const data = doc.data() || {};
@@ -71,6 +79,27 @@ jobs:
                 if (codes.length > 0) withRome += 1;
                 codes.forEach((code) => romeCodes.add(code));
                 openings += Number(data.openingCount || 0);
+
+                if (data.workplaceZipcode) {
+                  withZipcode += 1;
+                  if (zipcodeSamples.size < 10) {
+                    zipcodeSamples.add(String(data.workplaceZipcode));
+                  }
+                }
+                if (data.workplaceAddress) {
+                  withAddress += 1;
+                  if (addressSamples.size < 10) {
+                    addressSamples.add(String(data.workplaceAddress));
+                  }
+                }
+                if (data.workplaceDepartment) {
+                  withWorkplaceDepartment += 1;
+                  if (departmentSamples.size < 20) {
+                    departmentSamples.add(String(data.workplaceDepartment));
+                  }
+                }
+                if (data.workplaceCity) withWorkplaceCity += 1;
+                if (data.workplaceSiret) withSiret += 1;
               }
 
               result[date] = {
@@ -80,6 +109,18 @@ jobs:
                 observationsWithRome: withRome,
                 distinctRomeCodes: romeCodes.size,
                 openings,
+                locationCoverage: {
+                  withZipcode,
+                  withAddress,
+                  withWorkplaceDepartment,
+                  withWorkplaceCity,
+                  withSiret,
+                },
+                samples: {
+                  workplaceDepartments: Array.from(departmentSamples),
+                  addresses: Array.from(addressSamples),
+                  zipcodes: Array.from(zipcodeSamples),
+                },
               };
             }
 
