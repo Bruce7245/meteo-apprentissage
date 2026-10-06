@@ -1,0 +1,487 @@
+name: Publish occupation vigilance 2026-10-06
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/publish-occupation-vigilance-2026-10-06.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-occupation-vigilance-2026-10-06
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Validate calibration and publish Oct 6 vigilance
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+
+    env:
+      TARGET_DATE: "2026-10-06"
+      EXPECTED_CONFIG_VERSION: "occupationVigilance.v1.1.cal.83e64828c6d5"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Validate syntax
+        run: |
+          node --check functions/occupation-vigilance-daily.cjs
+          node --check functions/occupation-vigilance-precompute.cjs
+          node --check functions/scripts/build-occupation-calibration.cjs
+
+      - name: Run Functions unit tests
+        run: npm run test:unit --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Publication preflight
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+          const targetDate = process.env.TARGET_DATE;
+          const expectedConfigVersion =
+            process.env.EXPECTED_CONFIG_VERSION;
+
+          (async () => {
+            const [
+              oct4Contexts,
+              oct4Run,
+              oct5Run,
+              oct6Run,
+              oct6SnapshotDepartments,
+              config,
+              currentPointer,
+            ] = await Promise.all([
+              db.collection('occupationContextStats')
+                .where('date', '==', '2026-10-04')
+                .limit(1)
+                .get(),
+              db.collection('occupationContextStatsRuns')
+                .doc('2026-10-04')
+                .get(),
+              db.collection('occupationContextStatsRuns')
+                .doc('2026-10-05')
+                .get(),
+              db.collection('occupationContextStatsRuns')
+                .doc(targetDate)
+                .get(),
+              db.collection('dailyOfferSnapshots')
+                .doc(targetDate)
+                .collection('departments')
+                .get(),
+              db.collection('occupationVigilanceConfigs')
+                .doc(expectedConfigVersion)
+                .get(),
+              db.collection('publicOccupationVigilanceIndex')
+                .doc('current')
+                .get(),
+            ]);
+
+            const configData = config.exists
+              ? config.data() || {}
+              : null;
+
+            const blockers = [];
+
+            if (!oct4Contexts.empty || oct4Run.exists) {
+              blockers.push('OCT4_NOT_QUARANTINED');
+            }
+
+            if (
+              !oct5Run.exists ||
+              oct5Run.data()?.status !== 'ready'
+            ) {
+              blockers.push('OCT5_CONTEXTS_NOT_READY');
+            }
+
+            if (
+              !oct6Run.exists ||
+              oct6Run.data()?.status !== 'ready'
+            ) {
+              blockers.push('OCT6_CONTEXTS_NOT_READY');
+            }
+
+            if (oct6SnapshotDepartments.size !== 101) {
+              blockers.push(
+                `OCT6_SNAPSHOT_DEPARTMENTS_${oct6SnapshotDepartments.size}`
+              );
+            }
+
+            if (!config.exists) {
+              blockers.push('EXPECTED_CALIBRATION_MISSING');
+            } else {
+              if (configData.status !== 'draft') {
+                blockers.push(
+                  `EXPECTED_CALIBRATION_STATUS_${configData.status}`
+                );
+              }
+
+              if (
+                configData?.calibration?.windowStart !==
+                  '2026-10-05' ||
+                configData?.calibration?.windowEnd !==
+                  '2026-10-06'
+              ) {
+                blockers.push(
+                  'EXPECTED_CALIBRATION_WINDOW_MISMATCH'
+                );
+              }
+
+              if (
+                Object.keys(configData.baselines || {}).length !== 45
+              ) {
+                blockers.push(
+                  `EXPECTED_CALIBRATION_ROME_COUNT_${Object.keys(
+                    configData.baselines || {}
+                  ).length}`
+                );
+              }
+            }
+
+            if (currentPointer.exists) {
+              blockers.push(
+                'PUBLIC_OCCUPATION_POINTER_ALREADY_EXISTS'
+              );
+            }
+
+            const result = {
+              ok: blockers.length === 0,
+              targetDate,
+              expectedConfigVersion,
+              configStatus: configData?.status || null,
+              calibrationWindow: configData
+                ? {
+                    start:
+                      configData.calibration?.windowStart || null,
+                    end:
+                      configData.calibration?.windowEnd || null,
+                  }
+                : null,
+              romeCount: configData
+                ? Object.keys(configData.baselines || {}).length
+                : 0,
+              oct4Quarantined:
+                oct4Contexts.empty && !oct4Run.exists,
+              oct5ContextStatus:
+                oct5Run.exists
+                  ? oct5Run.data()?.status || null
+                  : null,
+              oct6ContextStatus:
+                oct6Run.exists
+                  ? oct6Run.data()?.status || null
+                  : null,
+              oct6SnapshotDepartments:
+                oct6SnapshotDepartments.size,
+              currentPointerExists: currentPointer.exists,
+              blockers,
+            };
+
+            console.log(JSON.stringify(result, null, 2));
+
+            if (!result.ok) {
+              throw new Error(
+                'Publication preflight failed: ' +
+                  blockers.join(' | ')
+              );
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Validate exact calibration
+        working-directory: functions
+        run: |
+          node scripts/build-occupation-calibration.cjs --validate
+
+      - name: Verify validated calibration
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+          const expected =
+            process.env.EXPECTED_CONFIG_VERSION;
+
+          (async () => {
+            const config = await db
+              .collection('occupationVigilanceConfigs')
+              .doc(expected)
+              .get();
+
+            if (!config.exists) {
+              throw new Error(
+                `Validated config missing: ${expected}`
+              );
+            }
+
+            const data = config.data() || {};
+            const result = {
+              ok:
+                data.status === 'validated' &&
+                data.version === expected &&
+                data.calculationVersion ===
+                  'occupationVigilance.v1.1' &&
+                data?.calibration?.windowStart ===
+                  '2026-10-05' &&
+                data?.calibration?.windowEnd ===
+                  '2026-10-06' &&
+                Object.keys(data.baselines || {}).length === 45,
+              version: data.version || null,
+              status: data.status || null,
+              calculationVersion:
+                data.calculationVersion || null,
+              windowStart:
+                data.calibration?.windowStart || null,
+              windowEnd:
+                data.calibration?.windowEnd || null,
+              romeCount:
+                Object.keys(data.baselines || {}).length,
+            };
+
+            console.log(JSON.stringify(result, null, 2));
+
+            if (!result.ok) {
+              throw new Error(
+                'Validated calibration does not match approved draft'
+              );
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Prepare Oct 6 inputs and publish occupation vigilance
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+          const precompute =
+            require('./occupation-vigilance-precompute.cjs');
+          const vigilance =
+            require('./occupation-vigilance-daily.cjs');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+          const FieldValue = admin.firestore.FieldValue;
+          const date = process.env.TARGET_DATE;
+
+          (async () => {
+            const preparationRepository =
+              precompute.createFirestoreOccupationPrecomputeRepository(
+                db,
+                {
+                  FieldValue,
+                  FieldPath: admin.firestore.FieldPath,
+                }
+              );
+
+            const preparation =
+              await precompute.prepareOccupationVigilanceInputs({
+                date,
+                repository: preparationRepository,
+              });
+
+            console.log(
+              JSON.stringify(
+                {
+                  phase: 'precompute',
+                  ...preparation,
+                },
+                null,
+                2
+              )
+            );
+
+            if (
+              preparation.status !== 'ready' ||
+              Number(preparation.contextsCount || 0) <= 0 ||
+              Number(preparation.historiesCount || 0) <= 0
+            ) {
+              throw new Error(
+                'Oct 6 vigilance inputs are not ready'
+              );
+            }
+
+            const result =
+              await vigilance.executeOccupationVigilanceForDate({
+                date,
+                db,
+                FieldValue,
+              });
+
+            console.log(
+              JSON.stringify(
+                {
+                  phase: 'publish',
+                  result,
+                },
+                null,
+                2
+              )
+            );
+
+            if (result?.status !== 'published') {
+              throw new Error(
+                'Occupation vigilance was not published: ' +
+                  JSON.stringify(result)
+              );
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Verify Firestore publication pointer
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+          const date = process.env.TARGET_DATE;
+          const expectedConfig =
+            process.env.EXPECTED_CONFIG_VERSION;
+
+          (async () => {
+            const pointer = await db
+              .collection('publicOccupationVigilanceIndex')
+              .doc('current')
+              .get();
+
+            if (!pointer.exists) {
+              throw new Error(
+                'publicOccupationVigilanceIndex/current is missing'
+              );
+            }
+
+            const pointerData = pointer.data() || {};
+            const runId = String(pointerData.runId || '').trim();
+
+            const [
+              run,
+              maps,
+              details,
+              g1204Maps,
+            ] = await Promise.all([
+              db.collection('occupationVigilanceRuns')
+                .doc(runId)
+                .get(),
+              db.collection('publicOccupationVigilanceMaps')
+                .doc(runId)
+                .collection('entries')
+                .get(),
+              db.collection('publicOccupationVigilanceDetails')
+                .doc(runId)
+                .collection('entries')
+                .get(),
+              db.collection('publicOccupationVigilanceMaps')
+                .doc(runId)
+                .collection('entries')
+                .where('romeCode', '==', 'G1204')
+                .get(),
+            ]);
+
+            const runData = run.exists ? run.data() || {} : {};
+            const result = {
+              ok:
+                run.exists &&
+                runData.status === 'published' &&
+                pointerData.date === date &&
+                pointerData.configVersion === expectedConfig &&
+                maps.size > 0 &&
+                details.size > 0,
+              runId,
+              pointerDate: pointerData.date || null,
+              configVersion:
+                pointerData.configVersion || null,
+              runStatus: runData.status || null,
+              expectedPairs:
+                Number(runData.expectedPairs || 0),
+              computedPairs:
+                Number(runData.computedPairs || 0),
+              insufficientDataPairs:
+                Number(runData.insufficientDataPairs || 0),
+              mapEntries: maps.size,
+              detailEntries: details.size,
+              g1204MapEntries: g1204Maps.size,
+            };
+
+            console.log(JSON.stringify(result, null, 2));
+
+            if (!result.ok) {
+              throw new Error(
+                'Firestore publication verification failed: ' +
+                  JSON.stringify(result)
+              );
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Verify public G1204 endpoint no longer returns 503
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://europe-west1-meteo-apprentissage.cloudfunctions.net/getPublicOccupationMapHttp?rome=G1204"
+
+          status="$(
+            curl               --silent               --show-error               --output /tmp/g1204.json               --write-out '%{http_code}'               "$url"
+          )"
+
+          cat /tmp/g1204.json
+          echo
+          echo "HTTP status: $status"
+
+          if [ "$status" = "503" ]; then
+            echo "G1204 still returns 503" >&2
+            exit 1
+          fi
+
+          if [ "$status" != "200" ] && [ "$status" != "404" ]; then
+            echo "Unexpected G1204 status: $status" >&2
+            exit 1
+          fi
