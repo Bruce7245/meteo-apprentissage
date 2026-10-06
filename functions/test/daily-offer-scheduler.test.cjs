@@ -67,3 +67,14 @@ test("shared daily offer importer also publishes occupation vigilance snapshots"
   assert.match(importer, /collection\(['"]offers['"]\)/);
   assert.match(importer, /activeRunId/);
 });
+
+
+test("daily offer observation forwards LBA address text to occupation snapshot projection", () => {
+  const normalizer = sliceBetween(
+    "function normalizeJobOfferObservation",
+    "async function importDailyOffersForDepartments"
+  );
+
+  assert.match(normalizer, /workplaceAddress\s*:/);
+  assert.match(normalizer, /location\.address/);
+});
