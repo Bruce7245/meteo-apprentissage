@@ -19,6 +19,14 @@ export default function PublicLayout({ children }) {
       </header>
 
       <main className="site-main">{children}</main>
+
+      <footer className="site-footer">
+        <img
+          className="footer-brand-image"
+          src="/apprenti_fr_BP.png"
+          alt="ApprentiFR"
+        />
+      </footer>
     </div>
   );
 }
