@@ -34,6 +34,8 @@ select {
 }
 
 .public-shell {
+  display: flex;
+  flex-direction: column;
   background:
     radial-gradient(circle at top left, rgba(69, 123, 157, 0.16), transparent 32%),
     #f8fafc;
@@ -106,6 +108,24 @@ select {
   width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
   padding: 28px 0 56px;
+  flex: 1;
+}
+
+.site-footer {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 24px 0 32px;
+  border-top: 1px solid rgba(29, 53, 87, 0.1);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.footer-brand-image {
+  display: block;
+  width: min(100%, 520px);
+  max-height: 120px;
+  object-fit: contain;
 }
 
 .hero,
