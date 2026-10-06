@@ -130,26 +130,34 @@ function buildCalibration(history, options = {}) {
     byRome.get(sample.romeCode).push(sample);
   }
 
+  const excludedRomeCodes = {};
+  const eligibleRomeCodes = [];
+
   for (const romeCode of Array.from(byRome.keys()).sort()) {
     const count = byRome.get(romeCode).length;
+
     if (count < minimumSamplesPerRome) {
-      blockers.push(`ROME_SAMPLE_COUNT:${romeCode}:${count}<${minimumSamplesPerRome}`);
+      excludedRomeCodes[romeCode] = {
+        reason: 'INSUFFICIENT_SAMPLES',
+        samplesCount: count,
+      };
+      continue;
     }
+
+    eligibleRomeCodes.push(romeCode);
   }
 
   if (byRome.size === 0) {
     blockers.push('ROME_BASELINES_EMPTY');
   }
 
-  const populationValues = samples.map((sample) => sample.population15To29);
-  const positiveActiveOfferValues = samples
-    .map((sample) => sample.activeOffersCount)
-    .filter((value) => value > 0);
-  const referencePopulation15To29 = median(populationValues);
-  const minimumGreenActiveOffers = Math.max(
-    1,
-    Math.ceil(quantile(positiveActiveOfferValues, 0.25) || 1)
+  const candidateSamples = eligibleRomeCodes.flatMap(
+    (romeCode) => byRome.get(romeCode)
   );
+  const candidatePopulationValues = candidateSamples.map(
+    (sample) => sample.population15To29
+  );
+  const referencePopulation15To29 = median(candidatePopulationValues);
 
   if (!(referencePopulation15To29 > 0)) {
     blockers.push('REFERENCE_POPULATION_UNAVAILABLE');
@@ -159,22 +167,25 @@ function buildCalibration(history, options = {}) {
   const normalizedOfferValues = [];
 
   if (referencePopulation15To29 > 0) {
-    for (const romeCode of Array.from(byRome.keys()).sort()) {
+    for (const romeCode of eligibleRomeCodes) {
       const normalizedOffers = byRome.get(romeCode).map((sample) => {
-        const normalized =
+        return (
           sample.activeOffersCount *
-          (referencePopulation15To29 / sample.population15To29);
-        normalizedOfferValues.push(normalized);
-        return normalized;
+          (referencePopulation15To29 / sample.population15To29)
+        );
       });
 
       const expectedOffersAtReferencePopulation = median(normalizedOffers);
 
       if (!(expectedOffersAtReferencePopulation > 0)) {
-        blockers.push(`ROME_BASELINE_NON_POSITIVE:${romeCode}`);
+        excludedRomeCodes[romeCode] = {
+          reason: 'NON_POSITIVE_BASELINE',
+          samplesCount: byRome.get(romeCode).length,
+        };
         continue;
       }
 
+      normalizedOfferValues.push(...normalizedOffers);
       baselines[romeCode] = {
         expectedOffersAtReferencePopulation: round(
           expectedOffersAtReferencePopulation
@@ -183,8 +194,30 @@ function buildCalibration(history, options = {}) {
     }
   }
 
+  const calibrationSamples = candidateSamples.filter(
+    (sample) => baselines[sample.romeCode]
+  );
+
+  if (calibrationSamples.length < minimumTotalSamples) {
+    blockers.push(
+      `ELIGIBLE_SAMPLE_COUNT:${calibrationSamples.length}<${minimumTotalSamples}`
+    );
+  }
+
+  if (Object.keys(baselines).length === 0) {
+    blockers.push('ROME_BASELINES_EMPTY');
+  }
+
+  const positiveActiveOfferValues = calibrationSamples
+    .map((sample) => sample.activeOffersCount)
+    .filter((value) => value > 0);
+  const minimumGreenActiveOffers = Math.max(
+    1,
+    Math.ceil(quantile(positiveActiveOfferValues, 0.25) || 1)
+  );
+
   const ratios = [];
-  for (const sample of samples) {
+  for (const sample of calibrationSamples) {
     const baseline = baselines[sample.romeCode]?.expectedOffersAtReferencePopulation;
     if (!(baseline > 0)) continue;
 
@@ -218,11 +251,18 @@ function buildCalibration(history, options = {}) {
         inputSamplesCount: rawHistory.length,
         validSamplesCount: samples.length,
         invalidSamplesCount,
-        romeCount: byRome.size,
+        romeCount: Object.keys(baselines).length,
+        inputRomeCount: byRome.size,
+        excludedRomeCodes,
+        excludedRomeCount: Object.keys(excludedRomeCodes).length,
+        eligibleSamplesCount: calibrationSamples.length,
       },
     };
   }
 
+  const populationValues = calibrationSamples.map(
+    (sample) => sample.population15To29
+  );
   const populationRatios = populationValues.map(
     (population) => population / referencePopulation15To29
   );
@@ -233,12 +273,15 @@ function buildCalibration(history, options = {}) {
     Math.min(...normalizedOfferValues.filter((value) => value > 0))
   );
 
-  const concentrationValues = samples
+  const concentrationValues = calibrationSamples
     .map((sample) => sample.employerConcentration)
     .filter((value) => value !== null && value >= 0 && value <= 1);
 
   const missingSignalPenalty = 100 / SECONDARY_SIGNAL_COUNT;
-  const dates = samples.map((sample) => sample.date).filter(Boolean).sort();
+  const dates = calibrationSamples
+    .map((sample) => sample.date)
+    .filter(Boolean)
+    .sort();
   const version = stableVersion(samples, {
     minimumSamplesPerRome,
     minimumTotalSamples,
@@ -290,7 +333,7 @@ function buildCalibration(history, options = {}) {
       inputSamplesCount: rawHistory.length,
       validSamplesCount: samples.length,
       invalidSamplesCount,
-      romeCount: byRome.size,
+      romeCount: Object.keys(baselines).length,
       minimumSamplesPerRome,
       minimumTotalSamples,
       ratioQuantiles: {
@@ -310,7 +353,13 @@ function buildCalibration(history, options = {}) {
     eligibleForValidation: true,
     validationBlockers: [],
     config,
-    diagnostics: config.calibration,
+    diagnostics: {
+      ...config.calibration,
+      excludedRomeCodes,
+      excludedRomeCount: Object.keys(excludedRomeCodes).length,
+      eligibleSamplesCount: calibrationSamples.length,
+      inputRomeCount: byRome.size,
+    },
   };
 }
 
