@@ -218,6 +218,87 @@ function buildOccupationDomainIndex(input = {}) {
   };
 }
 
+function buildOccupationDomainIndexPublication(
+  index,
+  options = {}
+) {
+  if (!index?.eligible) {
+    throw new Error(
+      `PUBLIC_DOMAIN_INDEX_INELIGIBLE:${(
+        index?.blockers || []
+      ).join('|')}`
+    );
+  }
+
+  const runId = cleanText(options.runId);
+  const sourceFingerprint = cleanText(
+    options.sourceFingerprint
+  );
+
+  if (!runId) {
+    throw new Error('PUBLIC_DOMAIN_INDEX_RUN_ID_REQUIRED');
+  }
+
+  if (!sourceFingerprint) {
+    throw new Error(
+      'PUBLIC_DOMAIN_INDEX_SOURCE_FINGERPRINT_REQUIRED'
+    );
+  }
+
+  const domains = Array.isArray(index.domains)
+    ? index.domains
+    : [];
+  const sourceVersions = index.sourceVersions || {};
+  const asOfDate = cleanText(index.asOfDate) || null;
+
+  const documents = domains.map((domain) => ({
+    domainCode: domain.domainCode,
+    domainLabel: domain.domainLabel,
+    majorDomainCode: domain.majorDomainCode,
+    majorDomainLabel: domain.majorDomainLabel,
+    occupationsCount: domain.occupationsCount,
+    occupations: Array.isArray(domain.occupations)
+      ? domain.occupations.map((occupation) => ({
+          romeCode: occupation.romeCode,
+          label: occupation.label,
+        }))
+      : [],
+    schemaVersion: 'publicOccupationDomainEntry.v1',
+  }));
+
+  const common = {
+    runId,
+    asOfDate,
+    domainsCount: documents.length,
+    sourceVersions: {
+      domainRunId:
+        cleanText(sourceVersions.domainRunId) || null,
+      domainSourceVersion:
+        cleanText(sourceVersions.domainSourceVersion) || null,
+      occupationRunId:
+        cleanText(sourceVersions.occupationRunId) || null,
+      occupationSourceVersion:
+        cleanText(sourceVersions.occupationSourceVersion) || null,
+    },
+    sourceFingerprint,
+  };
+
+  return {
+    documents,
+    run: {
+      ...common,
+      status: 'building',
+      schemaVersion: 'publicOccupationDomainIndex.v1',
+    },
+    meta: {
+      ...common,
+      schemaVersion:
+        'publicOccupationDomainIndexMeta.v1',
+    },
+  };
+}
+
 module.exports = {
   buildOccupationDomainIndex,
+  buildOccupationDomainIndexPublication,
 };
