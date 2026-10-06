@@ -96,6 +96,33 @@ jobs:
           const crossPartnerIds = Array.from(idToPartners.values())
             .filter((partners) => partners.size > 1);
 
+          const locations = jobs.map((job) => job?.workplace?.location || {});
+          const locationStats = {
+            withZipcode: locations.filter((location) => location?.zipcode).length,
+            withPostalCode: locations.filter((location) => location?.postal_code || location?.postcode).length,
+            withDepartment: locations.filter((location) => location?.department).length,
+            addressString: locations.filter((location) => typeof location?.address === 'string').length,
+            addressObject: locations.filter(
+              (location) =>
+                location?.address &&
+                typeof location.address === 'object' &&
+                !Array.isArray(location.address)
+            ).length,
+            withCity: locations.filter((location) => location?.city).length,
+            departmentSamples: Array.from(
+              new Set(
+                locations
+                  .map((location) => location?.department)
+                  .filter(Boolean)
+                  .map(String)
+              )
+            ).slice(0, 10),
+            addressSamples: locations
+              .map((location) => location?.address)
+              .filter(Boolean)
+              .slice(0, 5),
+          };
+
           const result = {
             jobs: jobs.length,
             legacyIdKey: legacy,
@@ -103,6 +130,7 @@ jobs:
             identifierIdsUsedAcrossMultiplePartners: crossPartnerIds.length,
             missingPartnerJobId: jobs.filter((job) => !job?.identifier?.partner_job_id).length,
             missingIdentifierId: jobs.filter((job) => !job?.identifier?.id).length,
+            locationStats,
           };
 
           console.log(JSON.stringify(result, null, 2));
