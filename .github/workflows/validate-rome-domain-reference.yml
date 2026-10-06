@@ -7,10 +7,13 @@ on:
     paths:
       - .github/workflows/validate-rome-domain-reference.yml
       - scripts/import-rome-reference.mjs
+      - functions/build-occupation-domain-index.cjs
       - functions/lib/rome-open-data.cjs
       - functions/lib/rome-domain-import.cjs
+      - functions/lib/occupation-domain-index.cjs
       - functions/test/rome-open-data.test.cjs
       - functions/test/rome-domain-import.test.cjs
+      - functions/test/occupation-domain-index.test.cjs
 
 permissions:
   contents: read
@@ -44,14 +47,17 @@ jobs:
       - name: Validate syntax
         run: |
           node --check scripts/import-rome-reference.mjs
+          node --check functions/build-occupation-domain-index.cjs
           node --check functions/lib/rome-open-data.cjs
           node --check functions/lib/rome-domain-import.cjs
+          node --check functions/lib/occupation-domain-index.cjs
 
-      - name: Run domain reference tests
+      - name: Run domain reference and index tests
         run: |
           node --test \
             functions/test/rome-open-data.test.cjs \
-            functions/test/rome-domain-import.test.cjs
+            functions/test/rome-domain-import.test.cjs \
+            functions/test/occupation-domain-index.test.cjs
 
       - name: Dry-run official occupation and domain references
         env:
