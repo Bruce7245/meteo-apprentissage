@@ -263,7 +263,7 @@ test('extractRomeDomainReferenceEntries merges duplicate domain rows determinist
   assert.equal(result.length, 1);
   assert.equal(result[0].domainCode, 'G12');
   assert.equal(result[0].domainLabel, "Animation d'activités de loisirs");
-  assert.deepEqual(result[0].romeCodes, ['G1204', 'G1205']);
+  assert.deepEqual(result[0].romeCodes, ['G1204', 'G1205', 'G1206']);
 });
 
 test('extractRomeDomainReferenceEntries only attaches occupations to an official extracted domain', () => {
