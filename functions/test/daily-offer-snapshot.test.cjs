@@ -264,3 +264,31 @@ test('applyHistoricalLocationRecovery leaves unresolved observation location emp
   assert.equal(result.workplaceZipcode, null);
   assert.equal(result.locationRecoverySource, null);
 });
+
+
+test('evaluateHistoricalRecoveryQuality requires the configured recovery threshold', () => {
+  assert.equal(typeof snapshot.evaluateHistoricalRecoveryQuality, 'function');
+
+  assert.deepEqual(
+    snapshot.evaluateHistoricalRecoveryQuality(
+      { total: 100, resolved: 95 },
+      0.95
+    ),
+    {
+      total: 100,
+      resolved: 95,
+      unresolved: 5,
+      recoveryRate: 0.95,
+      minimumRecoveryRate: 0.95,
+      eligible: true,
+    }
+  );
+
+  assert.equal(
+    snapshot.evaluateHistoricalRecoveryQuality(
+      { total: 100, resolved: 94 },
+      0.95
+    ).eligible,
+    false
+  );
+});
