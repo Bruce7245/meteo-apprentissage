@@ -178,3 +178,77 @@ test('buildOccupationDomainIndex rejects stale entry run ids', () => {
     true
   );
 });
+
+
+test('buildOccupationDomainIndexPublication creates minimal versioned Firestore projections', () => {
+  assert.equal(
+    typeof domainIndex.buildOccupationDomainIndexPublication,
+    'function'
+  );
+
+  const index = domainIndex.buildOccupationDomainIndex(fixture());
+  const result = domainIndex.buildOccupationDomainIndexPublication(
+    index,
+    {
+      runId: 'occupation_domain_index_2026-10-06_abc123',
+      sourceFingerprint: 'sha256:fingerprint',
+    }
+  );
+
+  assert.equal(result.run.status, 'building');
+  assert.equal(result.run.domainsCount, 2);
+  assert.equal(
+    result.run.schemaVersion,
+    'publicOccupationDomainIndex.v1'
+  );
+  assert.equal(result.meta.runId, result.run.runId);
+  assert.equal(result.meta.domainsCount, 2);
+  assert.equal(
+    result.meta.schemaVersion,
+    'publicOccupationDomainIndexMeta.v1'
+  );
+
+  assert.deepEqual(
+    result.documents.map((document) => ({
+      domainCode: document.domainCode,
+      occupationsCount: document.occupationsCount,
+      schemaVersion: document.schemaVersion,
+    })),
+    [
+      {
+        domainCode: 'D11',
+        occupationsCount: 1,
+        schemaVersion: 'publicOccupationDomainEntry.v1',
+      },
+      {
+        domainCode: 'G12',
+        occupationsCount: 2,
+        schemaVersion: 'publicOccupationDomainEntry.v1',
+      },
+    ]
+  );
+
+  for (const document of result.documents) {
+    assert.equal('sourceUrl' in document, false);
+    assert.equal('importRunId' in document, false);
+    assert.equal('sourceVersion' in document, false);
+  }
+});
+
+test('buildOccupationDomainIndexPublication refuses an ineligible index', () => {
+  assert.throws(
+    () =>
+      domainIndex.buildOccupationDomainIndexPublication(
+        {
+          eligible: false,
+          blockers: ['DOMAIN_OCCUPATION_RUN_MISMATCH'],
+          domains: [],
+        },
+        {
+          runId: 'run',
+          sourceFingerprint: 'sha256:test',
+        }
+      ),
+    /PUBLIC_DOMAIN_INDEX_INELIGIBLE/
+  );
+});
