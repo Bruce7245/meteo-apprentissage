@@ -878,8 +878,8 @@ h2 {
 
 .public-footer-brand-image {
   display: block;
-  width: min(100%, 420px);
-  max-height: 104px;
+  width: min(100%, 560px);
+  max-height: 140px;
   object-fit: contain;
   object-position: left center;
 }
