@@ -270,6 +270,319 @@ function extractRomeReferenceEntries(payload, sourceMeta = {}) {
     }));
 }
 
+function normalizeRomeDomainCode(value) {
+  const code = cleanText(value).toUpperCase();
+  return /^[A-Z][0-9]{2}$/.test(code) ? code : null;
+}
+
+function normalizeMajorRomeDomainCode(value) {
+  const code = cleanText(value).toUpperCase();
+  return /^[A-Z]$/.test(code) ? code : null;
+}
+
+function findScalarByKeySignals(object, keySignals, valueNormalizer = cleanText) {
+  if (!object || typeof object !== 'object' || Array.isArray(object)) return null;
+
+  const candidates = [];
+
+  for (const [key, value] of Object.entries(object)) {
+    if (value === null || value === undefined || typeof value === 'object') continue;
+
+    const normalizedKey = normalizeKey(key);
+    const matches = keySignals.every((signal) =>
+      normalizedKey.includes(signal)
+    );
+
+    if (!matches) continue;
+
+    const normalizedValue = valueNormalizer(value);
+    if (!normalizedValue) continue;
+
+    candidates.push({
+      key: normalizedKey,
+      value: normalizedValue,
+    });
+  }
+
+  candidates.sort((a, b) => {
+    if (a.key.length !== b.key.length) return a.key.length - b.key.length;
+    return a.key.localeCompare(b.key, 'fr');
+  });
+
+  return candidates[0]?.value || null;
+}
+
+function findDomainRecord(object) {
+  if (!object || typeof object !== 'object' || Array.isArray(object)) return null;
+
+  const domainCode =
+    findScalarByKeySignals(
+      object,
+      ['domaine', 'professionnel'],
+      normalizeRomeDomainCode
+    ) ||
+    findScalarByKeySignals(
+      object,
+      ['code', 'domaine'],
+      normalizeRomeDomainCode
+    );
+
+  if (!domainCode) return null;
+
+  const domainLabel =
+    findScalarByKeySignals(object, ['libelle', 'domaine', 'professionnel']) ||
+    findScalarByKeySignals(object, ['intitule', 'domaine', 'professionnel']) ||
+    findScalarByKeySignals(object, ['label', 'domaine', 'professionnel']);
+
+  if (!domainLabel || normalizeRomeDomainCode(domainLabel)) return null;
+
+  const majorDomainCode =
+    findScalarByKeySignals(
+      object,
+      ['grand', 'domaine'],
+      normalizeMajorRomeDomainCode
+    ) ||
+    domainCode.slice(0, 1);
+
+  const majorDomainLabel =
+    findScalarByKeySignals(object, ['libelle', 'grand', 'domaine']) ||
+    findScalarByKeySignals(object, ['intitule', 'grand', 'domaine']) ||
+    findScalarByKeySignals(object, ['label', 'grand', 'domaine']);
+
+  if (!majorDomainCode || !majorDomainLabel) return null;
+
+  return {
+    domainCode,
+    domainLabel: cleanText(domainLabel),
+    majorDomainCode,
+    majorDomainLabel: cleanText(majorDomainLabel),
+  };
+}
+
+function collectDomainRecords(node, output, depth = 0) {
+  if (!node || depth > 30) return;
+
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      collectDomainRecords(child, output, depth + 1);
+    }
+    return;
+  }
+
+  if (typeof node !== 'object') return;
+
+  const record = findDomainRecord(node);
+  if (record) output.push(record);
+
+  for (const child of Object.values(node)) {
+    if (child && typeof child === 'object') {
+      collectDomainRecords(child, output, depth + 1);
+    }
+  }
+}
+
+function chooseCanonicalText(values) {
+  return Array.from(
+    new Set(
+      values
+        .map(cleanText)
+        .filter(Boolean)
+    )
+  ).sort((a, b) => {
+    if (a.length !== b.length) return a.length - b.length;
+    return a.localeCompare(b, 'fr');
+  })[0] || null;
+}
+
+function extractRomeDomainReferenceEntries(
+  payload,
+  occupationEntries = [],
+  sourceMeta = {}
+) {
+  const records = [];
+  collectDomainRecords(payload, records);
+
+  const grouped = new Map();
+
+  for (const record of records) {
+    if (!grouped.has(record.domainCode)) {
+      grouped.set(record.domainCode, []);
+    }
+
+    grouped.get(record.domainCode).push(record);
+  }
+
+  const occupationCodes = Array.from(
+    new Set(
+      (Array.isArray(occupationEntries) ? occupationEntries : [])
+        .map((entry) => normalizeRomeCode(entry?.romeCode))
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b, 'fr'));
+
+  const source = cleanText(sourceMeta.source) || null;
+  const sourceVersion = cleanText(sourceMeta.sourceVersion) || null;
+  const occupationSourceVersion =
+    cleanText(sourceMeta.occupationSourceVersion) || null;
+
+  return Array.from(grouped.keys())
+    .sort((a, b) => a.localeCompare(b, 'fr'))
+    .map((domainCode) => {
+      const rows = grouped.get(domainCode) || [];
+      const domainLabel = chooseCanonicalText(
+        rows.map((row) => row.domainLabel)
+      );
+      const majorDomainCode =
+        normalizeMajorRomeDomainCode(
+          chooseCanonicalText(
+            rows.map((row) => row.majorDomainCode)
+          )
+        ) ||
+        domainCode.slice(0, 1);
+      const majorDomainLabel = chooseCanonicalText(
+        rows
+          .filter(
+            (row) =>
+              normalizeMajorRomeDomainCode(row.majorDomainCode) ===
+              majorDomainCode
+          )
+          .map((row) => row.majorDomainLabel)
+      );
+
+      if (!domainLabel || !majorDomainCode || !majorDomainLabel) {
+        return null;
+      }
+
+      return {
+        domainCode,
+        domainLabel,
+        majorDomainCode,
+        majorDomainLabel,
+        normalizedLabel: normalizeOccupationSearchText(domainLabel),
+        romeCodes: occupationCodes.filter((romeCode) =>
+          romeCode.startsWith(domainCode)
+        ),
+        source,
+        sourceVersion,
+        occupationSourceVersion,
+      };
+    })
+    .filter(Boolean);
+}
+
+function validateRomeDomainReference(
+  domainEntries,
+  occupationEntries,
+  options = {}
+) {
+  const entries = Array.isArray(domainEntries)
+    ? domainEntries
+    : [];
+  const occupations = Array.isArray(occupationEntries)
+    ? occupationEntries
+    : [];
+
+  const minimumDomains = Number.isInteger(options.minimumDomains)
+    ? options.minimumDomains
+    : 80;
+
+  const validDomains = new Map();
+  const invalidDomainCodes = [];
+
+  for (const entry of entries) {
+    const domainCode = normalizeRomeDomainCode(entry?.domainCode);
+    const domainLabel = cleanText(entry?.domainLabel);
+    const majorDomainCode = normalizeMajorRomeDomainCode(
+      entry?.majorDomainCode
+    );
+    const majorDomainLabel = cleanText(entry?.majorDomainLabel);
+
+    if (
+      !domainCode ||
+      !domainLabel ||
+      !majorDomainCode ||
+      !majorDomainLabel ||
+      majorDomainCode !== domainCode.slice(0, 1)
+    ) {
+      if (cleanText(entry?.domainCode)) {
+        invalidDomainCodes.push(cleanText(entry.domainCode));
+      }
+      continue;
+    }
+
+    validDomains.set(domainCode, entry);
+  }
+
+  const occupationCodes = Array.from(
+    new Set(
+      occupations
+        .map((entry) => normalizeRomeCode(entry?.romeCode))
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b, 'fr'));
+
+  const unmappedRomeCodes = occupationCodes.filter(
+    (romeCode) => !validDomains.has(romeCode.slice(0, 3))
+  );
+
+  const invalidMemberships = [];
+
+  for (const [domainCode, entry] of validDomains.entries()) {
+    for (const romeCode of Array.isArray(entry.romeCodes)
+      ? entry.romeCodes
+      : []) {
+      const normalizedRomeCode = normalizeRomeCode(romeCode);
+
+      if (
+        !normalizedRomeCode ||
+        !normalizedRomeCode.startsWith(domainCode)
+      ) {
+        invalidMemberships.push({
+          domainCode,
+          romeCode: cleanText(romeCode),
+        });
+      }
+    }
+  }
+
+  const domainsCount = validDomains.size;
+  const ok =
+    domainsCount >= minimumDomains &&
+    unmappedRomeCodes.length === 0 &&
+    invalidMemberships.length === 0 &&
+    invalidDomainCodes.length === 0;
+
+  return {
+    ok,
+    domainsCount,
+    minimumDomains,
+    occupationCodesCount: occupationCodes.length,
+    unmappedRomeCodes,
+    invalidMemberships,
+    invalidDomainCodes: Array.from(
+      new Set(invalidDomainCodes)
+    ).sort((a, b) => a.localeCompare(b, 'fr')),
+    error: ok
+      ? null
+      : [
+          domainsCount < minimumDomains
+            ? `ROME domain reference contains ${domainsCount} valid domains; minimum is ${minimumDomains}`
+            : null,
+          unmappedRomeCodes.length > 0
+            ? `${unmappedRomeCodes.length} ROME codes have no official professional domain`
+            : null,
+          invalidMemberships.length > 0
+            ? `${invalidMemberships.length} invalid ROME/domain memberships`
+            : null,
+          invalidDomainCodes.length > 0
+            ? `${invalidDomainCodes.length} invalid domain records`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(' | '),
+  };
+}
+
 function validateRomeReference(entries, options = {}) {
   const minimumEntries = Number.isInteger(options.minimumEntries)
     ? options.minimumEntries
@@ -301,5 +614,7 @@ function validateRomeReference(entries, options = {}) {
 
 module.exports = {
   extractRomeReferenceEntries,
+  extractRomeDomainReferenceEntries,
   validateRomeReference,
+  validateRomeDomainReference,
 };
