@@ -75,3 +75,42 @@ test('buildOccupationOfferSnapshot preserves out-of-department location quality'
   assert.equal(result.locationQuality, 'out_of_department');
   assert.equal(result.isInRequestedDepartment, false);
 });
+
+
+test('buildOccupationOfferSummary keeps public totals and exact ROME aggregates', () => {
+  assert.equal(typeof snapshot.buildOccupationOfferSummary, 'function');
+
+  const summary = snapshot.buildOccupationOfferSummary([
+    {
+      openingCount: 2,
+      romeCodes: ['D1102'],
+      sectorCode: 'commerce_vente',
+      sectorLabel: 'Commerce / vente',
+      nafCode: '1071C',
+      nafLabel: 'Boulangerie',
+      partnerLabel: 'source-a',
+      city: 'Le Mans',
+    },
+    {
+      openingCount: 1,
+      romeCodes: ['D1102', 'D1106'],
+      sectorCode: 'commerce_vente',
+      sectorLabel: 'Commerce / vente',
+      nafCode: '1071C',
+      nafLabel: 'Boulangerie',
+      partnerLabel: 'source-b',
+      city: 'Le Mans',
+    },
+  ]);
+
+  assert.equal(summary.totalOffers, 2);
+  assert.equal(summary.totalOpenings, 3);
+  assert.deepEqual(
+    summary.byRome.find((item) => item.code === 'D1102'),
+    { code: 'D1102', label: 'D1102', offers: 2, openings: 3 }
+  );
+  assert.deepEqual(
+    summary.byRome.find((item) => item.code === 'D1106'),
+    { code: 'D1106', label: 'D1106', offers: 1, openings: 1 }
+  );
+});
