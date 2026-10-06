@@ -1,3 +1,4 @@
+# redeploy: deduplicate duplicate LBA offer rows before publication
 name: Deploy daily offer snapshot bridge
 
 on:
