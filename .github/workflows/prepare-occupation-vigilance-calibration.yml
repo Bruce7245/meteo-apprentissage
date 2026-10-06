@@ -6,6 +6,10 @@ on:
       - feat/occupation-search-37
     paths:
       - .github/workflows/prepare-occupation-vigilance-calibration.yml
+      - functions/lib/occupation-calibration.cjs
+      - functions/test/occupation-calibration.test.cjs
+      - functions/scripts/build-occupation-calibration.cjs
+      - functions/occupation-vigilance-precompute.cjs
 
 permissions:
   contents: read
