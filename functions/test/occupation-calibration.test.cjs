@@ -329,3 +329,33 @@ test('buildCalibration excludes a ROME with a non-positive baseline instead of b
     samplesCount: 4,
   });
 });
+
+
+test('buildCalibration derives ratio thresholds from positive observations when zero-offer samples are present', () => {
+  const history = [0, 0, 0, 0, 2, 4, 8, 16].map(
+    (activeOffersCount, index) => ({
+      date: '2026-10-06',
+      departmentCode: String(index + 1).padStart(2, '0'),
+      romeCode: 'D1108',
+      activeOffersCount,
+      population15To29: 100000,
+    })
+  );
+
+  const result = calibration.buildCalibration(history, {
+    minimumSamplesPerRome: 8,
+    minimumTotalSamples: 8,
+  });
+
+  assert.equal(result.eligibleForValidation, true);
+  assert.equal(result.validationBlockers.length, 0);
+  assert.ok(result.config.thresholds.orangeMinRatio > 0);
+  assert.ok(
+    result.config.thresholds.greenMinRatio >
+      result.config.thresholds.yellowMinRatio
+  );
+  assert.ok(
+    result.config.thresholds.yellowMinRatio >
+      result.config.thresholds.orangeMinRatio
+  );
+});
