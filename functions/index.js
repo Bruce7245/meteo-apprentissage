@@ -31,6 +31,10 @@ const {
   sanitizePublicOccupationMap,
   sanitizePublicOccupationDepartment,
 } = require('./lib/public-occupation-vigilance.cjs');
+const {
+  getPublicOccupationDomains,
+  getPublicOccupationDomainOccupations,
+} = require('./lib/public-occupation-domains.cjs');
 
 admin.initializeApp();
 
@@ -7675,6 +7679,217 @@ exports.getPublicOccupationSearchHttp = onRequest(
 );
 
 
+
+const publicOccupationDomainRepository = {
+  async loadCurrentIndexPointer() {
+    const snapshot = await db
+      .collection('publicOccupationDomainIndexMeta')
+      .doc('current')
+      .get();
+
+    return snapshot.exists
+      ? snapshot.data() || {}
+      : null;
+  },
+
+  async loadIndexRun(runId) {
+    const snapshot = await db
+      .collection('publicOccupationDomainIndexes')
+      .doc(runId)
+      .get();
+
+    return snapshot.exists
+      ? {
+          runId: snapshot.id,
+          ...(snapshot.data() || {}),
+        }
+      : null;
+  },
+
+  async loadDomains(runId) {
+    const snapshot = await db
+      .collection('publicOccupationDomainIndexes')
+      .doc(runId)
+      .collection('domains')
+      .get();
+
+    return snapshot.docs.map(
+      (document) => document.data() || {}
+    );
+  },
+
+  async loadDomain(runId, domainCode) {
+    const snapshot = await db
+      .collection('publicOccupationDomainIndexes')
+      .doc(runId)
+      .collection('domains')
+      .doc(domainCode)
+      .get();
+
+    return snapshot.exists
+      ? snapshot.data() || {}
+      : null;
+  },
+};
+
+function publicOccupationRequesterKey(request) {
+  const forwardedFor = String(
+    request.get('x-forwarded-for') || ''
+  )
+    .split(',')[0]
+    .trim();
+
+  return (
+    request.ip ||
+    forwardedFor ||
+    'anonymous'
+  );
+}
+
+function enforceOccupationPublicReadMethod(
+  request,
+  response
+) {
+  if (request.method === 'OPTIONS') {
+    response.status(204).send('');
+    return false;
+  }
+
+  if (request.method !== 'GET') {
+    response.set('Allow', 'GET, OPTIONS');
+    response.status(405).json({
+      ok: false,
+      error: 'Method not allowed',
+    });
+    return false;
+  }
+
+  const rateLimit = publicOccupationSearchRateLimit(
+    publicOccupationRequesterKey(request)
+  );
+
+  if (!rateLimit.allowed) {
+    response.set(
+      'Retry-After',
+      String(rateLimit.retryAfterSeconds)
+    );
+    response.status(429).json({
+      ok: false,
+      error: 'Too many requests',
+    });
+    return false;
+  }
+
+  return true;
+}
+
+exports.getPublicOccupationDomainsHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    try {
+      if (
+        !enforceOccupationPublicReadMethod(
+          request,
+          response
+        )
+      ) {
+        return;
+      }
+
+      const result =
+        await getPublicOccupationDomains(
+          publicOccupationDomainRepository
+        );
+
+      if (result.status === 200) {
+        response.set(
+          'Cache-Control',
+          'public, max-age=300, s-maxage=600'
+        );
+      }
+
+      response
+        .status(result.status)
+        .json(result.body);
+    } catch (error) {
+      console.error(
+        'getPublicOccupationDomainsHttp error',
+        {
+          name: error?.name || 'Error',
+          message: String(
+            error?.message || error
+          ).slice(0, 500),
+        }
+      );
+
+      response.status(500).json({
+        ok: false,
+        error:
+          'PUBLIC_OCCUPATION_DOMAINS_UNAVAILABLE',
+      });
+    }
+  }
+);
+
+exports.getPublicOccupationDomainOccupationsHttp =
+  onRequest(
+    {
+      region: 'europe-west1',
+      timeoutSeconds: 30,
+      memory: '256MiB',
+      cors: true,
+    },
+    async (request, response) => {
+      try {
+        if (
+          !enforceOccupationPublicReadMethod(
+            request,
+            response
+          )
+        ) {
+          return;
+        }
+
+        const result =
+          await getPublicOccupationDomainOccupations(
+            publicOccupationDomainRepository,
+            request.query.domain
+          );
+
+        if (result.status === 200) {
+          response.set(
+            'Cache-Control',
+            'public, max-age=300, s-maxage=600'
+          );
+        }
+
+        response
+          .status(result.status)
+          .json(result.body);
+      } catch (error) {
+        console.error(
+          'getPublicOccupationDomainOccupationsHttp error',
+          {
+            name: error?.name || 'Error',
+            message: String(
+              error?.message || error
+            ).slice(0, 500),
+          }
+        );
+
+        response.status(500).json({
+          ok: false,
+          error:
+            'PUBLIC_OCCUPATION_DOMAIN_OCCUPATIONS_UNAVAILABLE',
+        });
+      }
+    }
+  );
 
 async function loadCurrentPublishedOccupationRun() {
   const pointerSnapshot = await db
