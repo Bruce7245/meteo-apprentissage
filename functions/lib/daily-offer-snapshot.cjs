@@ -273,6 +273,36 @@ function dedupeOccupationOffers(offers = []) {
     .sort((a, b) => String(a.offerDocId).localeCompare(String(b.offerDocId)));
 }
 
+function buildHistoricalDepartmentSnapshot(
+  observations = [],
+  { runId, targetDate, departmentCode } = {}
+) {
+  const offers = dedupeOccupationOffers(
+    (Array.isArray(observations) ? observations : [])
+      .filter(
+        (observation) =>
+          cleanText(observation?.partnerLabel) !== 'recruteurs_lba'
+      )
+      .map((observation) =>
+        buildOccupationOfferSnapshot(observation, {
+          runId,
+          targetDate,
+          departmentCode,
+        })
+      )
+  );
+
+  return {
+    offers,
+    summary: buildOccupationOfferSummary(offers),
+    strictSummary: buildOccupationOfferSummary(
+      offers.filter(
+        (offer) => offer.locationQuality === 'in_department'
+      )
+    ),
+  };
+}
+
 function addStat(map, key, label, openingCount) {
   const normalizedKey = cleanText(key);
   if (!normalizedKey) return;
@@ -357,4 +387,5 @@ module.exports = {
   buildOccupationOfferSnapshot,
   dedupeOccupationOffers,
   buildOccupationOfferSummary,
+  buildHistoricalDepartmentSnapshot,
 };
