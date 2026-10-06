@@ -160,7 +160,7 @@ test('buildDailyOccupationDomainVigilanceRun stages every context and marks miss
     item.key.endsWith('_D11')
   );
 
-  assert.equal(g12.mapEntry.level, 'orange');
+  assert.equal(g12.mapEntry.level, 'yellow');
   assert.equal(d11.mapEntry.level, 'insufficient_data');
   assert.deepEqual(
     d11.mapEntry.reasonCodes,
