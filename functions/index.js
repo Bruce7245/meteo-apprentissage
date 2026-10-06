@@ -13801,6 +13801,10 @@ function normalizeJobOfferObservation(job, department, targetDate) {
     workplaceCity: location.city || null,
     workplaceZipcode: location.zipcode || null,
     workplaceDepartment: location.department || null,
+    workplaceAddress:
+      typeof location.address === 'string'
+        ? location.address
+        : null,
 
     contractStartDate: contract.start
       ? String(contract.start).slice(0, 10)
