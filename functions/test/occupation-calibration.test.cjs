@@ -250,3 +250,78 @@ test('calibration derives the absolute green offer floor from observed positive 
   assert.equal(result.config.minimumGreenActiveOffers >= 1, true);
   assert.equal(result.config.minimumGreenActiveOffers, 4);
 });
+
+
+test('buildCalibration excludes sparse ROME instead of blocking eligible national baselines', () => {
+  const history = [];
+
+  [2, 4, 6, 8, 10, 12, 14, 16].forEach((activeOffersCount, index) => {
+    history.push({
+      date: '2026-10-06',
+      departmentCode: String(index + 1).padStart(2, '0'),
+      romeCode: 'D1108',
+      activeOffersCount,
+      population15To29: 100000,
+    });
+  });
+
+  [1, 2].forEach((activeOffersCount, index) => {
+    history.push({
+      date: '2026-10-06',
+      departmentCode: String(index + 20),
+      romeCode: 'M1607',
+      activeOffersCount,
+      population15To29: 100000,
+    });
+  });
+
+  const result = calibration.buildCalibration(history, {
+    minimumSamplesPerRome: 4,
+    minimumTotalSamples: 8,
+  });
+
+  assert.equal(result.eligibleForValidation, true);
+  assert.ok(result.config.baselines.D1108);
+  assert.equal(result.config.baselines.M1607, undefined);
+  assert.deepEqual(result.diagnostics.excludedRomeCodes.M1607, {
+    reason: 'INSUFFICIENT_SAMPLES',
+    samplesCount: 2,
+  });
+});
+
+test('buildCalibration excludes a ROME with a non-positive baseline instead of blocking eligible ROME', () => {
+  const history = [];
+
+  [2, 4, 6, 8, 10, 12, 14, 16].forEach((activeOffersCount, index) => {
+    history.push({
+      date: '2026-10-06',
+      departmentCode: String(index + 1).padStart(2, '0'),
+      romeCode: 'D1108',
+      activeOffersCount,
+      population15To29: 100000,
+    });
+  });
+
+  [0, 0, 0, 0].forEach((activeOffersCount, index) => {
+    history.push({
+      date: '2026-10-06',
+      departmentCode: String(index + 30),
+      romeCode: 'M1607',
+      activeOffersCount,
+      population15To29: 100000,
+    });
+  });
+
+  const result = calibration.buildCalibration(history, {
+    minimumSamplesPerRome: 4,
+    minimumTotalSamples: 8,
+  });
+
+  assert.equal(result.eligibleForValidation, true);
+  assert.ok(result.config.baselines.D1108);
+  assert.equal(result.config.baselines.M1607, undefined);
+  assert.deepEqual(result.diagnostics.excludedRomeCodes.M1607, {
+    reason: 'NON_POSITIVE_BASELINE',
+    samplesCount: 4,
+  });
+});
