@@ -102,6 +102,9 @@ jobs:
             const withRome = offers.filter(
               (offer) => Array.isArray(offer.romeCodes) && offer.romeCodes.length > 0
             );
+            const inDepartment = offers.filter(
+              (offer) => offer.locationQuality === 'in_department'
+            );
 
             if (offers.length !== Number(meta.storedOffersCount || 0)) {
               throw new Error(
@@ -113,14 +116,25 @@ jobs:
               throw new Error('No active offer contains a ROME code');
             }
 
+            const strictOffers = Number(meta.strictSummary.totalOffers || 0);
+            if (offers.length > 0 && strictOffers === 0) {
+              throw new Error('All active offers are outside/unknown for requested department');
+            }
+            if (strictOffers !== inDepartment.length) {
+              throw new Error(
+                `strictSummary mismatch: meta=${strictOffers}, inDepartment=${inDepartment.length}`
+              );
+            }
+
             console.log(JSON.stringify({
               ok: true,
               date: meta.date,
               departmentCode: meta.departmentCode,
               activeRunId: meta.activeRunId,
               storedOffersCount: meta.storedOffersCount,
-              strictOffers: meta.strictSummary.totalOffers,
+              strictOffers,
               strictOpenings: meta.strictSummary.totalOpenings,
+              inDepartmentOffers: inDepartment.length,
               offersWithRome: withRome.length,
               sampleRomeCodes: withRome.slice(0, 5).map((offer) => offer.romeCodes),
               schemaVersion: meta.schemaVersion,
