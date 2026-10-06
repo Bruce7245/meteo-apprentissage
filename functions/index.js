@@ -13696,6 +13696,7 @@ exports.purgeInseeCollectionBatchHttp = onRequest(
 // IMPORT_DAILY_OFFERS_HTTP_V1
 const {
   buildOccupationOfferSnapshot,
+  dedupeOccupationOffers,
   buildOccupationOfferSummary,
 } = require('./lib/daily-offer-snapshot.cjs');
 
@@ -13873,23 +13874,25 @@ async function importDailyOffersForDepartments({
         .map((job) => normalizeJobOfferObservation(job, department, targetDate))
         .filter((item) => item.offerId);
 
-      const occupationOffers = result.jobs
-        .filter(
-          (job) =>
-            String(job?.identifier?.partner_label || '').trim() !==
-            'recruteurs_lba'
-        )
-        .map((job) =>
-          normalizeJobOfferObservation(job, department, targetDate)
-        )
-        .filter((item) => item.offerId)
-        .map((observation) =>
-          buildOccupationOfferSnapshot(observation, {
-            runId: occupationSnapshotRunId,
-            targetDate,
-            departmentCode: department.code,
-          })
-        );
+      const occupationOffers = dedupeOccupationOffers(
+        result.jobs
+          .filter(
+            (job) =>
+              String(job?.identifier?.partner_label || '').trim() !==
+              'recruteurs_lba'
+          )
+          .map((job) =>
+            normalizeJobOfferObservation(job, department, targetDate)
+          )
+          .filter((item) => item.offerId)
+          .map((observation) =>
+            buildOccupationOfferSnapshot(observation, {
+              runId: occupationSnapshotRunId,
+              targetDate,
+              departmentCode: department.code,
+            })
+          )
+      );
 
       const occupationSummary =
         buildOccupationOfferSummary(occupationOffers);
