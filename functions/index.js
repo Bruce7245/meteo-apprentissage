@@ -13694,6 +13694,11 @@ exports.purgeInseeCollectionBatchHttp = onRequest(
 );
 
 // IMPORT_DAILY_OFFERS_HTTP_V1
+const {
+  buildOccupationOfferSnapshot,
+  buildOccupationOfferSummary,
+} = require('./lib/daily-offer-snapshot.cjs');
+
 
 function normalizeManualOfferImportDate(value) {
   const clean = String(value || '').trim();
@@ -13741,6 +13746,8 @@ function normalizeJobOfferObservation(job, department, targetDate) {
   const domain = workplace?.domain || {};
   const location = workplace?.location || {};
   const publication = offer?.publication || {};
+  const contract = job?.contract || {};
+  const apply = job?.apply || {};
 
   const offerId = getJobId(job);
 
@@ -13794,6 +13801,16 @@ function normalizeJobOfferObservation(job, department, targetDate) {
     workplaceZipcode: location.zipcode || null,
     workplaceDepartment: location.department || null,
 
+    contractStartDate: contract.start
+      ? String(contract.start).slice(0, 10)
+      : null,
+    contractTypes: Array.isArray(contract.type)
+      ? contract.type
+      : contract.type
+        ? [contract.type]
+        : [],
+    applyUrl: apply.url || null,
+
     nafCode: domain?.naf?.code || null,
     nafLabel: domain?.naf?.label || null,
     opco: domain?.opco || null,
@@ -13826,6 +13843,9 @@ async function importDailyOffersForDepartments({
     ? 'departmentDailyStats.lba.scheduled.v1'
     : 'departmentDailyStats.lba.manual.v1';
 
+  const occupationSnapshotRunId =
+    `daily_offer_${targetDate}_${Date.now().toString(36)}`;
+
   let successCount = 0;
   let errorCount = 0;
   const rows = [];
@@ -13852,6 +13872,33 @@ async function importDailyOffersForDepartments({
       const offerObservations = result.jobs
         .map((job) => normalizeJobOfferObservation(job, department, targetDate))
         .filter((item) => item.offerId);
+
+      const occupationOffers = result.jobs
+        .filter(
+          (job) =>
+            String(job?.identifier?.partner_label || '').trim() !==
+            'recruteurs_lba'
+        )
+        .map((job) =>
+          normalizeJobOfferObservation(job, department, targetDate)
+        )
+        .filter((item) => item.offerId)
+        .map((observation) =>
+          buildOccupationOfferSnapshot(observation, {
+            runId: occupationSnapshotRunId,
+            targetDate,
+            departmentCode: department.code,
+          })
+        );
+
+      const occupationSummary =
+        buildOccupationOfferSummary(occupationOffers);
+      const strictOccupationSummary =
+        buildOccupationOfferSummary(
+          occupationOffers.filter(
+            (offer) => offer.locationQuality === 'in_department'
+          )
+        );
 
       const previousDate = dateWithOffsetFromDateString(targetDate, -1);
       const previousId = `${previousDate}_${department.code}`;
@@ -13901,6 +13948,58 @@ async function importDailyOffersForDepartments({
           .collection('departmentDailyStats')
           .doc(`${targetDate}_${department.code}`)
           .set(dailyDocument, { merge: true });
+
+        const occupationDepartmentRef = db
+          .collection('dailyOfferSnapshots')
+          .doc(targetDate)
+          .collection('departments')
+          .doc(department.code);
+
+        let occupationOfferBatch = db.batch();
+        let occupationOfferBatchCount = 0;
+
+        for (const offer of occupationOffers) {
+          occupationOfferBatch.set(
+            occupationDepartmentRef
+              .collection('offers')
+              .doc(offer.offerDocId),
+            {
+              ...offer,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          occupationOfferBatchCount += 1;
+
+          if (occupationOfferBatchCount >= 400) {
+            await occupationOfferBatch.commit();
+            occupationOfferBatch = db.batch();
+            occupationOfferBatchCount = 0;
+          }
+        }
+
+        if (occupationOfferBatchCount > 0) {
+          await occupationOfferBatch.commit();
+        }
+
+        await occupationDepartmentRef.set(
+          {
+            date: targetDate,
+            departmentCode: department.code,
+            activeRunId: occupationSnapshotRunId,
+            source: 'api-apprentissage-job-v1-search',
+            sourceRoute: '/job/v1/search',
+            executionMode,
+            rawJobsCount: result.jobs.length,
+            storedOffersCount: occupationOffers.length,
+            summary: occupationSummary,
+            strictSummary: strictOccupationSummary,
+            importedAt: admin.firestore.FieldValue.serverTimestamp(),
+            schemaVersion: 'dailyOfferSnapshots.sharedImport.v1',
+          },
+          { merge: true }
+        );
 
         let observationBatch = db.batch();
         let observationBatchCount = 0;
@@ -13955,6 +14054,8 @@ async function importDailyOffersForDepartments({
         notSeenSinceYesterdayCount: notSeenSinceYesterdayIds.length,
         sectorStatsCount: sectorStats.length,
         offerObservationsCount: offerObservations.length,
+        occupationSnapshotOffersCount: occupationOffers.length,
+        occupationSnapshotRunId,
         createdTodayCount: offerObservations.filter((item) => item.isCreatedToday).length,
         expiresWithin7DaysCount: offerObservations.filter((item) => item.expiresWithin7Days).length,
       });
