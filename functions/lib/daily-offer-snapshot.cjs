@@ -307,6 +307,36 @@ function applyHistoricalLocationRecovery(
   };
 }
 
+function evaluateHistoricalRecoveryQuality(
+  { total = 0, resolved = 0 } = {},
+  minimumRecoveryRate = 0.95
+) {
+  const normalizedTotal = Math.max(0, Number(total) || 0);
+  const normalizedResolved = Math.min(
+    normalizedTotal,
+    Math.max(0, Number(resolved) || 0)
+  );
+  const normalizedMinimum = Math.min(
+    1,
+    Math.max(0, Number(minimumRecoveryRate) || 0)
+  );
+  const unresolved = normalizedTotal - normalizedResolved;
+  const recoveryRate = normalizedTotal > 0
+    ? Number((normalizedResolved / normalizedTotal).toFixed(4))
+    : 0;
+
+  return {
+    total: normalizedTotal,
+    resolved: normalizedResolved,
+    unresolved,
+    recoveryRate,
+    minimumRecoveryRate: normalizedMinimum,
+    eligible:
+      normalizedTotal > 0 &&
+      recoveryRate >= normalizedMinimum,
+  };
+}
+
 function buildHistoricalDepartmentSnapshot(
   observations = [],
   { runId, targetDate, departmentCode } = {}
@@ -423,4 +453,5 @@ module.exports = {
   buildOccupationOfferSummary,
   buildHistoricalDepartmentSnapshot,
   applyHistoricalLocationRecovery,
+  evaluateHistoricalRecoveryQuality,
 };
