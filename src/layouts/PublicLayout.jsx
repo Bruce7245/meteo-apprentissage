@@ -74,9 +74,12 @@ export default function PublicLayout({ children }) {
 
       <footer className="public-footer">
         <div className="public-footer-inner">
-          <div>
-            <strong>ApprentiFR</strong>
-            <p>Lecture territoriale du marché de l’apprentissage.</p>
+          <div className="public-footer-brand">
+            <img
+              className="public-footer-brand-image"
+              src="/apprenti_fr_BP.png"
+              alt="ApprentiFR"
+            />
           </div>
           <p className="public-footer-note">
             Les niveaux présentés sont des indicateurs d’observation et ne constituent pas une information officielle de l’État.
