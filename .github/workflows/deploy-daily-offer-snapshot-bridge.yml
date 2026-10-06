@@ -1,3 +1,4 @@
+# redeploy: forward LBA address string into snapshot projection
 # redeploy: parse LBA address-only locations
 # redeploy: deduplicate duplicate LBA offer rows before publication
 name: Deploy daily offer snapshot bridge
