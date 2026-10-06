@@ -39,7 +39,7 @@ jobs:
       - name: Check Firestore prerequisites
         working-directory: functions
         env:
-          TARGET_DATE: "2026-10-05"
+          TARGET_DATE: "2026-10-06"
         run: |
           node <<'NODE'
           const { initializeApp, getApps } = require('firebase-admin/app');
