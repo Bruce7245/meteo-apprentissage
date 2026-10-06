@@ -1,0 +1,161 @@
+name: Inspect Oct 4 recovery from Oct 6
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/inspect-oct4-recovery-from-oct6.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - run: npm ci --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Compare Oct 4 and Oct 6 observations
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+
+          function normalizeDepartment(value) {
+            const raw = String(value || '').trim().toUpperCase();
+            if (/^\d$/.test(raw)) return `0${raw}`;
+            if (/^(?:\d{2}|2A|2B|97[1-6])$/.test(raw)) return raw;
+            return null;
+          }
+
+          function departmentFromPostalCode(value) {
+            const postal = String(value || '').trim();
+            if (/^97[1-6]\d{2}$/.test(postal)) return postal.slice(0, 3);
+            if (/^20\d{3}$/.test(postal)) {
+              const numeric = Number(postal);
+              if (numeric >= 20000 && numeric <= 20199) return '2A';
+              if (numeric >= 20200 && numeric <= 20699) return '2B';
+              return null;
+            }
+            if (/^\d{5}$/.test(postal)) return postal.slice(0, 2);
+            return null;
+          }
+
+          function actualDepartment(row) {
+            return (
+              normalizeDepartment(row.workplaceDepartment) ||
+              departmentFromPostalCode(row.workplaceZipcode)
+            );
+          }
+
+          (async () => {
+            const [oct4Snap, oct6Snap] = await Promise.all([
+              db.collection('jobOfferObservations')
+                .where('date', '==', '2026-10-04')
+                .get(),
+              db.collection('jobOfferObservations')
+                .where('date', '==', '2026-10-06')
+                .get(),
+            ]);
+
+            const oct6ByOfferId = new Map();
+
+            for (const doc of oct6Snap.docs) {
+              const row = doc.data() || {};
+              const offerId = String(row.offerId || '').trim();
+              const departmentCode = actualDepartment(row);
+
+              if (!offerId || !departmentCode) continue;
+
+              oct6ByOfferId.set(offerId, {
+                departmentCode,
+                postalCode: row.workplaceZipcode || null,
+                city: row.workplaceCity || null,
+                workplaceDepartment: row.workplaceDepartment || null,
+                siret: row.workplaceSiret || null,
+              });
+            }
+
+            const result = {
+              oct4Observations: oct4Snap.size,
+              oct6Observations: oct6Snap.size,
+              oct6LocatedOfferIds: oct6ByOfferId.size,
+              overlappingLocatedOffers: 0,
+              matchedRequestedDepartment: 0,
+              outOfRequestedDepartment: 0,
+              unresolvedFromOct6: 0,
+              samples: [],
+            };
+
+            for (const doc of oct4Snap.docs) {
+              const row = doc.data() || {};
+              const offerId = String(row.offerId || '').trim();
+              const requestedDepartment =
+                normalizeDepartment(row.departmentCode);
+              const recovered = oct6ByOfferId.get(offerId);
+
+              if (!recovered) {
+                result.unresolvedFromOct6 += 1;
+                continue;
+              }
+
+              result.overlappingLocatedOffers += 1;
+
+              if (recovered.departmentCode === requestedDepartment) {
+                result.matchedRequestedDepartment += 1;
+              } else {
+                result.outOfRequestedDepartment += 1;
+              }
+
+              if (result.samples.length < 10) {
+                result.samples.push({
+                  offerId,
+                  requestedDepartment,
+                  ...recovered,
+                });
+              }
+            }
+
+            result.recoveryRate = Number(
+              (
+                result.overlappingLocatedOffers /
+                Math.max(1, result.oct4Observations)
+              ).toFixed(4)
+            );
+
+            result.requestedDepartmentMatchRate = Number(
+              (
+                result.matchedRequestedDepartment /
+                Math.max(1, result.overlappingLocatedOffers)
+              ).toFixed(4)
+            );
+
+            console.log(JSON.stringify(result, null, 2));
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
