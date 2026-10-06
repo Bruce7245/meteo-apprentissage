@@ -1,0 +1,144 @@
+name: Prepare occupation vigilance calibration
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/prepare-occupation-vigilance-calibration.yml
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Build occupation context and calibration draft
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Validate Functions syntax
+        run: |
+          node --check functions/occupation-vigilance-precompute.cjs
+          node --check functions/scripts/build-occupation-calibration.cjs
+
+      - name: Run Functions unit tests
+        run: npm run test:unit --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Prepare occupation context and history
+        working-directory: functions
+        env:
+          TARGET_DATE: "2026-10-06"
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+          const precompute = require('./occupation-vigilance-precompute.cjs');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+          const date = process.env.TARGET_DATE;
+
+          (async () => {
+            const repository =
+              precompute.createFirestoreOccupationPrecomputeRepository(
+                db,
+                {
+                  FieldValue: admin.firestore.FieldValue,
+                  FieldPath: admin.firestore.FieldPath,
+                }
+              );
+
+            const result = await precompute.prepareOccupationVigilanceInputs({
+              date,
+              repository,
+            });
+
+            console.log(JSON.stringify(result, null, 2));
+
+            if (
+              result.status !== 'ready' ||
+              Number(result.contextsCount || 0) <= 0 ||
+              Number(result.historiesCount || 0) <= 0
+            ) {
+              throw new Error('Occupation precompute did not produce usable context/history');
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Inspect prepared document counts
+        working-directory: functions
+        env:
+          TARGET_DATE: "2026-10-06"
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+          const date = process.env.TARGET_DATE;
+
+          (async () => {
+            const [contextRun, historyRun, contexts] = await Promise.all([
+              db.collection('occupationContextStatsRuns').doc(date).get(),
+              db.collection('occupationHistoryStatsRuns').doc(date).get(),
+              db.collection('occupationContextStats').where('date', '==', date).get(),
+            ]);
+
+            const contextData = contextRun.exists ? contextRun.data() : null;
+            const historyData = historyRun.exists ? historyRun.data() : null;
+
+            const romeCodes = new Set();
+            const departments = new Set();
+
+            for (const doc of contexts.docs) {
+              const data = doc.data() || {};
+              if (data.romeCode) romeCodes.add(data.romeCode);
+              if (data.departmentCode) departments.add(data.departmentCode);
+            }
+
+            console.log(JSON.stringify({
+              ok: true,
+              date,
+              contextRun: contextData,
+              historyRun: historyData,
+              contextDocuments: contexts.size,
+              departments: departments.size,
+              distinctRomeCodes: romeCodes.size,
+            }, null, 2));
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Build calibration draft
+        working-directory: functions
+        run: node scripts/build-occupation-calibration.cjs
