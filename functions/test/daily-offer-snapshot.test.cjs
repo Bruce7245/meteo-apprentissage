@@ -114,3 +114,40 @@ test('buildOccupationOfferSummary keeps public totals and exact ROME aggregates'
     { code: 'D1106', label: 'D1106', offers: 1, openings: 1 }
   );
 });
+
+
+test('dedupeOccupationOffers keeps one deterministic offer per offerDocId', () => {
+  assert.equal(typeof snapshot.dedupeOccupationOffers, 'function');
+
+  const deduped = snapshot.dedupeOccupationOffers([
+    {
+      offerDocId: 'same',
+      openingCount: 1,
+      romeCodes: ['D1102'],
+      title: 'Boulanger',
+    },
+    {
+      offerDocId: 'same',
+      openingCount: 2,
+      romeCodes: ['D1102', 'D1106'],
+      title: 'Boulanger',
+    },
+    {
+      offerDocId: 'other',
+      openingCount: 1,
+      romeCodes: ['D1102'],
+      title: 'Autre offre',
+    },
+  ]);
+
+  assert.equal(deduped.length, 2);
+  assert.deepEqual(
+    deduped.find((offer) => offer.offerDocId === 'same'),
+    {
+      offerDocId: 'same',
+      openingCount: 2,
+      romeCodes: ['D1102', 'D1106'],
+      title: 'Boulanger',
+    }
+  );
+});
