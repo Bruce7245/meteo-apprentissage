@@ -174,3 +174,46 @@ test('buildOccupationOfferSnapshot extracts postal code and city from LBA addres
   assert.equal(result.locationQuality, 'in_department');
   assert.equal(result.isInRequestedDepartment, true);
 });
+
+
+test('buildHistoricalDepartmentSnapshot excludes recruiter records and deduplicates offers', () => {
+  assert.equal(typeof snapshot.buildHistoricalDepartmentSnapshot, 'function');
+
+  const result = snapshot.buildHistoricalDepartmentSnapshot(
+    [
+      {
+        offerId: 'partner:1',
+        partnerLabel: 'source-a',
+        openingCount: 1,
+        romeCodes: ['D1102'],
+        workplaceZipcode: '72000',
+      },
+      {
+        offerId: 'partner:1',
+        partnerLabel: 'source-a',
+        openingCount: 2,
+        romeCodes: ['D1102', 'D1106'],
+        workplaceZipcode: '72000',
+      },
+      {
+        offerId: 'recruiter:1',
+        partnerLabel: 'recruteurs_lba',
+        openingCount: 1,
+        romeCodes: ['D1102'],
+        workplaceZipcode: '72000',
+      },
+    ],
+    {
+      runId: 'historical_2026-10-04_test',
+      targetDate: '2026-10-04',
+      departmentCode: '72',
+    }
+  );
+
+  assert.equal(result.offers.length, 1);
+  assert.equal(result.offers[0].openingCount, 2);
+  assert.deepEqual(result.offers[0].romeCodes, ['D1102', 'D1106']);
+  assert.equal(result.summary.totalOffers, 1);
+  assert.equal(result.summary.totalOpenings, 2);
+  assert.equal(result.strictSummary.totalOffers, 1);
+});
