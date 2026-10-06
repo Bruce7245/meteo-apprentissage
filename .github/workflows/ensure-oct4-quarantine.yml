@@ -1,0 +1,251 @@
+name: Ensure Oct 4 remains quarantined
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/ensure-oct4-quarantine.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ensure-oct4-quarantine
+  cancel-in-progress: false
+
+jobs:
+  quarantine:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - run: npm ci --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Wait for any in-flight Oct 4 rebuild and quarantine it
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+          const date = '2026-10-04';
+
+          const sleep = (ms) =>
+            new Promise((resolve) => setTimeout(resolve, ms));
+
+          async function deleteQueryInBatches(query, batchSize = 400) {
+            let deleted = 0;
+
+            while (true) {
+              const snapshot = await query.limit(batchSize).get();
+              if (snapshot.empty) break;
+
+              const batch = db.batch();
+              snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+              await batch.commit();
+
+              deleted += snapshot.size;
+              if (snapshot.size < batchSize) break;
+            }
+
+            return deleted;
+          }
+
+          async function removeDerivedData() {
+            const departmentsRef = db
+              .collection('dailyOfferSnapshots')
+              .doc(date)
+              .collection('departments');
+
+            const departments = await departmentsRef.get();
+
+            let batch = db.batch();
+            let operations = 0;
+
+            for (const doc of departments.docs) {
+              batch.set(
+                doc.ref,
+                {
+                  activeRunId:
+                    admin.firestore.FieldValue.delete(),
+                  strictSummary:
+                    admin.firestore.FieldValue.delete(),
+                  qualityStatus: 'quarantined',
+                  qualityReason:
+                    'historical_location_missing',
+                  quarantinedAt:
+                    admin.firestore.FieldValue.serverTimestamp(),
+                },
+                { merge: true }
+              );
+
+              operations += 1;
+
+              if (operations >= 400) {
+                await batch.commit();
+                batch = db.batch();
+                operations = 0;
+              }
+            }
+
+            if (operations > 0) {
+              await batch.commit();
+            }
+
+            const deletedContexts =
+              await deleteQueryInBatches(
+                db.collection('occupationContextStats')
+                  .where('date', '==', date)
+              );
+
+            await db
+              .collection('occupationContextStatsRuns')
+              .doc(date)
+              .delete()
+              .catch(() => {});
+
+            const configs = await db
+              .collection('occupationVigilanceConfigs')
+              .get();
+
+            let deletedDrafts = 0;
+
+            for (const doc of configs.docs) {
+              const data = doc.data() || {};
+
+              if (
+                data.status === 'draft' &&
+                data?.calibration?.windowStart === date
+              ) {
+                await doc.ref.delete();
+                deletedDrafts += 1;
+              }
+            }
+
+            return {
+              departments: departments.size,
+              deletedContexts,
+              deletedDrafts,
+            };
+          }
+
+          (async () => {
+            const runRef = db
+              .collection('occupationContextStatsRuns')
+              .doc(date);
+
+            let sawRebuild = false;
+
+            for (let attempt = 0; attempt < 120; attempt += 1) {
+              const run = await runRef.get();
+
+              if (run.exists) {
+                sawRebuild = true;
+                break;
+              }
+
+              await sleep(10000);
+            }
+
+            if (!sawRebuild) {
+              console.log(
+                'No Oct 4 context rebuild observed; applying quarantine anyway.'
+              );
+            }
+
+            const firstCleanup = await removeDerivedData();
+
+            // Let any immediately-following verification/calibration step
+            // finish or fail, then clean once more to close the race.
+            await sleep(45000);
+
+            const secondCleanup = await removeDerivedData();
+
+            const [
+              contexts,
+              run,
+              departments,
+              configs,
+            ] = await Promise.all([
+              db.collection('occupationContextStats')
+                .where('date', '==', date)
+                .limit(1)
+                .get(),
+              runRef.get(),
+              db.collection('dailyOfferSnapshots')
+                .doc(date)
+                .collection('departments')
+                .get(),
+              db.collection('occupationVigilanceConfigs')
+                .get(),
+            ]);
+
+            let activePointers = 0;
+            let strictSummaries = 0;
+
+            for (const doc of departments.docs) {
+              const data = doc.data() || {};
+              if (data.activeRunId) activePointers += 1;
+              if (data.strictSummary) strictSummaries += 1;
+            }
+
+            const oct4Drafts = configs.docs.filter((doc) => {
+              const data = doc.data() || {};
+              return (
+                data.status === 'draft' &&
+                data?.calibration?.windowStart === date
+              );
+            });
+
+            const result = {
+              ok:
+                contexts.empty &&
+                !run.exists &&
+                activePointers === 0 &&
+                strictSummaries === 0 &&
+                oct4Drafts.length === 0,
+              date,
+              sourceObservationsPreserved: true,
+              sawRebuild,
+              firstCleanup,
+              secondCleanup,
+              departments: departments.size,
+              activePointers,
+              strictSummaries,
+              remainingContexts: contexts.size,
+              contextRunExists: run.exists,
+              oct4Drafts: oct4Drafts.map((doc) => doc.id),
+            };
+
+            console.log(JSON.stringify(result, null, 2));
+
+            if (!result.ok) {
+              throw new Error(
+                'Oct 4 quarantine verification failed: ' +
+                  JSON.stringify(result)
+              );
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
