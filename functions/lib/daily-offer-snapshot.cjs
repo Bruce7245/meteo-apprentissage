@@ -18,6 +18,31 @@ function normalizeDepartmentCode(value) {
   return null;
 }
 
+function parseAddressText(value) {
+  const address = cleanText(value);
+
+  if (!address) {
+    return {
+      postalCode: null,
+      city: null,
+    };
+  }
+
+  const match = address.match(/\b(\d{5})\b\s*(.*)$/);
+
+  if (!match) {
+    return {
+      postalCode: null,
+      city: null,
+    };
+  }
+
+  return {
+    postalCode: cleanText(match[1]),
+    city: cleanText(match[2]),
+  };
+}
+
 function departmentFromPostalCode(value) {
   const postalCode = cleanText(value);
   if (!postalCode) return null;
@@ -115,10 +140,22 @@ function buildOccupationOfferSnapshot(
     throw new Error('Snapshot offerId is required');
   }
 
+  const parsedAddress = parseAddressText(
+    observation.workplaceAddress ||
+    observation.address
+  );
+
   const postalCode = cleanText(
     observation.postalCode ||
-    observation.workplaceZipcode
+    observation.workplaceZipcode ||
+    parsedAddress.postalCode
   );
+  const city = cleanText(
+    observation.city ||
+    observation.workplaceCity ||
+    parsedAddress.city
+  );
+
   const effectiveDepartmentCode =
     normalizeDepartmentCode(observation.effectiveDepartmentCode) ||
     departmentFromPostalCode(postalCode);
@@ -182,7 +219,7 @@ function buildOccupationOfferSnapshot(
       observation.workplaceSiret
     ),
 
-    city: cleanText(observation.city || observation.workplaceCity),
+    city,
     postalCode,
     effectiveDepartmentCode,
     locationQuality,
