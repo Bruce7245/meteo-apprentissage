@@ -217,3 +217,50 @@ test('buildHistoricalDepartmentSnapshot excludes recruiter records and deduplica
   assert.equal(result.summary.totalOpenings, 2);
   assert.equal(result.strictSummary.totalOffers, 1);
 });
+
+
+test('applyHistoricalLocationRecovery overlays recovered location without changing offer identity', () => {
+  assert.equal(typeof snapshot.applyHistoricalLocationRecovery, 'function');
+
+  const result = snapshot.applyHistoricalLocationRecovery(
+    {
+      offerId: 'offer-123',
+      partnerLabel: 'source-a',
+      workplaceSiret: '12345678901234',
+      workplaceZipcode: null,
+      workplaceCity: null,
+      workplaceDepartment: null,
+      romeCodes: ['D1102'],
+    },
+    {
+      source: 'oct6Snapshot',
+      departmentCode: '75',
+      postalCode: '75001',
+      city: 'Paris',
+    }
+  );
+
+  assert.equal(result.offerId, 'offer-123');
+  assert.equal(result.workplaceSiret, '12345678901234');
+  assert.equal(result.workplaceDepartment, '75');
+  assert.equal(result.workplaceZipcode, '75001');
+  assert.equal(result.workplaceCity, 'Paris');
+  assert.equal(result.locationRecoverySource, 'oct6Snapshot');
+});
+
+test('applyHistoricalLocationRecovery leaves unresolved observation location empty', () => {
+  const result = snapshot.applyHistoricalLocationRecovery(
+    {
+      offerId: 'offer-456',
+      workplaceZipcode: null,
+      workplaceCity: null,
+      workplaceDepartment: null,
+    },
+    null
+  );
+
+  assert.equal(result.offerId, 'offer-456');
+  assert.equal(result.workplaceDepartment, null);
+  assert.equal(result.workplaceZipcode, null);
+  assert.equal(result.locationRecoverySource, null);
+});
