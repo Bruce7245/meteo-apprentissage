@@ -153,3 +153,161 @@ test('extractRomeReferenceEntries retains official employment aliases as search 
     'Développeuse web',
   ]);
 });
+
+
+test('extractRomeDomainReferenceEntries reads official-style professional-domain rows', () => {
+  assert.equal(typeof romeOpenData.extractRomeDomainReferenceEntries, 'function');
+
+  const payload = [
+    {
+      code_grand_domaine: 'G',
+      libelle_grand_domaine: 'Hôtellerie-Restauration Tourisme Loisirs et Animation',
+      code_domaine_professionnel: 'G12',
+      libelle_domaine_professionnel: "Animation d'activités de loisirs",
+      code_rome: 'G1204',
+    },
+    {
+      code_grand_domaine: 'G',
+      libelle_grand_domaine: 'Hôtellerie-Restauration Tourisme Loisirs et Animation',
+      code_domaine_professionnel: 'G12',
+      libelle_domaine_professionnel: "Animation d'activités de loisirs",
+      code_rome: 'G1205',
+    },
+    {
+      code_grand_domaine: 'D',
+      libelle_grand_domaine: 'Commerce, Vente et Grande distribution',
+      code_domaine_professionnel: 'D11',
+      libelle_domaine_professionnel: 'Commerce alimentaire et métiers de bouche',
+      code_rome: 'D1108',
+    },
+  ];
+
+  const occupationEntries = [
+    { romeCode: 'D1108', label: 'Vente en alimentation' },
+    { romeCode: 'G1204', label: 'Educateur sportif / Educatrice sportive' },
+    { romeCode: 'G1205', label: "Opérateur / Opératrice d'attraction" },
+  ];
+
+  assert.deepEqual(
+    romeOpenData.extractRomeDomainReferenceEntries(
+      payload,
+      occupationEntries,
+      {
+        source: 'france-travail-rome-main-tree',
+        sourceVersion: 'sha256:tree',
+        occupationSourceVersion: 'sha256:occupations',
+      }
+    ),
+    [
+      {
+        domainCode: 'D11',
+        domainLabel: 'Commerce alimentaire et métiers de bouche',
+        majorDomainCode: 'D',
+        majorDomainLabel: 'Commerce, Vente et Grande distribution',
+        normalizedLabel: 'commerce alimentaire et metiers de bouche',
+        romeCodes: ['D1108'],
+        source: 'france-travail-rome-main-tree',
+        sourceVersion: 'sha256:tree',
+        occupationSourceVersion: 'sha256:occupations',
+      },
+      {
+        domainCode: 'G12',
+        domainLabel: "Animation d'activités de loisirs",
+        majorDomainCode: 'G',
+        majorDomainLabel: 'Hôtellerie-Restauration Tourisme Loisirs et Animation',
+        normalizedLabel: 'animation d activites de loisirs',
+        romeCodes: ['G1204', 'G1205'],
+        source: 'france-travail-rome-main-tree',
+        sourceVersion: 'sha256:tree',
+        occupationSourceVersion: 'sha256:occupations',
+      },
+    ]
+  );
+});
+
+test('extractRomeDomainReferenceEntries merges duplicate domain rows deterministically', () => {
+  const payload = [
+    {
+      code_domaine_professionnel: 'G12',
+      libelle_domaine_professionnel: "Animation d'activités de loisirs",
+      code_grand_domaine: 'G',
+      libelle_grand_domaine: 'Hôtellerie-Restauration Tourisme Loisirs et Animation',
+      code_rome: 'G1205',
+    },
+    {
+      code_domaine_professionnel: 'G12',
+      libelle_domaine_professionnel: "Animation d'activités de loisirs",
+      code_grand_domaine: 'G',
+      libelle_grand_domaine: 'Hôtellerie-Restauration Tourisme Loisirs et Animation',
+      code_rome: 'G1204',
+    },
+    {
+      code_domaine_professionnel: 'G12',
+      libelle_domaine_professionnel: '',
+      code_grand_domaine: 'G',
+      libelle_grand_domaine: 'Hôtellerie-Restauration Tourisme Loisirs et Animation',
+      code_rome: 'G1206',
+    },
+  ];
+
+  const result = romeOpenData.extractRomeDomainReferenceEntries(
+    payload,
+    [
+      { romeCode: 'G1204', label: 'A' },
+      { romeCode: 'G1205', label: 'B' },
+      { romeCode: 'G1206', label: 'C' },
+    ],
+    {}
+  );
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].domainCode, 'G12');
+  assert.equal(result[0].domainLabel, "Animation d'activités de loisirs");
+  assert.deepEqual(result[0].romeCodes, ['G1204', 'G1205']);
+});
+
+test('extractRomeDomainReferenceEntries only attaches occupations to an official extracted domain', () => {
+  const result = romeOpenData.extractRomeDomainReferenceEntries(
+    [
+      {
+        code_domaine_professionnel: 'G12',
+        libelle_domaine_professionnel: "Animation d'activités de loisirs",
+        code_grand_domaine: 'G',
+        libelle_grand_domaine: 'Hôtellerie-Restauration Tourisme Loisirs et Animation',
+      },
+    ],
+    [
+      { romeCode: 'G1204', label: 'Educateur sportif / Educatrice sportive' },
+      { romeCode: 'G1299', label: 'Métier test du domaine' },
+      { romeCode: 'D1108', label: 'Vente en alimentation' },
+    ],
+    {}
+  );
+
+  assert.deepEqual(result[0].romeCodes, ['G1204', 'G1299']);
+  assert.equal(result.some((entry) => entry.domainCode === 'D11'), false);
+});
+
+test('validateRomeDomainReference reports unexplained occupation prefixes', () => {
+  assert.equal(typeof romeOpenData.validateRomeDomainReference, 'function');
+
+  const result = romeOpenData.validateRomeDomainReference(
+    [
+      {
+        domainCode: 'G12',
+        domainLabel: "Animation d'activités de loisirs",
+        majorDomainCode: 'G',
+        majorDomainLabel: 'Hôtellerie-Restauration Tourisme Loisirs et Animation',
+        romeCodes: ['G1204'],
+      },
+    ],
+    [
+      { romeCode: 'G1204', label: 'Educateur sportif / Educatrice sportive' },
+      { romeCode: 'D1108', label: 'Vente en alimentation' },
+    ]
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.domainsCount, 1);
+  assert.deepEqual(result.unmappedRomeCodes, ['D1108']);
+});
