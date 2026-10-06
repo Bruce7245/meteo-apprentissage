@@ -151,3 +151,26 @@ test('dedupeOccupationOffers keeps one deterministic offer per offerDocId', () =
     }
   );
 });
+
+
+test('buildOccupationOfferSnapshot extracts postal code and city from LBA address text', () => {
+  const result = snapshot.buildOccupationOfferSnapshot(
+    {
+      offerId: 'partner:address',
+      openingCount: 1,
+      romeCodes: ['D1102'],
+      workplaceAddress: '38 RUE DES MINIMES 72000 LE MANS',
+    },
+    {
+      runId: 'run-address',
+      targetDate: '2026-10-06',
+      departmentCode: '72',
+    }
+  );
+
+  assert.equal(result.postalCode, '72000');
+  assert.equal(result.city, 'LE MANS');
+  assert.equal(result.effectiveDepartmentCode, '72');
+  assert.equal(result.locationQuality, 'in_department');
+  assert.equal(result.isInRequestedDepartment, true);
+});
