@@ -201,6 +201,41 @@ function buildOccupationOfferSnapshot(
   };
 }
 
+function dedupeOccupationOffers(offers = []) {
+  const unique = new Map();
+
+  for (const offer of Array.isArray(offers) ? offers : []) {
+    const key = cleanText(offer?.offerDocId);
+    if (!key) continue;
+
+    const current = unique.get(key);
+    if (!current) {
+      unique.set(key, {
+        ...offer,
+        romeCodes: normalizeRomeCodes(offer?.romeCodes),
+      });
+      continue;
+    }
+
+    const currentOpenings = toPositiveNumber(current.openingCount, 1);
+    const candidateOpenings = toPositiveNumber(offer?.openingCount, 1);
+    const preferred =
+      candidateOpenings > currentOpenings ? offer : current;
+
+    unique.set(key, {
+      ...preferred,
+      openingCount: Math.max(currentOpenings, candidateOpenings),
+      romeCodes: normalizeRomeCodes([
+        ...(Array.isArray(current.romeCodes) ? current.romeCodes : []),
+        ...(Array.isArray(offer?.romeCodes) ? offer.romeCodes : []),
+      ]),
+    });
+  }
+
+  return Array.from(unique.values())
+    .sort((a, b) => String(a.offerDocId).localeCompare(String(b.offerDocId)));
+}
+
 function addStat(map, key, label, openingCount) {
   const normalizedKey = cleanText(key);
   if (!normalizedKey) return;
@@ -283,5 +318,6 @@ function buildOccupationOfferSummary(offers = []) {
 
 module.exports = {
   buildOccupationOfferSnapshot,
+  dedupeOccupationOffers,
   buildOccupationOfferSummary,
 };
