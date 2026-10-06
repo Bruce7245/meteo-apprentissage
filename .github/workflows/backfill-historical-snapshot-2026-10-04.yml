@@ -1,14 +1,7 @@
 name: Backfill historical snapshot 2026-10-04
 
 on:
-  push:
-    branches:
-      - feat/occupation-search-37
-    paths:
-      - .github/workflows/backfill-historical-snapshot-2026-10-04.yml
-      - functions/scripts/backfill-historical-daily-offer-snapshot.cjs
-      - functions/lib/daily-offer-snapshot.cjs
-      - functions/test/daily-offer-snapshot.test.cjs
+  workflow_dispatch:
 
 permissions:
   contents: read
