@@ -102,6 +102,50 @@ jobs:
                 if (data.workplaceSiret) withSiret += 1;
               }
 
+              const [
+                lbaObsSnap,
+                rawCaptureSnap,
+                detailsSnap,
+              ] = await Promise.all([
+                db.collection('lbaOfferObservations')
+                  .where('observedDate', '==', date)
+                  .get(),
+                db.collection('lbaRawOfferCaptureItems')
+                  .where('observedDate', '==', date)
+                  .get(),
+                db.collection('jobOfferDetails')
+                  .where('detailLastFetchedDate', '==', date)
+                  .get(),
+              ]);
+
+              function coverage(snapshot, extractor) {
+                let rowsWithDepartment = 0;
+                let rowsWithPostalCode = 0;
+                let rowsWithCity = 0;
+                const samples = [];
+
+                for (const doc of snapshot.docs) {
+                  const row = extractor(doc.data() || {});
+                  if (row.departmentCode) rowsWithDepartment += 1;
+                  if (row.postalCode) rowsWithPostalCode += 1;
+                  if (row.city) rowsWithCity += 1;
+                  if (
+                    samples.length < 5 &&
+                    (row.departmentCode || row.postalCode || row.city)
+                  ) {
+                    samples.push(row);
+                  }
+                }
+
+                return {
+                  count: snapshot.size,
+                  rowsWithDepartment,
+                  rowsWithPostalCode,
+                  rowsWithCity,
+                  samples,
+                };
+              }
+
               result[date] = {
                 departmentDailyStats: statsSnap.size,
                 observations: obsSnap.size,
@@ -120,6 +164,43 @@ jobs:
                   workplaceDepartments: Array.from(departmentSamples),
                   addresses: Array.from(addressSamples),
                   zipcodes: Array.from(zipcodeSamples),
+                },
+                alternateHistoricalSources: {
+                  lbaOfferObservations: coverage(
+                    lbaObsSnap,
+                    (data) => ({
+                      offerId: data.offerId || null,
+                      departmentCode: data.departmentCode || null,
+                      postalCode: data.postalCode || null,
+                      city: data.city || null,
+                    })
+                  ),
+                  lbaRawOfferCaptureItems: coverage(
+                    rawCaptureSnap,
+                    (data) => ({
+                      offerId: data.offerId || null,
+                      departmentCode:
+                        data?.normalized?.inferredDepartmentCode ||
+                        data?.normalized?.departmentCode ||
+                        null,
+                      postalCode:
+                        data?.normalized?.postalCode || null,
+                      city:
+                        data?.normalized?.city || null,
+                    })
+                  ),
+                  jobOfferDetails: coverage(
+                    detailsSnap,
+                    (data) => ({
+                      offerId: data.offerId || null,
+                      departmentCode:
+                        data.workplaceDepartment || null,
+                      postalCode:
+                        data.workplaceZipcode || null,
+                      city:
+                        data.workplaceCity || null,
+                    })
+                  ),
                 },
               };
             }
