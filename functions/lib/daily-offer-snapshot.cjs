@@ -273,6 +273,40 @@ function dedupeOccupationOffers(offers = []) {
     .sort((a, b) => String(a.offerDocId).localeCompare(String(b.offerDocId)));
 }
 
+function applyHistoricalLocationRecovery(
+  observation = {},
+  recoveredLocation = null
+) {
+  const recovered = recoveredLocation && typeof recoveredLocation === 'object'
+    ? recoveredLocation
+    : null;
+
+  if (!recovered) {
+    return {
+      ...observation,
+      locationRecoverySource: null,
+    };
+  }
+
+  return {
+    ...observation,
+    workplaceDepartment:
+      cleanText(recovered.departmentCode) ||
+      observation.workplaceDepartment ||
+      null,
+    workplaceZipcode:
+      cleanText(recovered.postalCode) ||
+      observation.workplaceZipcode ||
+      null,
+    workplaceCity:
+      cleanText(recovered.city) ||
+      observation.workplaceCity ||
+      null,
+    locationRecoverySource:
+      cleanText(recovered.source) || null,
+  };
+}
+
 function buildHistoricalDepartmentSnapshot(
   observations = [],
   { runId, targetDate, departmentCode } = {}
@@ -388,4 +422,5 @@ module.exports = {
   dedupeOccupationOffers,
   buildOccupationOfferSummary,
   buildHistoricalDepartmentSnapshot,
+  applyHistoricalLocationRecovery,
 };
