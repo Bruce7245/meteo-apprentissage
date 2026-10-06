@@ -311,3 +311,87 @@ test('validateRomeDomainReference reports unexplained occupation prefixes', () =
   assert.equal(result.domainsCount, 1);
   assert.deepEqual(result.unmappedRomeCodes, ['D1108']);
 });
+
+
+test('extractRomeDomainReferenceEntries reads the official main-tree workbook matrix', () => {
+  const payload = [
+    [' ', ' ', ' ', ' ', 'Code OGR'],
+    [
+      'G',
+      ' ',
+      ' ',
+      'Hôtellerie-Restauration Tourisme Loisirs et Animation',
+      ' ',
+    ],
+    ['G', '12', ' ', "Animation d'activités de loisirs", ' '],
+    [
+      'G',
+      '12',
+      '04',
+      'Educateur sportif / Educatrice sportive',
+      '123',
+    ],
+    [
+      'G',
+      '12',
+      '05',
+      "Opérateur / Opératrice d'attraction",
+      '456',
+    ],
+    [
+      'D',
+      ' ',
+      ' ',
+      'Commerce, Vente et Grande distribution',
+      ' ',
+    ],
+    [
+      'D',
+      '11',
+      ' ',
+      'Commerce alimentaire et métiers de bouche',
+      ' ',
+    ],
+  ];
+
+  const result = romeOpenData.extractRomeDomainReferenceEntries(
+    payload,
+    [
+      { romeCode: 'D1108', label: 'Vente en alimentation' },
+      { romeCode: 'G1204', label: 'Educateur sportif / Educatrice sportive' },
+      { romeCode: 'G1205', label: "Opérateur / Opératrice d'attraction" },
+    ],
+    {
+      source: 'france-travail-rome-main-tree',
+      sourceVersion: 'sha256:tree',
+      occupationSourceVersion: 'sha256:occupations',
+    }
+  );
+
+  assert.deepEqual(
+    result.map((entry) => ({
+      domainCode: entry.domainCode,
+      domainLabel: entry.domainLabel,
+      majorDomainCode: entry.majorDomainCode,
+      majorDomainLabel: entry.majorDomainLabel,
+      romeCodes: entry.romeCodes,
+    })),
+    [
+      {
+        domainCode: 'D11',
+        domainLabel: 'Commerce alimentaire et métiers de bouche',
+        majorDomainCode: 'D',
+        majorDomainLabel: 'Commerce, Vente et Grande distribution',
+        romeCodes: ['D1108'],
+      },
+      {
+        domainCode: 'G12',
+        domainLabel: "Animation d'activités de loisirs",
+        majorDomainCode: 'G',
+        majorDomainLabel:
+          'Hôtellerie-Restauration Tourisme Loisirs et Animation',
+        romeCodes: ['G1204', 'G1205'],
+      },
+    ]
+  );
+});
