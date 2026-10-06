@@ -116,8 +116,12 @@ test('buildCalibration refuses sparse history instead of fabricating a productio
     result.validationBlockers.some((item) => item.includes('TOTAL_SAMPLE_COUNT')),
     true
   );
+  assert.deepEqual(result.diagnostics.excludedRomeCodes.D1108, {
+    reason: 'INSUFFICIENT_SAMPLES',
+    samplesCount: 2,
+  });
   assert.equal(
-    result.validationBlockers.some((item) => item.includes('ROME_SAMPLE_COUNT:D1108')),
+    result.validationBlockers.some((item) => item.includes('ELIGIBLE_SAMPLE_COUNT')),
     true
   );
 });
