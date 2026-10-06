@@ -1,0 +1,254 @@
+name: Import national daily offer snapshots
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/import-daily-offer-snapshots-national.yml
+
+permissions:
+  contents: read
+
+jobs:
+  import:
+    name: Import 101 department snapshots
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Load admin key from Secret Manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          BACKFILL_ADMIN_KEY="$(gcloud secrets versions access latest \
+            --secret=BACKFILL_ADMIN_KEY \
+            --project=meteo-apprentissage)"
+          test -n "$BACKFILL_ADMIN_KEY"
+          echo "::add-mask::$BACKFILL_ADMIN_KEY"
+          printf 'BACKFILL_ADMIN_KEY=%s\n' "$BACKFILL_ADMIN_KEY" >> "$GITHUB_ENV"
+
+      - name: Import national snapshots in controlled batches
+        shell: bash
+        env:
+          TARGET_DATE: "2026-10-06"
+        run: |
+          set -euo pipefail
+
+          batches=(
+            "01,02,03,04,05,06,07,08,09,10"
+            "11,12,13,14,15,16,17,18,19,2A"
+            "2B,21,22,23,24,25,26,27,28,29"
+            "30,31,32,33,34,35,36,37,38,39"
+            "40,41,42,43,44,45,46,47,48,49"
+            "50,51,52,53,54,55,56,57,58,59"
+            "60,61,62,63,64,65,66,67,68,69"
+            "70,71,72,73,74,75,76,77,78,79"
+            "80,81,82,83,84,85,86,87,88,89"
+            "90,91,92,93,94,95,971,972,973,974"
+            "976"
+          )
+
+          total_success=0
+          total_requested=0
+
+          for index in "${!batches[@]}"; do
+            batch="${batches[$index]}"
+            expected="$(awk -F',' '{print NF}' <<< "$batch")"
+            total_requested=$((total_requested + expected))
+            response="/tmp/import-$index.json"
+
+            echo "Import batch $((index + 1))/${#batches[@]}: $batch"
+
+            curl --fail-with-body --silent --show-error \
+              --retry 2 \
+              --max-time 540 \
+              -H "x-admin-key: $BACKFILL_ADMIN_KEY" \
+              "https://importdailyoffershttp-n3mitilivq-ew.a.run.app?date=$TARGET_DATE&departments=$batch&write=1&publish=0&delayMs=0" \
+              -o "$response"
+
+            node - "$response" "$expected" <<'NODE'
+          const fs = require('node:fs');
+          const [file, expectedRaw] = process.argv.slice(2);
+          const expected = Number(expectedRaw);
+          const result = JSON.parse(fs.readFileSync(file, 'utf8'));
+
+          const summary = {
+            ok: result.ok,
+            targetDate: result.targetDate,
+            departmentsCount: result.departmentsCount,
+            successCount: result.successCount,
+            errorCount: result.errorCount,
+            totalSnapshotOffers: Array.isArray(result.rows)
+              ? result.rows.reduce(
+                  (sum, row) => sum + Number(row.occupationSnapshotOffersCount || 0),
+                  0
+                )
+              : 0,
+          };
+
+          console.log(JSON.stringify(summary));
+
+          if (
+            result.ok !== true ||
+            Number(result.departmentsCount) !== expected ||
+            Number(result.successCount) !== expected ||
+            Number(result.errorCount) !== 0
+          ) {
+            process.exit(1);
+          }
+          NODE
+
+            successes="$(node -p "require('$response').successCount")"
+            total_success=$((total_success + successes))
+          done
+
+          echo "Requested departments: $total_requested"
+          echo "Successful departments: $total_success"
+
+          test "$total_requested" -eq 101
+          test "$total_success" -eq 101
+
+      - name: Verify all 101 Firestore snapshots
+        working-directory: functions
+        env:
+          TARGET_DATE: "2026-10-06"
+        run: |
+          node <<'NODE'
+          const { initializeApp, getApps } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
+
+          if (getApps().length === 0) {
+            initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = getFirestore();
+          const date = process.env.TARGET_DATE;
+
+          (async () => {
+            const snapshot = await db
+              .collection('dailyOfferSnapshots')
+              .doc(date)
+              .collection('departments')
+              .get();
+
+            const docs = snapshot.docs;
+            if (docs.length !== 101) {
+              throw new Error(
+                `Expected 101 department snapshots for ${date}, got ${docs.length}`
+              );
+            }
+
+            let storedOffers = 0;
+            let strictOffers = 0;
+            let strictOpenings = 0;
+            let departmentsWithOffers = 0;
+            let departmentsWithStrictOffers = 0;
+            let departmentsWithRome = 0;
+            const invalid = [];
+
+            for (const doc of docs) {
+              const meta = doc.data() || {};
+              const activeRunId = String(meta.activeRunId || '').trim();
+
+              if (!activeRunId || !meta.strictSummary) {
+                invalid.push({
+                  departmentCode: doc.id,
+                  reason: !activeRunId ? 'missing_activeRunId' : 'missing_strictSummary',
+                });
+                continue;
+              }
+
+              const offersSnapshot = await doc.ref
+                .collection('offers')
+                .where('runId', '==', activeRunId)
+                .get();
+
+              const offers = offersSnapshot.docs.map((offerDoc) => offerDoc.data() || {});
+              const expectedCount = Number(meta.storedOffersCount || 0);
+              const inDepartment = offers.filter(
+                (offer) => offer.locationQuality === 'in_department'
+              );
+              const withRome = offers.filter(
+                (offer) =>
+                  Array.isArray(offer.romeCodes) &&
+                  offer.romeCodes.length > 0
+              );
+
+              if (offers.length !== expectedCount) {
+                invalid.push({
+                  departmentCode: doc.id,
+                  reason: `storedOffersCount_${expectedCount}_actual_${offers.length}`,
+                });
+                continue;
+              }
+
+              const strictCount = Number(meta.strictSummary.totalOffers || 0);
+              if (strictCount !== inDepartment.length) {
+                invalid.push({
+                  departmentCode: doc.id,
+                  reason: `strict_${strictCount}_actual_${inDepartment.length}`,
+                });
+                continue;
+              }
+
+              storedOffers += offers.length;
+              strictOffers += strictCount;
+              strictOpenings += Number(meta.strictSummary.totalOpenings || 0);
+              if (offers.length > 0) departmentsWithOffers += 1;
+              if (strictCount > 0) departmentsWithStrictOffers += 1;
+              if (withRome.length > 0) departmentsWithRome += 1;
+            }
+
+            if (invalid.length > 0) {
+              console.error(JSON.stringify({ invalid }, null, 2));
+              throw new Error(`${invalid.length} department snapshot(s) invalid`);
+            }
+
+            const result = {
+              ok: true,
+              date,
+              departments: docs.length,
+              storedOffers,
+              strictOffers,
+              strictOpenings,
+              departmentsWithOffers,
+              departmentsWithStrictOffers,
+              departmentsWithRome,
+            };
+
+            console.log(JSON.stringify(result, null, 2));
+
+            if (storedOffers === 0 || strictOffers === 0) {
+              throw new Error('National snapshot contains no usable offers');
+            }
+            if (departmentsWithRome === 0) {
+              throw new Error('No department contains ROME-coded offers');
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
