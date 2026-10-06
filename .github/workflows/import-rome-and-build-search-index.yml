@@ -1,4 +1,4 @@
-name: Import ROME and build search index
+name: Import ROME and build public indexes
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   import-and-build:
-    name: Import ROME and build public search index
+    name: Import ROME and build public indexes
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 30
@@ -36,13 +36,18 @@ jobs:
       - name: Install Functions dependencies
         run: npm ci --prefix functions
 
-      - name: Validate importer and builder syntax
+      - name: Validate importer and builders syntax
         run: |
           node --check scripts/import-rome-reference.mjs
+          node --check functions/build-occupation-domain-index.cjs
           node --check functions/build-occupation-search-index.cjs
 
-      - name: Run ROME parser tests
-        run: node --test functions/test/rome-open-data.test.cjs
+      - name: Run ROME and domain index tests
+        run: |
+          node --test \
+            functions/test/rome-open-data.test.cjs \
+            functions/test/rome-domain-import.test.cjs \
+            functions/test/occupation-domain-index.test.cjs
 
       - name: Dry-run official ROME import
         env:
@@ -54,8 +59,11 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
 
-      - name: Import and publish official ROME reference
+      - name: Import and publish official ROME references
         run: node scripts/import-rome-reference.mjs
+
+      - name: Build and publish public occupation domain index
+        run: node functions/build-occupation-domain-index.cjs
 
       - name: Build and publish public occupation search index
         run: node functions/build-occupation-search-index.cjs
