@@ -225,7 +225,12 @@ function buildCalibration(history, options = {}) {
       baseline * (sample.population15To29 / referencePopulation15To29);
 
     if (expectedAtSamplePopulation > 0) {
-      ratios.push(sample.activeOffersCount / expectedAtSamplePopulation);
+      const ratio =
+        sample.activeOffersCount / expectedAtSamplePopulation;
+
+      if (ratio > 0) {
+        ratios.push(ratio);
+      }
     }
   }
 
