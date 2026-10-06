@@ -359,6 +359,45 @@ function findDomainRecord(object) {
   };
 }
 
+function collectOfficialMainTreeMatrixRecords(rows, output) {
+  if (!Array.isArray(rows) || !rows.every((row) => Array.isArray(row))) {
+    return false;
+  }
+
+  const majorLabels = new Map();
+  let recognizedRows = 0;
+
+  for (const row of rows) {
+    const majorDomainCode = normalizeMajorRomeDomainCode(row?.[0]);
+    const domainSuffix = cleanText(row?.[1]);
+    const occupationSuffix = cleanText(row?.[2]);
+    const label = cleanText(row?.[3]);
+
+    if (!majorDomainCode || !label) continue;
+
+    if (!domainSuffix && !occupationSuffix) {
+      majorLabels.set(majorDomainCode, label);
+      recognizedRows += 1;
+      continue;
+    }
+
+    if (/^[0-9]{2}$/.test(domainSuffix) && !occupationSuffix) {
+      const majorDomainLabel = majorLabels.get(majorDomainCode);
+      if (!majorDomainLabel) continue;
+
+      output.push({
+        domainCode: `${majorDomainCode}${domainSuffix}`,
+        domainLabel: label,
+        majorDomainCode,
+        majorDomainLabel,
+      });
+      recognizedRows += 1;
+    }
+  }
+
+  return recognizedRows > 0;
+}
+
 function collectDomainRecords(node, output, depth = 0) {
   if (!node || depth > 30) return;
 
@@ -400,7 +439,12 @@ function extractRomeDomainReferenceEntries(
   sourceMeta = {}
 ) {
   const records = [];
-  collectDomainRecords(payload, records);
+  const matrixRecognized =
+    collectOfficialMainTreeMatrixRecords(payload, records);
+
+  if (!matrixRecognized) {
+    collectDomainRecords(payload, records);
+  }
 
   const grouped = new Map();
 
