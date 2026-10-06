@@ -1,11 +1,7 @@
 name: Deploy occupation public functions
 
 on:
-  push:
-    branches:
-      - feat/occupation-search-37
-    paths:
-      - .github/workflows/deploy-occupation-public-functions.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -51,5 +47,5 @@ jobs:
           npx --yes firebase-tools@latest deploy
           --project meteo-apprentissage
           --only
-          "functions:getPublicOccupationSearchHttp,functions:getPublicOccupationMapHttp,functions:getPublicOccupationDepartmentHttp,functions:getPublicDepartmentOffersHttp"
+          "functions:getPublicOccupationSearchHttp,functions:getPublicOccupationDomainsHttp,functions:getPublicOccupationDomainOccupationsHttp,functions:getPublicOccupationMapHttp,functions:getPublicOccupationDepartmentHttp,functions:getPublicDepartmentOffersHttp"
           --non-interactive
