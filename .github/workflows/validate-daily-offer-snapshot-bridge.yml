@@ -11,32 +11,11 @@ permissions:
   contents: read
 
 jobs:
-  import:
-    name: Import department 72
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Import department 72 into shared daily snapshot
-        env:
-          BACKFILL_ADMIN_KEY: ${{ secrets.BACKFILL_ADMIN_KEY }}
-        run: |
-          set -euo pipefail
-          test -n "$BACKFILL_ADMIN_KEY"
-          curl --fail-with-body --silent --show-error \
-            --retry 2 \
-            --max-time 540 \
-            -H "x-admin-key: $BACKFILL_ADMIN_KEY" \
-            "https://importdailyoffershttp-n3mitilivq-ew.a.run.app?date=2026-10-06&department=72&write=1&publish=0&delayMs=0" \
-            -o /tmp/import-response.json
-          node -e "const r=require('/tmp/import-response.json'); console.log(JSON.stringify({ok:r.ok,targetDate:r.targetDate,departmentsCount:r.departmentsCount,successCount:r.successCount,errorCount:r.errorCount,rows:r.rows},null,2)); if(!r.ok||r.errorCount!==0||r.successCount!==1) process.exit(1)"
-
-  verify:
-    name: Verify department 72 snapshot
-    needs: import
+  validate:
+    name: Import and verify department 72
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -56,6 +35,32 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Load admin key from Secret Manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          BACKFILL_ADMIN_KEY="$(gcloud secrets versions access latest \
+            --secret=BACKFILL_ADMIN_KEY \
+            --project=meteo-apprentissage)"
+          test -n "$BACKFILL_ADMIN_KEY"
+          echo "::add-mask::$BACKFILL_ADMIN_KEY"
+          printf 'BACKFILL_ADMIN_KEY=%s\n' "$BACKFILL_ADMIN_KEY" >> "$GITHUB_ENV"
+
+      - name: Import department 72 into shared daily snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            --retry 2 \
+            --max-time 540 \
+            -H "x-admin-key: $BACKFILL_ADMIN_KEY" \
+            "https://importdailyoffershttp-n3mitilivq-ew.a.run.app?date=2026-10-06&department=72&write=1&publish=0&delayMs=0" \
+            -o /tmp/import-response.json
+          node -e "const r=require('/tmp/import-response.json'); console.log(JSON.stringify({ok:r.ok,targetDate:r.targetDate,departmentsCount:r.departmentsCount,successCount:r.successCount,errorCount:r.errorCount,rows:r.rows},null,2)); if(!r.ok||r.errorCount!==0||r.successCount!==1) process.exit(1)"
 
       - name: Verify Firestore occupation snapshot
         working-directory: functions
