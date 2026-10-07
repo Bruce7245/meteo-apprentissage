@@ -5,6 +5,7 @@ const {
   activateOccupationVigilanceDraft,
   bearerToken,
   manualCandidateFromDraft,
+  simulateOccupationRows,
   stableManualVersion,
 } = require('../admin-occupation-vigilance-config.cjs');
 
@@ -285,4 +286,149 @@ test('manualCandidateFromDraft keeps calibrated baselines and population immutab
   );
   assert.equal(candidate.thresholds.greenMinRatio, 0.95);
   assert.equal(candidate.historicalTrend.weight, 0.6);
+});
+
+
+test('simulateOccupationRows compares the published snapshot with proposed thresholds without writing data', () => {
+  const active = validCandidate();
+  active.status = 'validated';
+
+  const result = simulateOccupationRows({
+    activeConfig: active,
+    candidateConfig: {
+      thresholds: {
+        greenMinRatio: 0.95,
+        yellowMinRatio: 0.7,
+        orangeMinRatio: 0.45,
+      },
+      minimumGreenActiveOffers: 3,
+      historicalTrend: active.historicalTrend,
+      coefficients: active.coefficients,
+    },
+    romeCode: 'D1108',
+    snapshots: [
+      {
+        departmentCode: '72',
+        departmentName: 'Sarthe',
+        romeCode: 'D1108',
+        romeLabel: 'Vente en alimentation',
+        activeOffersCount: 18,
+        population15To29: 100000,
+        formationsCount: 0,
+        employerConcentration: 0.2,
+        recentTrend: { status: 'stable', changeRatio: 0 },
+        seasonality: { status: 'active', factor: 1 },
+        interannualTrend: {
+          status: 'active',
+          direction: 'stable',
+          annualTrendRatio: 0,
+        },
+        publishedLevel: 'green',
+        expectedOffers: 20,
+        observedVsExpectedRatio: 0.9,
+        effectiveThresholds: {
+          greenMinOffers: 18,
+          yellowMinOffers: 13,
+          orangeMinOffers: 8,
+        },
+      },
+      {
+        departmentCode: '44',
+        departmentName: 'Loire-Atlantique',
+        romeCode: 'D1108',
+        romeLabel: 'Vente en alimentation',
+        activeOffersCount: 25,
+        population15To29: 100000,
+        formationsCount: 0,
+        employerConcentration: 0.2,
+        recentTrend: { status: 'stable', changeRatio: 0 },
+        seasonality: { status: 'active', factor: 1 },
+        interannualTrend: {
+          status: 'active',
+          direction: 'stable',
+          annualTrendRatio: 0,
+        },
+        publishedLevel: 'green',
+        expectedOffers: 20,
+        observedVsExpectedRatio: 1.25,
+        effectiveThresholds: {
+          greenMinOffers: 18,
+          yellowMinOffers: 13,
+          orangeMinOffers: 8,
+        },
+      },
+    ],
+  });
+
+  assert.equal(result.summary.departmentsCount, 2);
+  assert.equal(result.summary.changedCount, 1);
+  assert.equal(result.summary.worsenedCount, 1);
+  assert.equal(result.summary.improvedCount, 0);
+  assert.equal(result.summary.currentLevels.green, 2);
+  assert.equal(result.summary.proposedLevels.green, 1);
+  assert.equal(result.summary.proposedLevels.yellow, 1);
+
+  const sarthe = result.rows.find(
+    (row) => row.departmentCode === '72'
+  );
+
+  assert.equal(sarthe.currentLevel, 'green');
+  assert.equal(sarthe.proposedLevel, 'yellow');
+  assert.equal(sarthe.direction, 'worsened');
+  assert.equal(sarthe.proposedExpectedOffers, 20);
+  assert.equal(
+    sarthe.proposedEffectiveThresholds.greenMinOffers,
+    19
+  );
+});
+
+test('simulateOccupationRows ignores snapshots from other ROME codes', () => {
+  const active = validCandidate();
+  active.status = 'validated';
+
+  const result = simulateOccupationRows({
+    activeConfig: active,
+    candidateConfig: {
+      thresholds: active.thresholds,
+      minimumGreenActiveOffers: active.minimumGreenActiveOffers,
+      historicalTrend: active.historicalTrend,
+      coefficients: active.coefficients,
+    },
+    romeCode: 'D1108',
+    snapshots: [
+      {
+        departmentCode: '72',
+        romeCode: 'D1108',
+        activeOffersCount: 20,
+        population15To29: 100000,
+        formationsCount: 0,
+        employerConcentration: 0.2,
+        seasonality: { status: 'active', factor: 1 },
+        interannualTrend: {
+          status: 'active',
+          direction: 'stable',
+          annualTrendRatio: 0,
+        },
+        publishedLevel: 'green',
+      },
+      {
+        departmentCode: '44',
+        romeCode: 'M1607',
+        activeOffersCount: 1,
+        population15To29: 100000,
+        formationsCount: 0,
+        employerConcentration: 0.2,
+        seasonality: { status: 'active', factor: 1 },
+        interannualTrend: {
+          status: 'active',
+          direction: 'stable',
+          annualTrendRatio: 0,
+        },
+        publishedLevel: 'red',
+      },
+    ],
+  });
+
+  assert.equal(result.summary.departmentsCount, 1);
+  assert.equal(result.rows[0].departmentCode, '72');
 });
