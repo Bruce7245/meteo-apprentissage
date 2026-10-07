@@ -19,6 +19,7 @@ function getNavigationState() {
       (departmentPath && !hasRome),
     occupationActive:
       path === '/metiers' ||
+      path === '/formations' ||
       (departmentPath && hasRome),
   };
 }
