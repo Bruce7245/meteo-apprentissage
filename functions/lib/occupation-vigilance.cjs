@@ -18,6 +18,9 @@ const REASON_CODES = Object.freeze([
   'EMPLOYER_DIVERSITY_LOW',
   'TRAINING_PRESSURE_HIGH',
   'RECENT_TREND_DEGRADING',
+  'INTERANNUAL_TREND_DEGRADING',
+  'INTERANNUAL_TREND_IMPROVING',
+  'INTERANNUAL_TREND_UNAVAILABLE',
 ]);
 
 function round(value, digits = 6) {
@@ -57,6 +60,50 @@ function validateBounds(bounds, name, errors) {
   if (min === null || max === null || min > max) {
     errors.push(`factorBounds.${name} must have positive min <= max`);
   }
+}
+
+function historicalTrendSettings(config) {
+  const raw = config?.historicalTrend || {};
+  const minimumYears = Number.isInteger(raw.minimumYears)
+    ? raw.minimumYears
+    : 3;
+  const weight = finiteNumber(raw.weight);
+  const stableBand = finiteNumber(raw.stableBand);
+  const minFactor = positiveNumber(raw.minFactor);
+  const maxFactor = positiveNumber(raw.maxFactor);
+
+  return {
+    minimumYears,
+    weight:
+      weight !== null && weight >= 0 && weight <= 1
+        ? weight
+        : 0.5,
+    stableBand:
+      stableBand !== null && stableBand >= 0
+        ? stableBand
+        : 0.05,
+    minFactor: minFactor ?? 0.9,
+    maxFactor: maxFactor ?? 1.1,
+  };
+}
+
+function effectiveOfferThresholds(expectedOffers, config) {
+  const expected = nonNegativeNumber(expectedOffers);
+
+  if (expected === null) return null;
+
+  return {
+    greenMinOffers: Math.max(
+      Number(config.minimumGreenActiveOffers),
+      Math.ceil(expected * Number(config.thresholds.greenMinRatio))
+    ),
+    yellowMinOffers: Math.ceil(
+      expected * Number(config.thresholds.yellowMinRatio)
+    ),
+    orangeMinOffers: Math.ceil(
+      expected * Number(config.thresholds.orangeMinRatio)
+    ),
+  };
 }
 
 function validateOccupationVigilanceConfig(config) {
@@ -167,6 +214,27 @@ function validateOccupationVigilanceConfig(config) {
     errors.push(
       'thresholds must satisfy greenMinRatio > yellowMinRatio > orangeMinRatio > 0'
     );
+  }
+
+  if (config.historicalTrend !== undefined) {
+    const settings = historicalTrendSettings(config);
+
+    if (
+      settings.minimumYears < 2 ||
+      settings.minFactor > settings.maxFactor
+    ) {
+      errors.push(
+        'historicalTrend must have minimumYears >= 2 and minFactor <= maxFactor'
+      );
+    }
+
+    const rawWeight = finiteNumber(config.historicalTrend?.weight);
+    if (
+      rawWeight !== null &&
+      (rawWeight < 0 || rawWeight > 1)
+    ) {
+      errors.push('historicalTrend.weight must be between 0 and 1');
+    }
   }
 
   const highMin = finiteNumber(config.confidence?.highMin);
@@ -285,11 +353,30 @@ function computeExpectedOffers(input, config) {
     );
   }
 
+  const historicalSettings = historicalTrendSettings(config);
+  const interannualStatus = input?.interannualTrend?.status;
+  const annualTrendRatio = finiteNumber(
+    input?.interannualTrend?.annualTrendRatio
+  );
+
+  const historicalTrend =
+    interannualStatus === 'active' &&
+    annualTrendRatio !== null
+      ? clamp(
+          1 - annualTrendRatio * historicalSettings.weight,
+          {
+            min: historicalSettings.minFactor,
+            max: historicalSettings.maxFactor,
+          }
+        )
+      : 1;
+
   const factors = {
     population: round(populationFactor),
     trainingPressure: round(trainingPressure),
     diversityFragility: round(diversityFragility),
     seasonality: round(seasonality),
+    historicalTrend: round(historicalTrend),
   };
 
   const rawExpected =
@@ -297,7 +384,8 @@ function computeExpectedOffers(input, config) {
     factors.population *
     factors.trainingPressure *
     factors.diversityFragility *
-    factors.seasonality;
+    factors.seasonality *
+    factors.historicalTrend;
 
   const expectedOffers = round(
     Math.max(Number(config.expectedOffersFloor), rawExpected)
@@ -319,6 +407,7 @@ function insufficientResult(config, reasonCode) {
     observedVsExpectedRatio: null,
     reasonCodes: [reasonCode],
     factors: null,
+    effectiveThresholds: null,
     calculationVersion: config?.calculationVersion || null,
     configVersion: config?.version || null,
   };
@@ -437,6 +526,14 @@ function computeOccupationVigilance(input, config) {
     reasonCodes.push('RECENT_TREND_DEGRADING');
   }
 
+  if (input?.interannualTrend?.status !== 'active') {
+    reasonCodes.push('INTERANNUAL_TREND_UNAVAILABLE');
+  } else if (input?.interannualTrend?.direction === 'degrading') {
+    reasonCodes.push('INTERANNUAL_TREND_DEGRADING');
+  } else if (input?.interannualTrend?.direction === 'improving') {
+    reasonCodes.push('INTERANNUAL_TREND_IMPROVING');
+  }
+
   return {
     publishedLevel,
     confidenceLevel: confidenceLevel(confidenceScore, config),
@@ -445,6 +542,10 @@ function computeOccupationVigilance(input, config) {
     observedVsExpectedRatio,
     reasonCodes,
     factors: expected.factors,
+    effectiveThresholds: effectiveOfferThresholds(
+      expected.expectedOffers,
+      config
+    ),
     calculationVersion: config.calculationVersion,
     configVersion: config.version,
   };
@@ -455,4 +556,5 @@ module.exports = {
   validateOccupationVigilanceConfig,
   computeExpectedOffers,
   computeOccupationVigilance,
+  effectiveOfferThresholds,
 };
