@@ -8,11 +8,6 @@ on:
         required: true
         default: ""
         type: string
-      password_provider_enabled:
-        description: "Firebase Email/Password provider is enabled"
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -29,7 +24,6 @@ jobs:
         shell: bash
         env:
           CONFIRM_DEPLOY: ${{ inputs.confirm_deploy }}
-          PASSWORD_PROVIDER_ENABLED: ${{ inputs.password_provider_enabled }}
         run: |
           set -euo pipefail
 
@@ -44,13 +38,61 @@ jobs:
             exit 1
           fi
 
-          if [ "$PASSWORD_PROVIDER_ENABLED" != "true" ]; then
-            echo "Enable Firebase Email/Password authentication before deployment." >&2
-            exit 1
-          fi
-
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Verify Firebase Email/Password provider
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FIREBASE_WEB_API_KEY="$(node <<'NODE'
+          const fs = require('node:fs');
+          const source = fs.readFileSync('src/firebase.js', 'utf8');
+          const match = source.match(/apiKey:\s*['"]([^'"]+)['"]/);
+
+          if (!match) {
+            console.error('Firebase web API key not found in src/firebase.js');
+            process.exit(1);
+          }
+
+          process.stdout.write(match[1]);
+          NODE
+          )"
+
+          body_file="$(mktemp)"
+          status="$(curl --silent --show-error \
+            --output "$body_file" \
+            --write-out "%{http_code}" \
+            --max-time 30 \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data '{"email":"firebase-provider-probe@invalid.example","password":"ProviderProbe-NotARealCredential-2026!","returnSecureToken":true}' \
+            "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=$FIREBASE_WEB_API_KEY")"
+
+          firebase_error="$(node - "$body_file" <<'NODE'
+          const fs = require('node:fs');
+          const file = process.argv[2];
+          const payload = JSON.parse(fs.readFileSync(file, 'utf8') || '{}');
+          process.stdout.write(String(payload?.error?.message || ''));
+          NODE
+          )"
+
+          case "$firebase_error" in
+            INVALID_LOGIN_CREDENTIALS|EMAIL_NOT_FOUND|INVALID_PASSWORD)
+              echo "Firebase Email/Password provider is enabled."
+              ;;
+            OPERATION_NOT_ALLOWED*)
+              echo "Firebase Email/Password provider is disabled. Deployment refused." >&2
+              exit 1
+              ;;
+            *)
+              echo "Unable to prove Firebase Email/Password is enabled." >&2
+              echo "HTTP status: $status" >&2
+              echo "Firebase error: ${firebase_error:-none}" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -165,7 +207,7 @@ jobs:
             echo
             echo "- Commit: `$GITHUB_SHA`"
             echo "- Branch: `$GITHUB_REF_NAME`"
-            echo "- Auth mode: Firebase Email/Password"
+            echo "- Auth mode: Firebase Email/Password (provider verified before deploy)"
             echo "- Functions: getAdminSessionHttp, recordAdminLogoutHttp"
             echo "- Hosting: deployed after protected Functions"
             echo
