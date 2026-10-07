@@ -128,6 +128,40 @@
         }
       }
     },
+    "historicalTrend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimumYears",
+        "weight",
+        "stableBand",
+        "minFactor",
+        "maxFactor"
+      ],
+      "properties": {
+        "minimumYears": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "stableBand": {
+          "type": "number",
+          "minimum": 0
+        },
+        "minFactor": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxFactor": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
     "confidence": {
       "type": "object",
       "additionalProperties": false,
