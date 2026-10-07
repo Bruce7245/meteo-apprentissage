@@ -12910,3 +12910,75 @@ const lbaDailyOffers = require("./lba-daily-offers");
 exports.backfillDailyOffers = lbaDailyOffers.backfillDailyOffers;
 exports.adminDailyOffers = lbaDailyOffers.adminDailyOffers;
 exports.adminNationalDailyOffers = lbaDailyOffers.adminNationalDailyOffers;
+
+
+const occupationVigilanceAdminConfig = require('./admin-occupation-vigilance-config.cjs');
+
+exports.previewOccupationVigilanceConfigHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceConfigPreview({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
+exports.getOccupationVigilanceConfigHistoryHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceConfigHistory({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
+exports.compareOccupationVigilanceConfigsHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceConfigComparison({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
+exports.activateOccupationVigilanceConfigHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceConfigActivation({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+      FieldValue: admin.firestore.FieldValue,
+    });
+  }
+);
