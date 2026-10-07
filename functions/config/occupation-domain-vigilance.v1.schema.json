@@ -167,6 +167,7 @@
         "invalidSamplesCount",
         "domainCount",
         "minimumSamplesPerDomain",
+        "minimumPositiveSamplesPerDomain",
         "minimumTotalSamples",
         "ratioQuantiles",
         "domainSampleCounts",
@@ -196,6 +197,10 @@
           "minimum": 0
         },
         "minimumSamplesPerDomain": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minimumPositiveSamplesPerDomain": {
           "type": "integer",
           "minimum": 1
         },
