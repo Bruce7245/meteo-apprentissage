@@ -1,0 +1,73 @@
+name: Admin auth tests
+
+on:
+  push:
+    branches:
+      - main
+      - feat/admin-email-password-auth-78
+    paths:
+      - src/components/auth/AdminAuthGate.jsx
+      - src/services/adminSessionService.js
+      - src/App.css
+      - scripts/create-admin.cjs
+      - functions/lib/admin-auth.cjs
+      - functions/admin-occupation-vigilance-config.cjs
+      - functions/index.js
+      - functions/test/admin-auth.test.cjs
+      - .github/workflows/admin-auth-tests.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - src/components/auth/AdminAuthGate.jsx
+      - src/services/adminSessionService.js
+      - src/App.css
+      - scripts/create-admin.cjs
+      - functions/lib/admin-auth.cjs
+      - functions/admin-occupation-vigilance-config.cjs
+      - functions/index.js
+      - functions/test/admin-auth.test.cjs
+      - .github/workflows/admin-auth-tests.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Check backend syntax
+        run: |
+          set -euo pipefail
+          node --check functions/lib/admin-auth.cjs
+          node --check functions/admin-occupation-vigilance-config.cjs
+          node --check functions/index.js
+          node --check scripts/create-admin.cjs
+
+      - name: Run admin auth tests
+        working-directory: functions
+        run: node --test test/admin-auth.test.cjs test/admin-occupation-vigilance-config.test.cjs
+
+      - name: Build frontend
+        run: npm run build
