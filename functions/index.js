@@ -14514,3 +14514,24 @@ exports.runOccupationVigilanceHttp = onRequest(
     });
   }
 );
+
+
+const occupationVigilanceAdminConfig = require('./admin-occupation-vigilance-config.cjs');
+
+exports.activateOccupationVigilanceConfigHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceConfigActivation({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+      FieldValue: admin.firestore.FieldValue,
+    });
+  }
+);
