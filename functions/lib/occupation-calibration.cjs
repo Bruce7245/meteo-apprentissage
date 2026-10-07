@@ -1,6 +1,6 @@
 const crypto = require('node:crypto');
 
-const CALCULATION_VERSION = 'occupationVigilance.v1.1';
+const CALCULATION_VERSION = 'occupationVigilance.v1.2';
 const SECONDARY_SIGNAL_COUNT = 4;
 
 function finiteNumber(value) {
@@ -321,6 +321,13 @@ function buildCalibration(history, options = {}) {
       greenMinRatio: round(greenMinRatio),
       yellowMinRatio: round(yellowMinRatio),
       orangeMinRatio: round(orangeMinRatio),
+    },
+    historicalTrend: {
+      minimumYears: 3,
+      weight: 0.5,
+      stableBand: 0.05,
+      minFactor: 0.9,
+      maxFactor: 1.1,
     },
     confidence: {
       highMin: round(100 - missingSignalPenalty),
