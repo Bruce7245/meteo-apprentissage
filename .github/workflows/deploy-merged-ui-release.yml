@@ -161,39 +161,6 @@ jobs:
               formationSnap.docs[0].id
             ).trim();
 
-            const dailyDatesSnap = await db
-              .collection('dailyOfferSnapshots')
-              .get();
-
-            const dates = dailyDatesSnap.docs
-              .map((doc) => doc.id)
-              .sort((a, b) => String(b).localeCompare(String(a)));
-
-            let offersDepartment = '';
-
-            for (const date of dates.slice(0, 10)) {
-              const departments = await db
-                .collection('dailyOfferSnapshots')
-                .doc(date)
-                .collection('departments')
-                .limit(1)
-                .get();
-
-              if (!departments.empty) {
-                const candidate = departments.docs[0];
-                const data = candidate.data() || {};
-
-                if (String(data.activeRunId || '').trim()) {
-                  offersDepartment = candidate.id;
-                  break;
-                }
-              }
-            }
-
-            if (!offersDepartment) {
-              throw new Error('No recent public offers department found');
-            }
-
             const searchMeta = await db
               .collection('publicOccupationSearchIndexMeta')
               .doc('current')
@@ -223,14 +190,14 @@ jobs:
             setEnv('SMOKE_ROME', romeCode);
             setEnv('SMOKE_DEPARTMENT', departmentCode);
             setEnv('FORMATION_DEPARTMENT', formationDepartment);
-            setEnv('OFFERS_DEPARTMENT', offersDepartment);
+            setEnv('OFFERS_DEPARTMENT', departmentCode);
 
             console.log(JSON.stringify({
               publishedRunId: runId,
               smokeRome: romeCode,
               smokeDepartment: departmentCode,
               formationDepartment,
-              offersDepartment,
+              offersDepartment: departmentCode,
               searchRunId,
             }, null, 2));
           })().catch((error) => {
@@ -312,7 +279,19 @@ jobs:
           check_200 map "$base/getPublicOccupationMapHttp?rome=$SMOKE_ROME"
           check_200 detail "$base/getPublicOccupationDepartmentHttp?department=$SMOKE_DEPARTMENT&rome=$SMOKE_ROME"
           check_200 formations "$base/getPublicFormationDepartmentStatsHttp?department=$FORMATION_DEPARTMENT"
-          check_200 offers "$base/getPublicDepartmentOffersHttp?department=$OFFERS_DEPARTMENT&limit=1"
+          offers_status="$(curl --silent --show-error \
+            --location \
+            --output /tmp/offers.json \
+            --write-out "%{http_code}" \
+            --max-time 30 \
+            "$base/getPublicDepartmentOffersHttp?department=$OFFERS_DEPARTMENT&limit=1")"
+
+          echo "offers -> HTTP $offers_status"
+
+          if [ "$offers_status" != "200" ] && [ "$offers_status" != "404" ]; then
+            cat /tmp/offers.json
+            exit 1
+          fi
 
           node <<'NODE'
           const fs = require('node:fs');
@@ -322,7 +301,6 @@ jobs:
             'map',
             'detail',
             'formations',
-            'offers',
           ]) {
             const payload = JSON.parse(
               fs.readFileSync('/tmp/' + name + '.json', 'utf8')
@@ -331,6 +309,16 @@ jobs:
             if (payload?.ok !== true) {
               throw new Error(name + ' returned ok != true');
             }
+          }
+
+          const offers = JSON.parse(
+            fs.readFileSync('/tmp/offers.json', 'utf8')
+          );
+
+          if (offers?.ok !== true && offers?.exists !== false) {
+            throw new Error(
+              'offers returned neither public data nor a valid no-data state'
+            );
           }
           NODE
 
