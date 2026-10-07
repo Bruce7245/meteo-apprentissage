@@ -1,58 +1,180 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import AdminLayout from '../../layouts/AdminLayout.jsx';
 import MetricCard from '../../components/dashboard/MetricCard.jsx';
-import { getActiveOccupationVigilanceConfig } from '../../services/adminVigilanceModelService.js';
+import OccupationSearch from '../../components/occupation/OccupationSearch.jsx';
+import {
+  getActiveOccupationVigilanceConfig,
+  getOccupationAnalysisForRome,
+} from '../../services/adminVigilanceModelService.js';
+import { getLevelCss, getLevelLabel } from '../../utils/levelUtils.js';
+import { normalizeRomeCode } from '../../utils/occupationUtils.js';
+import '../../occupation.css';
 
-function formatNumber(value) {
-  if (value === null || value === undefined) return 'Indisponible';
+function formatNumber(value, maximumFractionDigits = 2) {
+  if (value === null || value === undefined || value === '') return '—';
+
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+
   return new Intl.NumberFormat('fr-FR', {
-    maximumFractionDigits: 2,
-  }).format(Number(value));
+    maximumFractionDigits,
+  }).format(number);
 }
 
 function formatPercent(value) {
-  if (value === null || value === undefined) return 'Indisponible';
+  if (value === null || value === undefined || value === '') return '—';
+
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+
   return new Intl.NumberFormat('fr-FR', {
     style: 'percent',
     maximumFractionDigits: 1,
-  }).format(Number(value));
+  }).format(number);
+}
+
+function initialRomeFromLocation() {
+  const params = new URLSearchParams(window.location.search);
+  return normalizeRomeCode(params.get('rome'));
+}
+
+function thresholdText(row) {
+  const thresholds = row?.effectiveThresholds || {};
+
+  return [
+    'Vert ≥ ' + formatNumber(thresholds.greenMinOffers, 0),
+    'Jaune ≥ ' + formatNumber(thresholds.yellowMinOffers, 0),
+    'Orange ≥ ' + formatNumber(thresholds.orangeMinOffers, 0),
+  ].join(' · ');
+}
+
+function factorLabel(value) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) return '—';
+  if (number > 1.001) return '×' + formatNumber(number) + ' ↑';
+  if (number < 0.999) return '×' + formatNumber(number) + ' ↓';
+  return '×1';
+}
+
+function trendLabel(trend) {
+  if (!trend || trend.status === 'unavailable') return 'Historique insuffisant';
+  if (trend.direction === 'degrading') return 'Dégradation';
+  if (trend.direction === 'improving') return 'Amélioration';
+  return 'Stable';
 }
 
 export default function AdminSectorDashboardPage() {
   const [config, setConfig] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [configLoading, setConfigLoading] = useState(true);
+  const [configError, setConfigError] = useState('');
+
+  const [romeCode, setRomeCode] = useState(initialRomeFromLocation);
+  const [romeLabel, setRomeLabel] = useState('');
+  const [analysis, setAnalysis] = useState(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState('');
+  const [selectedDepartmentCode, setSelectedDepartmentCode] = useState('');
 
   useEffect(() => {
     let alive = true;
 
-    async function load() {
+    async function loadConfig() {
       try {
-        setLoading(true);
-        setError('');
+        setConfigLoading(true);
+        setConfigError('');
         const result = await getActiveOccupationVigilanceConfig();
+
         if (alive) setConfig(result);
       } catch (currentError) {
         if (alive) {
-          setError(
+          setConfigError(
             currentError?.message ||
               'Impossible de charger la configuration du moteur métier.'
           );
         }
       } finally {
-        if (alive) setLoading(false);
+        if (alive) setConfigLoading(false);
       }
     }
 
-    load();
+    loadConfig();
 
     return () => {
       alive = false;
     };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+
+    async function loadAnalysis() {
+      if (!romeCode) {
+        setAnalysis(null);
+        setAnalysisError('');
+        setSelectedDepartmentCode('');
+        return;
+      }
+
+      try {
+        setAnalysisLoading(true);
+        setAnalysisError('');
+        setSelectedDepartmentCode('');
+
+        const result = await getOccupationAnalysisForRome(romeCode);
+
+        if (alive) {
+          setAnalysis(result);
+          if (result?.romeLabel) setRomeLabel(result.romeLabel);
+        }
+      } catch (currentError) {
+        if (alive) {
+          setAnalysis(null);
+          setAnalysisError(
+            currentError?.message ||
+              'Impossible de charger l’analyse nationale de ce métier.'
+          );
+        }
+      } finally {
+        if (alive) setAnalysisLoading(false);
+      }
+    }
+
+    loadAnalysis();
+
+    return () => {
+      alive = false;
+    };
+  }, [romeCode]);
+
+  const selectedDepartment = useMemo(
+    () =>
+      analysis?.rows?.find(
+        (row) => row.departmentCode === selectedDepartmentCode
+      ) || null,
+    [analysis, selectedDepartmentCode]
+  );
+
+  function selectOccupation(selection) {
+    const nextRome = normalizeRomeCode(selection?.romeCode);
+
+    if (!nextRome) return;
+
+    const params = new URLSearchParams(window.location.search);
+    params.set('rome', nextRome);
+    window.history.replaceState(
+      {},
+      '',
+      window.location.pathname + '?' + params.toString()
+    );
+
+    setRomeCode(nextRome);
+    setRomeLabel(selection?.label || selection?.trainingLabel || nextRome);
+  }
+
   const thresholds = config?.thresholds || {};
   const history = config?.historicalTrend || {};
+  const summary = analysis?.summary || null;
 
   return (
     <AdminLayout>
@@ -60,68 +182,488 @@ export default function AdminSectorDashboardPage() {
         <p className="kicker">Analyse métier</p>
         <h1>Moteur de vigilance métiers</h1>
         <p>
-          La carte nationale reste automatique. Cette vue expose les paramètres
-          qui transforment les offres observées en seuils propres à chaque
-          département et à chaque métier ROME.
+          La carte nationale reste automatique. Ici, chaque couleur peut être
+          reliée aux offres observées, au niveau attendu, aux seuils locaux et
+          aux facteurs historiques du département.
         </p>
       </section>
 
-      {loading ? (
+      <section className="panel admin-occupation-search-panel">
+        <div className="section-heading">
+          <div>
+            <p className="kicker">Explorer</p>
+            <h2>Choisir un métier ROME</h2>
+          </div>
+          {analysis?.run?.date ? (
+            <span className="soft-pill">
+              Calcul du {analysis.run.date}
+            </span>
+          ) : null}
+        </div>
+
+        <OccupationSearch
+          onOccupationSelect={selectOccupation}
+          initialRomeCode={romeCode}
+          initialLabel={romeLabel}
+        />
+
+        <p className="date-line">
+          L’analyse utilise le dernier run métier prêt ou publié. Elle ne
+          recalcule pas la carte depuis le navigateur.
+        </p>
+      </section>
+
+      {analysisLoading ? (
         <section className="panel state-box">
-          Chargement de la configuration active...
+          Chargement des seuils et diagnostics départementaux...
         </section>
       ) : null}
 
-      {error ? (
+      {analysisError ? (
+        <section className="panel error-box" role="alert">
+          {analysisError}
+        </section>
+      ) : null}
+
+      {!analysisLoading && !analysisError && romeCode && analysis && !analysis.run ? (
         <section className="panel error-box">
-          Impossible de charger le moteur : {error}
+          Aucun run de vigilance métier prêt ou publié n’est disponible.
         </section>
       ) : null}
 
-      {!loading && !error && !config ? (
-        <section className="panel error-box">
-          Aucune configuration métier validée n’est disponible.
+      {!analysisLoading &&
+      !analysisError &&
+      analysis?.run &&
+      analysis?.rows?.length === 0 ? (
+        <section className="panel state-box">
+          Aucun département n’est présent dans le dernier run pour {romeCode}.
         </section>
       ) : null}
 
-      {!loading && !error && config ? (
+      {!analysisLoading && !analysisError && summary ? (
         <>
-          <section className="metrics-grid">
+          <section className="metrics-grid admin-analysis-summary">
             <MetricCard
-              label="Version de calcul"
-              value={config.calculationVersion || 'Inconnue'}
-              detail={'Configuration ' + (config.version || config.id)}
+              label="Départements analysés"
+              value={formatNumber(summary.departmentsCount, 0)}
+              detail={analysis.romeLabel || romeCode}
             />
             <MetricCard
-              label="Population de référence"
-              value={formatNumber(config.referencePopulation15To29)}
-              detail="Population 15–29 ans utilisée pour mettre les volumes à l’échelle"
-            />
-            <MetricCard
-              label="Poids tendance historique"
-              value={formatPercent(history.weight)}
-              detail="Influence maximale de la tendance interannuelle sur le niveau attendu"
-            />
-            <MetricCard
-              label="Historique minimal"
-              value={
-                history.minimumYears
-                  ? String(history.minimumYears) + ' ans'
-                  : 'Non paramétré'
+              label="Offres observées"
+              value={formatNumber(summary.totalObservedOffers, 0)}
+              detail={
+                'Attendu cumulé : ' +
+                formatNumber(summary.totalExpectedOffers, 0)
               }
-              detail="Années comparables requises avant activation de la tendance de fond"
+            />
+            <MetricCard
+              label="Orange ou rouge"
+              value={formatNumber(summary.elevatedDepartments, 0)}
+              detail={
+                formatNumber(summary.levels.orange, 0) +
+                ' orange · ' +
+                formatNumber(summary.levels.red, 0) +
+                ' rouge'
+              }
+            />
+            <MetricCard
+              label="Confiance élevée"
+              value={
+                formatNumber(summary.highConfidenceCount, 0) +
+                ' / ' +
+                formatNumber(summary.departmentsCount, 0)
+              }
+              detail="Diagnostics disposant du meilleur niveau de confiance"
             />
           </section>
 
           <section className="panel">
             <div className="section-heading">
               <div>
-                <p className="kicker">Seuils</p>
-                <h2>Ratios de vigilance</h2>
+                <p className="kicker">Carte expliquée</p>
+                <h2>Seuils par département</h2>
               </div>
               <span className="soft-pill">
-                Carte calculée automatiquement
+                {analysis.romeLabel || romeCode}
               </span>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="simple-table admin-vigilance-table">
+                <thead>
+                  <tr>
+                    <th>Département</th>
+                    <th>Niveau</th>
+                    <th>Observé</th>
+                    <th>Attendu</th>
+                    <th>Ratio</th>
+                    <th>Seuils locaux</th>
+                    <th>Confiance</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analysis.rows.map((row) => (
+                    <tr
+                      key={row.id || row.departmentCode}
+                      className={
+                        selectedDepartmentCode === row.departmentCode
+                          ? 'is-selected'
+                          : ''
+                      }
+                    >
+                      <td>
+                        <strong>
+                          {row.departmentName || row.departmentCode}
+                        </strong>
+                        <div className="date-line">
+                          {row.departmentCode}
+                        </div>
+                      </td>
+                      <td>
+                        <span
+                          className={
+                            'vigilance-badge vigilance-' +
+                            getLevelCss(row.publishedLevel)
+                          }
+                        >
+                          {getLevelLabel(row.publishedLevel)}
+                        </span>
+                      </td>
+                      <td>{formatNumber(row.activeOffersCount, 0)}</td>
+                      <td>{formatNumber(row.expectedOffers, 1)}</td>
+                      <td>{formatPercent(row.observedVsExpectedRatio)}</td>
+                      <td className="admin-threshold-cell">
+                        {thresholdText(row)}
+                      </td>
+                      <td>{row.confidenceLevel || '—'}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="admin-detail-button"
+                          onClick={() =>
+                            setSelectedDepartmentCode((current) =>
+                              current === row.departmentCode
+                                ? ''
+                                : row.departmentCode
+                            )
+                          }
+                        >
+                          {selectedDepartmentCode === row.departmentCode
+                            ? 'Fermer'
+                            : 'Analyser'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {selectedDepartment ? (
+            <section className="panel admin-department-diagnostic">
+              <div className="section-heading">
+                <div>
+                  <p className="kicker">Diagnostic local</p>
+                  <h2>
+                    {selectedDepartment.departmentName ||
+                      selectedDepartment.departmentCode}
+                    {' — '}
+                    {analysis.romeLabel || romeCode}
+                  </h2>
+                </div>
+                <span
+                  className={
+                    'vigilance-badge vigilance-' +
+                    getLevelCss(selectedDepartment.publishedLevel)
+                  }
+                >
+                  {getLevelLabel(selectedDepartment.publishedLevel)}
+                </span>
+              </div>
+
+              <div className="metrics-grid">
+                <MetricCard
+                  label="Offres observées"
+                  value={formatNumber(
+                    selectedDepartment.activeOffersCount,
+                    0
+                  )}
+                  detail={
+                    'Attendu : ' +
+                    formatNumber(selectedDepartment.expectedOffers, 1)
+                  }
+                />
+                <MetricCard
+                  label="Population 15–29 ans"
+                  value={formatNumber(
+                    selectedDepartment.population15To29,
+                    0
+                  )}
+                  detail={
+                    selectedDepartment.populationReferenceYear
+                      ? 'Référence ' +
+                        selectedDepartment.populationReferenceYear
+                      : 'Année de référence inconnue'
+                  }
+                />
+                <MetricCard
+                  label="Évolution récente"
+                  value={formatPercent(
+                    selectedDepartment.recentTrend?.changeRatio
+                  )}
+                  detail={
+                    selectedDepartment.recentTrend?.status ||
+                    'Tendance inconnue'
+                  }
+                />
+                <MetricCard
+                  label="Tendance interannuelle"
+                  value={formatPercent(
+                    selectedDepartment.interannualTrend
+                      ?.annualTrendRatio
+                  )}
+                  detail={trendLabel(
+                    selectedDepartment.interannualTrend
+                  )}
+                />
+              </div>
+
+              <div className="admin-analysis-columns">
+                <section className="admin-analysis-subpanel">
+                  <p className="kicker">Seuils effectifs</p>
+                  <h3>Ce qui déclenche la couleur</h3>
+                  <dl className="admin-analysis-definition-list">
+                    <div>
+                      <dt>Vert</dt>
+                      <dd>
+                        ≥{' '}
+                        {formatNumber(
+                          selectedDepartment.effectiveThresholds
+                            ?.greenMinOffers,
+                          0
+                        )}{' '}
+                        offres
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Jaune</dt>
+                      <dd>
+                        ≥{' '}
+                        {formatNumber(
+                          selectedDepartment.effectiveThresholds
+                            ?.yellowMinOffers,
+                          0
+                        )}{' '}
+                        offres
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Orange</dt>
+                      <dd>
+                        ≥{' '}
+                        {formatNumber(
+                          selectedDepartment.effectiveThresholds
+                            ?.orangeMinOffers,
+                          0
+                        )}{' '}
+                        offres
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Rouge</dt>
+                      <dd>
+                        sous{' '}
+                        {formatNumber(
+                          selectedDepartment.effectiveThresholds
+                            ?.orangeMinOffers,
+                          0
+                        )}{' '}
+                        offres
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+
+                <section className="admin-analysis-subpanel">
+                  <p className="kicker">Coefficients</p>
+                  <h3>Ce qui déplace le niveau attendu</h3>
+                  <dl className="admin-analysis-definition-list">
+                    <div>
+                      <dt>Population</dt>
+                      <dd>
+                        {factorLabel(
+                          selectedDepartment.factors?.population
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Saisonnalité</dt>
+                      <dd>
+                        {factorLabel(
+                          selectedDepartment.factors?.seasonality
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Tendance historique</dt>
+                      <dd>
+                        {factorLabel(
+                          selectedDepartment.factors
+                            ?.historicalTrend
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Pression formation</dt>
+                      <dd>
+                        {factorLabel(
+                          selectedDepartment.factors
+                            ?.trainingPressure
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Diversité employeur</dt>
+                      <dd>
+                        {factorLabel(
+                          selectedDepartment.factors
+                            ?.diversityFragility
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+
+                <section className="admin-analysis-subpanel">
+                  <p className="kicker">Normalité historique</p>
+                  <h3>Même période les années précédentes</h3>
+                  <dl className="admin-analysis-definition-list">
+                    <div>
+                      <dt>Années comparables</dt>
+                      <dd>
+                        {formatNumber(
+                          selectedDepartment.interannualTrend
+                            ?.sampleYears,
+                          0
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Médiane</dt>
+                      <dd>
+                        {formatNumber(
+                          selectedDepartment.interannualTrend
+                            ?.normalMedian,
+                          1
+                        )}{' '}
+                        offres
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Plage centrale</dt>
+                      <dd>
+                        {formatNumber(
+                          selectedDepartment.interannualTrend
+                            ?.normalLow,
+                          1
+                        )}
+                        {' → '}
+                        {formatNumber(
+                          selectedDepartment.interannualTrend
+                            ?.normalHigh,
+                          1
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Dernier N-1 disponible</dt>
+                      <dd>
+                        {formatNumber(
+                          selectedDepartment.interannualTrend
+                            ?.latestHistoricalOffers,
+                          0
+                        )}{' '}
+                        offres
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+              </div>
+
+              {Array.isArray(selectedDepartment.reasonCodes) &&
+              selectedDepartment.reasonCodes.length > 0 ? (
+                <div className="admin-analysis-reasons">
+                  <strong>Codes explicatifs du moteur</strong>
+                  <div>
+                    {selectedDepartment.reasonCodes.map((reason) => (
+                      <span className="soft-pill" key={reason}>
+                        {reason}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+        </>
+      ) : null}
+
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <p className="kicker">Paramétrage national</p>
+            <h2>Configuration active du moteur</h2>
+          </div>
+        </div>
+
+        {configLoading ? (
+          <div className="state-box">
+            Chargement de la configuration active...
+          </div>
+        ) : null}
+
+        {configError ? (
+          <div className="error-box">{configError}</div>
+        ) : null}
+
+        {!configLoading && !configError && !config ? (
+          <div className="error-box">
+            Aucune configuration métier validée n’est disponible.
+          </div>
+        ) : null}
+
+        {!configLoading && !configError && config ? (
+          <>
+            <div className="metrics-grid">
+              <MetricCard
+                label="Version de calcul"
+                value={config.calculationVersion || 'Inconnue'}
+                detail={'Configuration ' + (config.version || config.id)}
+              />
+              <MetricCard
+                label="Population de référence"
+                value={formatNumber(
+                  config.referencePopulation15To29,
+                  0
+                )}
+                detail="Population 15–29 ans"
+              />
+              <MetricCard
+                label="Poids tendance historique"
+                value={formatPercent(history.weight)}
+                detail="Influence de la tendance interannuelle"
+              />
+              <MetricCard
+                label="Historique minimal"
+                value={
+                  history.minimumYears
+                    ? String(history.minimumYears) + ' ans'
+                    : 'Non paramétré'
+                }
+                detail="Avant activation de la tendance de fond"
+              />
             </div>
 
             <div className="table-wrapper">
@@ -129,7 +671,7 @@ export default function AdminSectorDashboardPage() {
                 <thead>
                   <tr>
                     <th>Niveau</th>
-                    <th>Condition minimale</th>
+                    <th>Ratio minimal</th>
                     <th>Lecture</th>
                   </tr>
                 </thead>
@@ -137,168 +679,37 @@ export default function AdminSectorDashboardPage() {
                   <tr>
                     <td>Vert</td>
                     <td>{formatPercent(thresholds.greenMinRatio)}</td>
-                    <td>
-                      Les offres observées atteignent au moins cette part du
-                      volume attendu localement.
-                    </td>
+                    <td>Au niveau attendu ou proche.</td>
                   </tr>
                   <tr>
                     <td>Jaune</td>
                     <td>{formatPercent(thresholds.yellowMinRatio)}</td>
-                    <td>Le marché est sous son niveau attendu mais reste proche.</td>
+                    <td>Écart modéré à la normalité locale.</td>
                   </tr>
                   <tr>
                     <td>Orange</td>
                     <td>{formatPercent(thresholds.orangeMinRatio)}</td>
-                    <td>L’écart à la normalité locale devient significatif.</td>
+                    <td>Écart significatif à la normalité locale.</td>
                   </tr>
                   <tr>
                     <td>Rouge</td>
                     <td>
                       Sous {formatPercent(thresholds.orangeMinRatio)}
                     </td>
-                    <td>Le volume observé est très inférieur au niveau attendu.</td>
+                    <td>Écart très important au niveau attendu.</td>
                   </tr>
                 </tbody>
               </table>
             </div>
 
             <p className="date-line">
-              Ces ratios sont convertis en nombres d’offres différents pour
-              chaque département × métier après application des coefficients.
+              La normalité interannuelle est aujourd’hui mensuelle. Elle
+              passera à une référence hebdomadaire quand l’historique sera
+              suffisamment long et fiable.
             </p>
-          </section>
-
-          <section className="panel">
-            <div className="section-heading">
-              <div>
-                <p className="kicker">Normalité locale</p>
-                <h2>Facteurs qui déplacent les seuils</h2>
-              </div>
-            </div>
-
-            <div className="table-wrapper">
-              <table className="simple-table">
-                <thead>
-                  <tr>
-                    <th>Facteur</th>
-                    <th>Bornes / réglage</th>
-                    <th>Rôle</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>Population 15–29 ans</td>
-                    <td>
-                      {formatNumber(config.factorBounds?.population?.min)}
-                      {' → '}
-                      {formatNumber(config.factorBounds?.population?.max)}
-                    </td>
-                    <td>
-                      Ajuste la quantité d’offres attendue à la taille du
-                      public potentiel du département.
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>Saisonnalité</td>
-                    <td>
-                      {formatNumber(config.factorBounds?.seasonality?.min)}
-                      {' → '}
-                      {formatNumber(config.factorBounds?.seasonality?.max)}
-                    </td>
-                    <td>
-                      Compare la période actuelle au comportement habituel du
-                      métier dans ce département.
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>Tendance interannuelle</td>
-                    <td>
-                      {formatNumber(history.minFactor)}
-                      {' → '}
-                      {formatNumber(history.maxFactor)}
-                    </td>
-                    <td>
-                      Prend en compte l’évolution des mêmes périodes des années
-                      précédentes sans laisser la tendance dominer le calcul.
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>Formations</td>
-                    <td>
-                      {formatNumber(
-                        config.coefficients?.trainingPressurePerFormation
-                      )}
-                      {' / formation'}
-                    </td>
-                    <td>
-                      Peut augmenter le niveau attendu lorsque davantage de
-                      candidats arrivent sur le marché.
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>Diversité employeur</td>
-                    <td>
-                      Seuil{' '}
-                      {formatPercent(
-                        config.coefficients
-                          ?.lowDiversityConcentrationThreshold
-                      )}
-                    </td>
-                    <td>
-                      Renforce la fragilité lorsqu’une part importante des
-                      offres dépend de très peu d’employeurs.
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section className="panel">
-            <div className="section-heading">
-              <div>
-                <p className="kicker">Historique</p>
-                <h2>Référence utilisée</h2>
-              </div>
-            </div>
-
-            <p>
-              La normalité saisonnière actuelle est calculée à partir des
-              statistiques mensuelles historiques du même couple département ×
-              métier. La tendance interannuelle compare les mêmes mois des
-              années précédentes. Une granularité hebdomadaire pourra remplacer
-              cette référence lorsque l’historique hebdomadaire sera
-              suffisamment long.
-            </p>
-
-            <div className="metrics-grid">
-              <MetricCard
-                label="Fenêtre de calibration"
-                value={
-                  config.calibration?.windowStart &&
-                  config.calibration?.windowEnd
-                    ? config.calibration.windowStart + ' → ' + config.calibration.windowEnd
-                    : 'Indisponible'
-                }
-              />
-              <MetricCard
-                label="Échantillons valides"
-                value={formatNumber(config.calibration?.validSamplesCount)}
-              />
-              <MetricCard
-                label="Métiers calibrés"
-                value={formatNumber(config.calibration?.romeCount)}
-              />
-              <MetricCard
-                label="Bande stable interannuelle"
-                value={formatPercent(history.stableBand)}
-                detail="En dessous de cette variation absolue, la tendance est considérée stable"
-              />
-            </div>
-          </section>
-        </>
-      ) : null}
+          </>
+        ) : null}
+      </section>
     </AdminLayout>
   );
 }
