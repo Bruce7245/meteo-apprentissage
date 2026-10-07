@@ -10,6 +10,7 @@ const {
   occupationConfigSummary,
   saveOccupationVigilanceDraft,
   simulateOccupationRows,
+  summarizeOccupationAnalysisRows,
   stableManualVersion,
 } = require('../admin-occupation-vigilance-config.cjs');
 
@@ -661,4 +662,65 @@ test('saveOccupationVigilanceDraft refuses a stale base version', async () => {
   assert.equal(result.ok, false);
   assert.equal(result.status, 409);
   assert.equal(result.errorCode, 'STALE_DRAFT_BASE');
+});
+
+
+test('summarizeOccupationAnalysisRows keeps missing expected offers distinct from zero', () => {
+  const summary = summarizeOccupationAnalysisRows([
+    {
+      publishedLevel: 'insufficient_data',
+      activeOffersCount: 2,
+      expectedOffers: null,
+      confidenceLevel: 'low',
+    },
+    {
+      publishedLevel: 'green',
+      activeOffersCount: 3,
+      expectedOffers: 0,
+      confidenceLevel: 'high',
+    },
+    {
+      publishedLevel: 'yellow',
+      activeOffersCount: 4,
+      expectedOffers: 5,
+      confidenceLevel: 'medium',
+    },
+  ]);
+
+  assert.equal(summary.departmentsCount, 3);
+  assert.equal(summary.totalObservedOffers, 9);
+  assert.equal(summary.observedOffersAvailableCount, 3);
+  assert.equal(summary.totalExpectedOffers, 5);
+  assert.equal(summary.expectedOffersAvailableCount, 2);
+  assert.equal(summary.missingExpectedOffersCount, 1);
+  assert.equal(summary.expectedCoverageRatio, 2 / 3);
+  assert.equal(summary.highConfidenceCount, 1);
+  assert.equal(summary.levels.insufficient_data, 1);
+  assert.equal(summary.levels.green, 1);
+  assert.equal(summary.levels.yellow, 1);
+});
+
+test('summarizeOccupationAnalysisRows returns null total when no expected value is available', () => {
+  const summary = summarizeOccupationAnalysisRows([
+    {
+      publishedLevel: 'insufficient_data',
+      activeOffersCount: 1,
+      expectedOffers: null,
+    },
+    {
+      publishedLevel: 'insufficient_data',
+      activeOffersCount: 2,
+      expectedOffers: undefined,
+    },
+    {
+      publishedLevel: 'insufficient_data',
+      activeOffersCount: 3,
+      expectedOffers: '',
+    },
+  ]);
+
+  assert.equal(summary.totalExpectedOffers, null);
+  assert.equal(summary.expectedOffersAvailableCount, 0);
+  assert.equal(summary.missingExpectedOffersCount, 3);
+  assert.equal(summary.expectedCoverageRatio, 0);
 });
