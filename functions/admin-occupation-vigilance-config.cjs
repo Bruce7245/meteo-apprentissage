@@ -789,22 +789,20 @@ async function listOccupationVigilanceConfigHistory(db) {
     .where('status', '==', 'validated')
     .get();
 
-  const versions = snapshot.docs
-    .map((doc) => occupationConfigSummary({
+  const configs = snapshot.docs
+    .map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }))
-    .sort((a, b) => {
-      const left = timestampMillis(a.validatedAt);
-      const right = timestampMillis(b.validatedAt);
-
-      if (left !== right) return right - left;
-      return text(b.version).localeCompare(text(a.version));
-    });
+    .sort(
+      (a, b) =>
+        timestampMillis(b.validatedAt || b.createdAt) -
+        timestampMillis(a.validatedAt || a.createdAt)
+    );
 
   return {
-    activeVersion: versions[0]?.version || null,
-    versions,
+    activeVersion: configs[0]?.version || configs[0]?.id || null,
+    versions: configs.map(occupationConfigSummary),
   };
 }
 
