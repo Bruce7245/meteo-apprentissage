@@ -41,7 +41,12 @@ function collectRomeCodes(offers, formations) {
   return Array.from(codes).sort((a, b) => a.localeCompare(b, 'fr'));
 }
 
-function resolveDefaults({ aggregateContext, computeRecentTrend, computeSeasonality }) {
+function resolveDefaults({
+  aggregateContext,
+  computeRecentTrend,
+  computeSeasonality,
+  computeInterannualTrend,
+}) {
   return {
     aggregateContext:
       aggregateContext ||
@@ -52,6 +57,9 @@ function resolveDefaults({ aggregateContext, computeRecentTrend, computeSeasonal
     computeSeasonality:
       computeSeasonality ||
       require('./lib/occupation-history.cjs').computeSeasonalityProfile,
+    computeInterannualTrend:
+      computeInterannualTrend ||
+      require('./lib/occupation-history.cjs').computeInterannualTrendProfile,
   };
 }
 
@@ -61,6 +69,7 @@ async function prepareOccupationVigilanceInputs({
   aggregateContext,
   computeRecentTrend,
   computeSeasonality,
+  computeInterannualTrend,
 } = {}) {
   const targetDate = text(date);
   if (!validDate(targetDate)) {
@@ -97,6 +106,7 @@ async function prepareOccupationVigilanceInputs({
     aggregateContext,
     computeRecentTrend,
     computeSeasonality,
+    computeInterannualTrend,
   });
 
   let contexts;
@@ -219,6 +229,17 @@ async function prepareOccupationVigilanceInputs({
             completenessThreshold: 0.9,
             minFactor: 0.5,
             maxFactor: 2,
+          }
+        ),
+        interannualTrend: defaults.computeInterannualTrend(
+          mapGet(monthlyByKey, key) || [],
+          {
+            asOfMonth,
+            minYears: 3,
+            stableBand: 0.05,
+            weight: 0.5,
+            minFactor: 0.9,
+            maxFactor: 1.1,
           }
         ),
         sources: {
@@ -635,7 +656,7 @@ function createFirestoreOccupationPrecomputeRepository(
         rows,
         () => ({
           generatedAt: serverTimestamp(),
-          schemaVersion: 'occupationHistoryStats.v1',
+          schemaVersion: 'occupationHistoryStats.v2',
         })
       );
     },
@@ -651,7 +672,7 @@ function createFirestoreOccupationPrecomputeRepository(
             recentWindowStartDate: dateOffset(date, -13),
             ...meta,
             generatedAt: serverTimestamp(),
-            schemaVersion: 'occupationHistoryStatsRun.v1',
+            schemaVersion: 'occupationHistoryStatsRun.v2',
           },
           { merge: false }
         );
