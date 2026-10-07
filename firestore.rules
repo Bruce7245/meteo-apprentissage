@@ -89,6 +89,15 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /occupationVigilanceConfigDrafts/{document=**} {
+      allow read, create, update, delete: if isAdmin();
+    }
+
+    match /occupationVigilanceConfigAudit/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     match /occupationHistoryStats/{document=**} {
       allow read: if isAdmin();
       allow write: if false;
