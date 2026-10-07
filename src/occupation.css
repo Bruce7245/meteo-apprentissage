@@ -274,8 +274,13 @@
 }
 
 
-.occupation-sector-hero {
+.public-hero.occupation-sector-hero {
   align-items: start;
+}
+
+.public-hero.occupation-sector-hero > .public-hero-copy,
+.public-hero.occupation-sector-hero > .occupation-search-card {
+  align-self: start;
 }
 
 .occupation-sector-card {
