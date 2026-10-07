@@ -7,9 +7,11 @@ on:
     paths:
       - functions/admin-occupation-vigilance-config.cjs
       - functions/lib/occupation-search.cjs
+      - functions/lib/public-occupation-search.cjs
       - functions/lib/occupation-vigilance.cjs
       - functions/test/admin-occupation-vigilance-config.test.cjs
       - functions/test/occupation-vigilance.test.cjs
+      - functions/test/public-occupation-search.test.cjs
       - functions/index.js
       - .github/workflows/admin-vigilance-backend-tests.yml
   pull_request:
@@ -54,11 +56,12 @@ jobs:
           node --check functions/index.js
           node --check functions/admin-occupation-vigilance-config.cjs
           node --check functions/lib/occupation-search.cjs
+          node --check functions/lib/public-occupation-search.cjs
           node --check functions/lib/occupation-vigilance.cjs
 
       - name: Run targeted unit tests
         working-directory: functions
         run: |
           set -euo pipefail
-          node --test             test/admin-occupation-vigilance-config.test.cjs             test/occupation-vigilance.test.cjs
+          node --test             test/admin-occupation-vigilance-config.test.cjs             test/occupation-vigilance.test.cjs             test/public-occupation-search.test.cjs
 
