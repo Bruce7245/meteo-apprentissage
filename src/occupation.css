@@ -584,14 +584,8 @@
   }
 
   .jobs-formations-summary-card,
-  .jobs-formations-summary-card,
   .jobs-formations-selector-card {
-    padding: 22px;
-    border-radius: 16px;
-  }
-
-  .jobs-formations-summary-card h1 {
-    font-size: clamp(2.1rem, 11vw, 3rem);
+    min-height: 0;
   }
 }
 
@@ -605,7 +599,13 @@
     min-height: 56px;
   }
 
+  .jobs-formations-summary-card,
   .jobs-formations-selector-card {
-    min-height: 0;
+    padding: 22px;
+    border-radius: 16px;
+  }
+
+  .jobs-formations-summary-card h1 {
+    font-size: clamp(2.1rem, 11vw, 3rem);
   }
 }
