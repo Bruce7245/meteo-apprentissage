@@ -101,6 +101,24 @@ function transitionLabel(direction) {
   return 'Changement de données';
 }
 
+function deltaClass(value) {
+  const number = optionalFiniteNumber(value);
+
+  if (number === null || number === 0) return 'is-neutral';
+  return number > 0 ? 'is-positive' : 'is-negative';
+}
+
+function comparisonDeltaClass(currentValue, previousValue) {
+  const current = optionalFiniteNumber(currentValue);
+  const previous = optionalFiniteNumber(previousValue);
+
+  if (current === null || previous === null || current === previous) {
+    return 'is-neutral';
+  }
+
+  return current > previous ? 'is-positive' : 'is-negative';
+}
+
 function initialRomeFromLocation() {
   const params = new URLSearchParams(window.location.search);
   return normalizeRomeCode(params.get('rome'));
@@ -623,11 +641,7 @@ export default function AdminSectorDashboardPage() {
                               <span
                                 className={
                                   'admin-delta ' +
-                                  (Number(row.activeOffersDelta) > 0
-                                    ? 'is-positive'
-                                    : Number(row.activeOffersDelta) < 0
-                                      ? 'is-negative'
-                                      : 'is-neutral')
+                                  deltaClass(row.activeOffersDelta)
                                 }
                               >
                                 {formatSignedNumber(
@@ -640,11 +654,7 @@ export default function AdminSectorDashboardPage() {
                               <span
                                 className={
                                   'admin-delta ' +
-                                  (Number(offersVariation) > 0
-                                    ? 'is-positive'
-                                    : Number(offersVariation) < 0
-                                      ? 'is-negative'
-                                      : 'is-neutral')
+                                  deltaClass(offersVariation)
                                 }
                               >
                                 {formatSignedPercent(offersVariation)}
@@ -685,21 +695,10 @@ export default function AdminSectorDashboardPage() {
                               <span
                                 className={
                                   'admin-delta ' +
-                                  (optionalFiniteNumber(
-                                    row.observedVsExpectedRatio
-                                  ) >
-                                  optionalFiniteNumber(
+                                  comparisonDeltaClass(
+                                    row.observedVsExpectedRatio,
                                     row.previousObservedVsExpectedRatio
                                   )
-                                    ? 'is-positive'
-                                    : optionalFiniteNumber(
-                                          row.observedVsExpectedRatio
-                                        ) <
-                                        optionalFiniteNumber(
-                                          row.previousObservedVsExpectedRatio
-                                        )
-                                      ? 'is-negative'
-                                      : 'is-neutral')
                                 }
                               >
                                 {formatPercentagePointDelta(
