@@ -179,6 +179,8 @@ export async function getOccupationAnalysisForRome(romeCode) {
 }
 
 
+const PREVIEW_OCCUPATION_VIGILANCE_CONFIG_ENDPOINT =
+  'https://europe-west1-meteo-apprentissage.cloudfunctions.net/previewOccupationVigilanceConfigHttp';
 const ACTIVATE_OCCUPATION_VIGILANCE_CONFIG_ENDPOINT =
   'https://europe-west1-meteo-apprentissage.cloudfunctions.net/activateOccupationVigilanceConfigHttp';
 
@@ -210,6 +212,66 @@ function cleanConfigForDraft(config) {
     ...rest,
     status: 'draft',
   };
+}
+
+async function postAdminOccupationConfig(endpoint, body, fallbackMessage) {
+  const user = auth.currentUser;
+
+  if (!user) {
+    throw new Error('Session administrateur absente.');
+  }
+
+  const token = await user.getIdToken();
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      Authorization: 'Bearer ' + token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body || {}),
+  });
+
+  let payload = null;
+
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const error = new Error(
+      payload?.error || fallbackMessage
+    );
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  return payload || {};
+}
+
+export async function previewOccupationVigilanceConfig(
+  candidateConfig,
+  romeCode
+) {
+  const rome = normalizeRomeCode(romeCode);
+
+  if (!rome) {
+    throw new Error(
+      'Choisissez un métier ROME avant de lancer la simulation.'
+    );
+  }
+
+  return postAdminOccupationConfig(
+    PREVIEW_OCCUPATION_VIGILANCE_CONFIG_ENDPOINT,
+    {
+      candidateConfig: cleanConfigForDraft(candidateConfig),
+      romeCode: rome,
+    },
+    'Impossible de simuler la configuration métier.'
+  );
 }
 
 export async function saveOccupationVigilanceConfigDraft(
@@ -249,45 +311,11 @@ export async function saveOccupationVigilanceConfigDraft(
 }
 
 export async function activateOccupationVigilanceConfigDraft(draftId) {
-  const user = auth.currentUser;
-
-  if (!user) {
-    throw new Error('Session administrateur absente.');
-  }
-
-  const token = await user.getIdToken();
-  const response = await fetch(
+  return postAdminOccupationConfig(
     ACTIVATE_OCCUPATION_VIGILANCE_CONFIG_ENDPOINT,
     {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        Authorization: 'Bearer ' + token,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        draftId: String(draftId || '').trim(),
-      }),
-    }
+      draftId: String(draftId || '').trim(),
+    },
+    'Impossible d’activer la configuration métier.'
   );
-
-  let payload = null;
-
-  try {
-    payload = await response.json();
-  } catch {
-    payload = null;
-  }
-
-  if (!response.ok) {
-    const error = new Error(
-      payload?.error ||
-        'Impossible d’activer la configuration métier.'
-    );
-    error.status = response.status;
-    error.payload = payload;
-    throw error;
-  }
-
-  return payload || {};
 }
