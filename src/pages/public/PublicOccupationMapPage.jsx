@@ -1,42 +1,177 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import PublicLayout from '../../layouts/PublicLayout.jsx';
-import OccupationSearch from '../../components/occupation/OccupationSearch.jsx';
+import OccupationDomainBrowser from '../../components/occupation/OccupationDomainBrowser.jsx';
 import VigilanceMap from '../../components/maps/VigilanceMap.jsx';
 import VigilanceLegend from '../../components/vigilance/VigilanceLegend.jsx';
 import { getLatestPublicVigilanceIndex } from '../../services/vigilanceService.js';
 import { getPublicOccupationMap } from '../../services/occupationPublicService.js';
 import {
+  getPublicOccupationDomains,
+  getPublicOccupationDomainOccupations,
+} from '../../services/occupationDomainPublicService.js';
+import {
   buildOccupationDepartmentUrl,
+  buildOccupationDomainMapUrl,
   buildOccupationMapUrl,
-  getRomeSearchState,
+  getOccupationNavigationState,
 } from '../../utils/occupationUtils.js';
 
 export default function PublicOccupationMapPage() {
-  const romeState = getRomeSearchState(window.location.search);
-  const romeCode = romeState.romeCode;
+  const navigation = getOccupationNavigationState(
+    window.location.search
+  );
+  const domainCode = navigation.domainCode;
+  const romeCode = navigation.romeCode;
 
+  const [domainsResult, setDomainsResult] = useState({
+    domains: [],
+    asOfDate: null,
+  });
+  const [domainResult, setDomainResult] = useState(null);
   const [generalIndex, setGeneralIndex] = useState(null);
   const [occupationResult, setOccupationResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+
+  const [loadingDomains, setLoadingDomains] = useState(true);
+  const [loadingOccupations, setLoadingOccupations] = useState(false);
+  const [loadingMap, setLoadingMap] = useState(false);
+
+  const [domainError, setDomainError] = useState('');
+  const [occupationsError, setOccupationsError] = useState('');
+  const [mapError, setMapError] = useState('');
+
+  useEffect(() => {
+    if (
+      navigation.valid &&
+      romeCode &&
+      (
+        navigation.needsCanonicalization ||
+        !navigation.domainPresent
+      )
+    ) {
+      window.history.replaceState(
+        null,
+        '',
+        buildOccupationMapUrl(romeCode, domainCode)
+      );
+    }
+  }, [
+    domainCode,
+    romeCode,
+    navigation.domainPresent,
+    navigation.needsCanonicalization,
+    navigation.valid,
+  ]);
 
   useEffect(() => {
     let alive = true;
     const controller = new AbortController();
 
-    async function load() {
-      if (romeState.present && !romeState.valid) {
-        setLoading(false);
-        setError('');
-        setOccupationResult(null);
+    async function loadDomains() {
+      try {
+        setLoadingDomains(true);
+        setDomainError('');
+
+        const result = await getPublicOccupationDomains({
+          signal: controller.signal,
+        });
+
+        if (alive) setDomainsResult(result);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (alive) {
+          setDomainError(
+            error?.message ||
+              'Les secteurs sont momentanément indisponibles.'
+          );
+        }
+      } finally {
+        if (alive && !controller.signal.aborted) {
+          setLoadingDomains(false);
+        }
+      }
+    }
+
+    loadDomains();
+
+    return () => {
+      alive = false;
+      controller.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const controller = new AbortController();
+
+    async function loadOccupations() {
+      if (!domainCode || !navigation.valid) {
+        setDomainResult(null);
+        setOccupationsError('');
+        setLoadingOccupations(false);
         return;
       }
 
       try {
-        setLoading(true);
-        setError('');
+        setLoadingOccupations(true);
+        setOccupationsError('');
 
-        if (romeState.present) {
+        const result =
+          await getPublicOccupationDomainOccupations(
+            domainCode,
+            { signal: controller.signal }
+          );
+
+        if (alive) setDomainResult(result);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (alive) {
+          setDomainResult(null);
+          setOccupationsError(
+            error?.message ||
+              'Les métiers de ce secteur sont momentanément indisponibles.'
+          );
+        }
+      } finally {
+        if (alive && !controller.signal.aborted) {
+          setLoadingOccupations(false);
+        }
+      }
+    }
+
+    loadOccupations();
+
+    return () => {
+      alive = false;
+      controller.abort();
+    };
+  }, [domainCode, navigation.valid]);
+
+  useEffect(() => {
+    let alive = true;
+    const controller = new AbortController();
+
+    async function loadMap() {
+      if (!navigation.valid) {
+        setGeneralIndex(null);
+        setOccupationResult(null);
+        setLoadingMap(false);
+        setMapError('');
+        return;
+      }
+
+      if (domainCode && !romeCode) {
+        setGeneralIndex(null);
+        setOccupationResult(null);
+        setLoadingMap(false);
+        setMapError('');
+        return;
+      }
+
+      try {
+        setLoadingMap(true);
+        setMapError('');
+
+        if (romeCode) {
           const result = await getPublicOccupationMap(
             romeCode,
             { signal: controller.signal }
@@ -54,35 +189,75 @@ export default function PublicOccupationMapPage() {
             setOccupationResult(null);
           }
         }
-      } catch (currentError) {
+      } catch (error) {
         if (controller.signal.aborted) return;
-
         if (alive) {
-          setError(
-            currentError?.message ||
+          setMapError(
+            error?.message ||
               'La carte métier est momentanément indisponible.'
           );
         }
       } finally {
         if (alive && !controller.signal.aborted) {
-          setLoading(false);
+          setLoadingMap(false);
         }
       }
     }
 
-    load();
+    loadMap();
 
     return () => {
       alive = false;
       controller.abort();
     };
-  }, [romeCode, romeState.present, romeState.valid]);
+  }, [
+    domainCode,
+    romeCode,
+    navigation.valid,
+  ]);
+
+  const selectedDomain = useMemo(
+    () =>
+      domainsResult.domains.find(
+        (domain) => domain.domainCode === domainCode
+      ) || null,
+    [domainsResult.domains, domainCode]
+  );
+
+  const selectedOccupation = useMemo(
+    () =>
+      domainResult?.occupations?.find(
+        (occupation) =>
+          occupation.romeCode === romeCode
+      ) || null,
+    [domainResult, romeCode]
+  );
 
   const occupationData = occupationResult?.data || null;
-  const occupationMode = romeState.present && romeState.valid;
+  const occupationMode = Boolean(
+    navigation.valid && romeCode
+  );
+  const domainMode = Boolean(
+    navigation.valid && domainCode && !romeCode
+  );
+  const generalMode = Boolean(
+    navigation.valid && !domainCode && !romeCode
+  );
+
+  const occupationUnavailable =
+    selectedOccupation?.dataStatus ===
+    'insufficient_data';
+
   const romeLabel =
     occupationData?.romeLabel ||
+    selectedOccupation?.label ||
     romeCode ||
+    '';
+
+  const domainLabel =
+    domainResult?.domainLabel ||
+    selectedDomain?.domainLabel ||
+    domainCode ||
     '';
 
   const departments = useMemo(() => {
@@ -92,80 +267,128 @@ export default function PublicOccupationMapPage() {
         : [];
     }
 
-    return Array.isArray(generalIndex?.departments)
-      ? generalIndex.departments
-      : [];
-  }, [occupationMode, occupationData, generalIndex]);
+    if (generalMode) {
+      return Array.isArray(generalIndex?.departments)
+        ? generalIndex.departments
+        : [];
+    }
+
+    return [];
+  }, [
+    occupationMode,
+    occupationData,
+    generalMode,
+    generalIndex,
+  ]);
 
   const latestDate = occupationMode
     ? occupationData?.date || null
     : generalIndex?.latestDate || null;
 
-  function selectOccupation(selection) {
-    if (!selection?.romeCode) return;
+  function selectDomain(nextDomainCode) {
     window.location.assign(
-      buildOccupationMapUrl(selection.romeCode)
+      buildOccupationDomainMapUrl(nextDomainCode)
     );
   }
 
-  const invalidSelection =
-    romeState.present &&
-    !romeState.valid;
+  function selectOccupation(occupation) {
+    if (
+      !occupation?.romeCode ||
+      occupation.dataStatus !== 'available'
+    ) {
+      return;
+    }
+
+    window.location.assign(
+      buildOccupationMapUrl(
+        occupation.romeCode,
+        domainCode
+      )
+    );
+  }
+
+  const invalidSelection = !navigation.valid;
 
   const noPublishedOccupation =
     occupationMode &&
-    !loading &&
-    !error &&
+    !loadingMap &&
+    !mapError &&
     occupationResult &&
     occupationResult.exists !== true;
 
-  const showMap =
+  const showGeneralMap =
+    generalMode && !invalidSelection;
+
+  const showOccupationMap =
+    occupationMode &&
     !invalidSelection &&
+    !occupationUnavailable &&
     !noPublishedOccupation &&
-    (!occupationMode || occupationResult?.exists === true);
+    occupationResult?.exists === true;
 
   return (
     <PublicLayout>
-      <section className="public-hero">
+      <section className="public-hero occupation-sector-hero">
         <div className="public-hero-copy">
-          <p className="eyebrow">Métiers & formations</p>
+          <p className="eyebrow">Métiers</p>
           <h1>
             {occupationMode
               ? 'Vigilance métier : ' + romeLabel
-              : invalidSelection
-                ? 'Sélection métier invalide'
-                : 'Explorer l’apprentissage par métier.'}
+              : domainMode
+                ? 'Secteur : ' + domainLabel
+                : invalidSelection
+                  ? 'Sélection invalide'
+                  : 'Explorer l’apprentissage par secteur.'}
           </h1>
+
           <p className="public-hero-intro">
             {occupationMode
-              ? 'La carte nationale est recalculée à partir du niveau publié pour le code ROME ' + romeCode + '. Les données insuffisantes restent distinctes du vert.'
-              : invalidSelection
-                ? 'Le code ROME présent dans l’adresse n’est pas valide. Lancez une nouvelle recherche pour continuer.'
-                : 'Recherchez un métier ou une formation. La même carte nationale sera ensuite affichée avec la vigilance du métier sélectionné.'}
+              ? 'La carte compare la vigilance publiée pour ce métier ROME. Les départements sans données suffisantes restent explicitement distingués.'
+              : domainMode
+                ? 'Le secteur affine la liste des métiers. Choisissez ensuite un métier disposant de données exploitables pour afficher sa carte.'
+                : invalidSelection
+                  ? 'Le secteur ou le code ROME présent dans l’adresse n’est pas valide.'
+                  : 'Commencez par choisir un secteur professionnel ROME, puis sélectionnez un métier pour afficher sa vigilance territoriale.'}
           </p>
 
-          {occupationMode ? (
+          {domainCode ? (
             <div className="occupation-context-actions">
-              <a className="button-link" href="/">
-                Revenir à la situation générale
-              </a>
+              {occupationMode ? (
+                <a
+                  className="button-link"
+                  href={buildOccupationDomainMapUrl(
+                    domainCode
+                  )}
+                >
+                  Revenir aux métiers du secteur
+                </a>
+              ) : null}
+
               <a className="text-link" href="/metiers">
-                Effacer le métier
+                Changer de secteur
               </a>
             </div>
           ) : null}
         </div>
 
-        <div className="occupation-search-card">
-          <p className="eyebrow">Recherche</p>
-          <h2>Choisir un métier</h2>
+        <div className="occupation-search-card occupation-sector-card">
+          <p className="eyebrow">Parcours guidé</p>
+          <h2>Choisir un secteur puis un métier</h2>
           <p>
-            Une formation liée à plusieurs métiers vous demandera de choisir explicitement le code ROME.
+            Les métiers sans données suffisantes restent visibles mais ne peuvent pas ouvrir une carte.
           </p>
-          <OccupationSearch
+
+          <OccupationDomainBrowser
+            domains={domainsResult.domains}
+            selectedDomainCode={domainCode}
+            selectedRomeCode={romeCode}
+            domainData={domainResult}
+            loadingDomains={loadingDomains}
+            loadingOccupations={loadingOccupations}
+            domainError={domainError}
+            occupationsError={occupationsError}
+            onDomainSelect={selectDomain}
             onOccupationSelect={selectOccupation}
-            initialRomeCode={romeCode}
-            initialLabel={occupationData?.romeLabel || ''}
           />
         </div>
       </section>
@@ -175,25 +398,44 @@ export default function PublicOccupationMapPage() {
           className="state-box error-box occupation-map-notice"
           role="alert"
         >
-          Le paramètre ROME de cette adresse est invalide. La carte générale n’est pas utilisée comme remplacement silencieux.
+          Le secteur ou le code ROME présent dans cette adresse est invalide.
           <div className="occupation-context-actions">
             <a className="button-link" href="/metiers">
-              Rechercher un métier
+              Recommencer
             </a>
           </div>
         </section>
       ) : null}
 
-      {noPublishedOccupation ? (
+      {domainMode ? (
+        <section className="occupation-domain-guidance">
+          <p className="eyebrow">Étape suivante</p>
+          <h2>Sélectionnez un métier du secteur.</h2>
+          <p>
+            La vigilance sectorielle agrégée n’est pas encore publiée. Tant que le moteur secteur #51 n’est pas validé, ApprentiFR n’utilise aucune couleur sectorielle de remplacement.
+          </p>
+        </section>
+      ) : null}
+
+      {occupationUnavailable ? (
         <section
           className="state-box occupation-map-notice"
           aria-live="polite"
         >
-          Aucune vigilance métier publiée n’est disponible actuellement pour {romeCode}. Choisissez un autre métier ou revenez à la carte générale.
+          Les données sont actuellement insuffisantes pour ouvrir une vigilance fiable pour {romeCode}. Le métier reste référencé dans son secteur mais son accès cartographique est désactivé.
         </section>
       ) : null}
 
-      {showMap ? (
+      {noPublishedOccupation && !occupationUnavailable ? (
+        <section
+          className="state-box occupation-map-notice"
+          aria-live="polite"
+        >
+          Aucune vigilance métier publiée n’est disponible actuellement pour {romeCode}.
+        </section>
+      ) : null}
+
+      {showGeneralMap || showOccupationMap ? (
         <section className="public-map-section">
           <div className="section-title-row map-section-heading">
             <div>
@@ -205,13 +447,14 @@ export default function PublicOccupationMapPage() {
               <h2>
                 {occupationMode
                   ? 'Situation territoriale — ' + romeLabel
-                  : 'Situation générale en attendant votre sélection'}
+                  : 'Situation générale'}
               </h2>
             </div>
+
             <p className="section-note">
               {occupationMode
-                ? 'Chaque département conserve le contexte ROME dans son lien de détail.'
-                : 'Cette carte reste la lecture nationale générale. Recherchez un métier pour activer le filtre.'}
+                ? 'Chaque département conserve le secteur et le métier dans son lien de détail.'
+                : 'Choisissez un secteur puis un métier pour passer à une lecture spécialisée.'}
             </p>
           </div>
 
@@ -219,8 +462,8 @@ export default function PublicOccupationMapPage() {
             <VigilanceMap
               mode={occupationMode ? 'occupation' : 'public'}
               departments={departments}
-              loading={loading}
-              error={error}
+              loading={loadingMap}
+              error={mapError}
               latestDate={latestDate}
               contextLabel={occupationMode ? romeLabel : ''}
               missingLevel={
@@ -230,10 +473,11 @@ export default function PublicOccupationMapPage() {
               }
               departmentHrefBuilder={
                 occupationMode
-                  ? (departmentCode) =>
+                  ? (departmentCodeValue) =>
                       buildOccupationDepartmentUrl(
-                        departmentCode,
-                        romeCode
+                        departmentCodeValue,
+                        romeCode,
+                        domainCode
                       )
                   : null
               }
@@ -246,13 +490,13 @@ export default function PublicOccupationMapPage() {
                 <p className="eyebrow">Lecture</p>
                 <h3>
                   {occupationMode
-                    ? 'Le métier reste le même partout.'
-                    : 'Choisissez un métier pour comparer.'}
+                    ? 'Une vigilance métier, pas une moyenne de secteur.'
+                    : 'Le secteur sert d’abord à orienter la recherche.'}
                 </h3>
                 <p>
                   {occupationMode
-                    ? 'La couleur n’est jamais utilisée seule : le niveau textuel est annoncé sur chaque département, et « Données insuffisantes » possède son propre état.'
-                    : 'Le mode métier réutilise cette carte. Il ne déclenche pas de calcul lourd lors de votre consultation.'}
+                    ? 'La carte utilise uniquement la publication du métier sélectionné. Une donnée insuffisante n’est jamais transformée en vert.'
+                    : 'Les cartes sectorielles seront activées seulement lorsque leur moteur indépendant sera validé et publié.'}
                 </p>
               </section>
             </aside>
@@ -260,23 +504,18 @@ export default function PublicOccupationMapPage() {
         </section>
       ) : null}
 
-      {!invalidSelection && loading ? (
+      {!invalidSelection && loadingMap ? (
         <section className="state-box occupation-map-notice">
           Chargement de la carte…
         </section>
       ) : null}
 
-      {!invalidSelection && error && !showMap ? (
+      {!invalidSelection && mapError && !showGeneralMap && !showOccupationMap ? (
         <section
           className="state-box error-box occupation-map-notice"
           role="alert"
         >
-          Impossible de charger la vigilance métier : {error}
-          <div className="occupation-context-actions">
-            <a className="text-link" href="/">
-              La carte nationale générale reste disponible
-            </a>
-          </div>
+          Impossible de charger la vigilance métier : {mapError}
         </section>
       ) : null}
     </PublicLayout>
