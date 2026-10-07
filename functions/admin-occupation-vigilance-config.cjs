@@ -518,6 +518,7 @@ function simulateOccupationRows({
 async function previewOccupationVigilanceConfig({
   candidateConfig,
   romeCode,
+  baseConfigVersion,
   db,
 } = {}) {
   const activeConfig = await latestValidatedConfig(db);
@@ -528,6 +529,23 @@ async function previewOccupationVigilanceConfig({
       status: 409,
       errorCode: 'ACTIVE_CONFIG_MISSING',
       error: 'Aucune configuration active ne peut servir de base.',
+    };
+  }
+
+  const expectedBaseVersion = text(baseConfigVersion);
+
+  if (
+    expectedBaseVersion &&
+    expectedBaseVersion !== activeConfig.version
+  ) {
+    return {
+      ok: false,
+      status: 409,
+      errorCode: 'STALE_SIMULATION_BASE',
+      error:
+        'La configuration active a changé depuis l’ouverture de cette page. Rechargez les paramètres avant de simuler.',
+      activeConfigVersion: activeConfig.version,
+      baseConfigVersion: expectedBaseVersion,
     };
   }
 
@@ -678,6 +696,7 @@ async function handleOccupationVigilanceConfigPreview({
   const result = await previewOccupationVigilanceConfig({
     candidateConfig: request?.body?.candidateConfig,
     romeCode: request?.body?.romeCode,
+    baseConfigVersion: request?.body?.baseConfigVersion,
     db,
   });
 
