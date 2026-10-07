@@ -14535,6 +14535,40 @@ exports.previewOccupationVigilanceConfigHttp = onRequest(
   }
 );
 
+exports.getOccupationVigilanceConfigHistoryHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceConfigHistory({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
+exports.compareOccupationVigilanceConfigsHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceConfigComparison({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
 exports.activateOccupationVigilanceConfigHttp = onRequest(
   {
     region: 'europe-west1',
