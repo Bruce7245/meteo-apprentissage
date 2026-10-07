@@ -40,6 +40,13 @@ function validConfig(overrides = {}) {
       yellowMinRatio: 0.65,
       orangeMinRatio: 0.4,
     },
+    historicalTrend: {
+      minimumYears: 3,
+      weight: 0.5,
+      stableBand: 0.05,
+      minFactor: 0.9,
+      maxFactor: 1.1,
+    },
     confidence: {
       highMin: 80,
       mediumMin: 60,
@@ -71,6 +78,13 @@ function baseInput(overrides = {}) {
     recentTrend: {
       status: 'stable',
       changeRatio: 0,
+    },
+    interannualTrend: {
+      status: 'active',
+      direction: 'stable',
+      annualTrendRatio: 0,
+      factor: 1,
+      sampleYears: 3,
     },
     ...overrides,
   };
@@ -143,6 +157,7 @@ test('computeExpectedOffers uses neutral factors and confidence penalties when s
     trainingPressure: 1,
     diversityFragility: 1,
     seasonality: 1,
+    historicalTrend: 1,
   });
   assert.equal(result.expectedOffers, 20);
   assert.equal(result.confidencePenalty, 45);
@@ -166,6 +181,7 @@ test('computeExpectedOffers bounds training, diversity and seasonality factors',
     trainingPressure: 1.2,
     diversityFragility: 1.1,
     seasonality: 1.25,
+    historicalTrend: 1,
   });
   assert.equal(result.expectedOffers, 33);
 });
@@ -313,4 +329,49 @@ test('minimumGreenActiveOffers must be a positive whole offer count', () => {
     ).ok,
     false
   );
+});
+
+
+test('interannual decline raises expected offers within configured bounds and exposes department-specific thresholds', () => {
+  const result = vigilance.computeOccupationVigilance(
+    baseInput({
+      activeOffersCount: 18,
+      interannualTrend: {
+        status: 'active',
+        direction: 'degrading',
+        annualTrendRatio: -0.2,
+        sampleYears: 3,
+      },
+    }),
+    validConfig()
+  );
+
+  assert.equal(result.factors.historicalTrend, 1.1);
+  assert.equal(result.expectedOffers, 22);
+  assert.deepEqual(result.effectiveThresholds, {
+    greenMinOffers: 20,
+    yellowMinOffers: 15,
+    orangeMinOffers: 9,
+  });
+  assert.equal(
+    result.reasonCodes.includes('INTERANNUAL_TREND_DEGRADING'),
+    true
+  );
+});
+
+test('interannual improvement can soften the expected level without overriding configured bounds', () => {
+  const result = vigilance.computeExpectedOffers(
+    baseInput({
+      interannualTrend: {
+        status: 'active',
+        direction: 'improving',
+        annualTrendRatio: 0.4,
+        sampleYears: 4,
+      },
+    }),
+    validConfig()
+  );
+
+  assert.equal(result.factors.historicalTrend, 0.9);
+  assert.equal(result.expectedOffers, 18);
 });
