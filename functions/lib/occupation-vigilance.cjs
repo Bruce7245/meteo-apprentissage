@@ -217,23 +217,42 @@ function validateOccupationVigilanceConfig(config) {
   }
 
   if (config.historicalTrend !== undefined) {
-    const settings = historicalTrendSettings(config);
+    const raw = config.historicalTrend;
 
-    if (
-      settings.minimumYears < 2 ||
-      settings.minFactor > settings.maxFactor
-    ) {
-      errors.push(
-        'historicalTrend must have minimumYears >= 2 and minFactor <= maxFactor'
-      );
-    }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      errors.push('historicalTrend must be an object');
+    } else {
+      const minimumYears = finiteNumber(raw.minimumYears);
+      const weight = finiteNumber(raw.weight);
+      const stableBand = finiteNumber(raw.stableBand);
+      const minFactor = positiveNumber(raw.minFactor);
+      const maxFactor = positiveNumber(raw.maxFactor);
 
-    const rawWeight = finiteNumber(config.historicalTrend?.weight);
-    if (
-      rawWeight !== null &&
-      (rawWeight < 0 || rawWeight > 1)
-    ) {
-      errors.push('historicalTrend.weight must be between 0 and 1');
+      if (
+        minimumYears === null ||
+        !Number.isInteger(minimumYears) ||
+        minimumYears < 2
+      ) {
+        errors.push('historicalTrend.minimumYears must be an integer >= 2');
+      }
+
+      if (weight === null || weight < 0 || weight > 1) {
+        errors.push('historicalTrend.weight must be between 0 and 1');
+      }
+
+      if (stableBand === null || stableBand < 0) {
+        errors.push('historicalTrend.stableBand must be >= 0');
+      }
+
+      if (
+        minFactor === null ||
+        maxFactor === null ||
+        minFactor > maxFactor
+      ) {
+        errors.push(
+          'historicalTrend factors must be positive with minFactor <= maxFactor'
+        );
+      }
     }
   }
 
