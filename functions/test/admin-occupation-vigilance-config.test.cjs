@@ -5,8 +5,10 @@ const {
   activateOccupationVigilanceDraft,
   bearerToken,
   compareOccupationConfigRows,
+  getActiveOccupationVigilanceConfigForAdmin,
   manualCandidateFromDraft,
   occupationConfigSummary,
+  saveOccupationVigilanceDraft,
   simulateOccupationRows,
   stableManualVersion,
 } = require('../admin-occupation-vigilance-config.cjs');
@@ -82,6 +84,7 @@ function fakeDb({ activeVersion = 'base-config', draft } = {}) {
   function makeDoc(path) {
     return {
       path,
+      id: path.split('/').at(-1),
       async get() {
         const value = documents.get(path);
         return {
@@ -89,6 +92,18 @@ function fakeDb({ activeVersion = 'base-config', draft } = {}) {
           data: () => value,
           id: path.split('/').at(-1),
         };
+      },
+      async set(data, options) {
+        const current = documents.get(path) || {};
+        const next = options?.merge
+          ? { ...current, ...data }
+          : data;
+
+        documents.set(path, next);
+        writes.push({
+          path,
+          data: next,
+        });
       },
     };
   }
@@ -575,4 +590,75 @@ test('compareOccupationConfigRows can reveal a calibration change independently 
   assert.equal(result.rows[0].leftLevel, 'green');
   assert.equal(result.rows[0].rightLevel, 'orange');
   assert.equal(result.rows[0].direction, 'stricter');
+});
+
+
+test('getActiveOccupationVigilanceConfigForAdmin returns a safe config summary', async () => {
+  const db = fakeDb();
+
+  const config =
+    await getActiveOccupationVigilanceConfigForAdmin(db);
+
+  assert.equal(config.version, 'base-config');
+  assert.equal(config.baselineCount, 1);
+  assert.equal(config.baselines, undefined);
+  assert.equal(config.thresholds.greenMinRatio, 0.9);
+});
+
+test('saveOccupationVigilanceDraft writes through the server only when the base is current', async () => {
+  const db = fakeDb();
+
+  const result = await saveOccupationVigilanceDraft({
+    candidateConfig: {
+      status: 'draft',
+      thresholds: {
+        greenMinRatio: 0.95,
+        yellowMinRatio: 0.7,
+        orangeMinRatio: 0.45,
+      },
+    },
+    baseConfigVersion: 'base-config',
+    uid: 'admin-1',
+    email: 'admin@example.test',
+    db,
+    FieldValue: {
+      serverTimestamp: () => 'timestamp',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 200);
+  assert.match(result.id, /^auto-/);
+
+  const write = db.writes.find(
+    (item) =>
+      item.path ===
+      'occupationVigilanceConfigDrafts/' + result.id
+  );
+
+  assert.equal(write.data.status, 'draft');
+  assert.equal(write.data.baseConfigVersion, 'base-config');
+  assert.equal(write.data.createdByUid, 'admin-1');
+});
+
+test('saveOccupationVigilanceDraft refuses a stale base version', async () => {
+  const db = fakeDb({
+    activeVersion: 'newer-config',
+  });
+
+  const result = await saveOccupationVigilanceDraft({
+    candidateConfig: {
+      status: 'draft',
+    },
+    baseConfigVersion: 'older-config',
+    uid: 'admin-1',
+    db,
+    FieldValue: {
+      serverTimestamp: () => 'timestamp',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 409);
+  assert.equal(result.errorCode, 'STALE_DRAFT_BASE');
 });

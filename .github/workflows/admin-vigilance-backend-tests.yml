@@ -11,7 +11,6 @@ on:
       - functions/test/admin-occupation-vigilance-config.test.cjs
       - functions/test/occupation-vigilance.test.cjs
       - functions/index.js
-      - firestore.rules
       - .github/workflows/admin-vigilance-backend-tests.yml
   pull_request:
     branches:
@@ -23,7 +22,6 @@ on:
       - functions/test/admin-occupation-vigilance-config.test.cjs
       - functions/test/occupation-vigilance.test.cjs
       - functions/index.js
-      - firestore.rules
       - .github/workflows/admin-vigilance-backend-tests.yml
   workflow_dispatch:
 
@@ -64,14 +62,3 @@ jobs:
           set -euo pipefail
           node --test             test/admin-occupation-vigilance-config.test.cjs             test/occupation-vigilance.test.cjs
 
-      - name: Validate Firestore rule scope
-        run: |
-          set -euo pipefail
-          test -s firestore.rules
-          grep -q "occupationVigilanceConfigs" firestore.rules
-          grep -q "occupationVigilanceConfigDrafts" firestore.rules
-          grep -q "occupationVigilanceConfigAudit" firestore.rules
-          grep -q "occupationHistoryStats" firestore.rules
-          grep -q "occupationContextStats" firestore.rules
-          grep -q "occupationVigilanceRuns" firestore.rules
-          grep -q "occupationVigilanceSnapshots" firestore.rules

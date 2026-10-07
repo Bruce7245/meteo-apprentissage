@@ -1045,6 +1045,301 @@ async function compareOccupationVigilanceVersions({
   }
 }
 
+async function getActiveOccupationVigilanceConfigForAdmin(db) {
+  const config = await latestValidatedConfig(db);
+
+  return config ? occupationConfigSummary(config) : null;
+}
+
+async function getOccupationAnalysisForAdmin({
+  db,
+  romeCode,
+} = {}) {
+  const rome = normalizeRomeCode(romeCode);
+
+  if (!rome) {
+    return {
+      ok: false,
+      status: 400,
+      errorCode: 'ROME_REQUIRED',
+      error: 'Un métier ROME valide est requis.',
+    };
+  }
+
+  const run = await latestReadyOccupationRun(db);
+
+  if (!run) {
+    return {
+      ok: true,
+      status: 200,
+      run: null,
+      romeCode: rome,
+      rows: [],
+      summary: null,
+    };
+  }
+
+  const snapshot = await db
+    .collection('occupationVigilanceSnapshots')
+    .doc(run.id)
+    .collection('entries')
+    .where('romeCode', '==', rome)
+    .get();
+
+  const levelRankForAdmin = {
+    red: 0,
+    orange: 1,
+    yellow: 2,
+    green: 3,
+    insufficient_data: 4,
+  };
+
+  const rows = snapshot.docs
+    .map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }))
+    .sort((a, b) => {
+      const levelCompare =
+        (levelRankForAdmin[a.publishedLevel] ?? 99) -
+        (levelRankForAdmin[b.publishedLevel] ?? 99);
+
+      if (levelCompare !== 0) return levelCompare;
+
+      const ratioA = Number(a.observedVsExpectedRatio);
+      const ratioB = Number(b.observedVsExpectedRatio);
+
+      if (Number.isFinite(ratioA) && Number.isFinite(ratioB) && ratioA !== ratioB) {
+        return ratioA - ratioB;
+      }
+
+      return text(a.departmentName || a.departmentCode)
+        .localeCompare(
+          text(b.departmentName || b.departmentCode),
+          'fr'
+        );
+    });
+
+  const levels = {
+    green: 0,
+    yellow: 0,
+    orange: 0,
+    red: 0,
+    insufficient_data: 0,
+  };
+
+  let highConfidenceCount = 0;
+  let totalObservedOffers = 0;
+  let totalExpectedOffers = 0;
+
+  for (const row of rows) {
+    const level = text(row.publishedLevel || 'insufficient_data');
+
+    if (level in levels) levels[level] += 1;
+    if (row.confidenceLevel === 'high') highConfidenceCount += 1;
+
+    const observed = Number(row.activeOffersCount);
+    const expected = Number(row.expectedOffers);
+
+    if (Number.isFinite(observed)) totalObservedOffers += observed;
+    if (Number.isFinite(expected)) totalExpectedOffers += expected;
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    run: {
+      id: run.id,
+      date: run.date || null,
+      status: run.status || null,
+      configVersion: run.configVersion || null,
+      calculationVersion: run.calculationVersion || null,
+    },
+    romeCode: rome,
+    romeLabel: rows[0]?.romeLabel || rome,
+    rows,
+    summary: {
+      departmentsCount: rows.length,
+      totalObservedOffers,
+      totalExpectedOffers,
+      highConfidenceCount,
+      levels,
+      elevatedDepartments: levels.orange + levels.red,
+    },
+  };
+}
+
+async function saveOccupationVigilanceDraft({
+  candidateConfig,
+  baseConfigVersion,
+  uid,
+  email,
+  db,
+  FieldValue,
+} = {}) {
+  const cleanBaseVersion = text(baseConfigVersion);
+
+  if (!cleanBaseVersion) {
+    return {
+      ok: false,
+      status: 400,
+      errorCode: 'BASE_CONFIG_REQUIRED',
+      error: 'Version de base manquante.',
+    };
+  }
+
+  const activeConfig = await latestValidatedConfig(db);
+
+  if (!activeConfig) {
+    return {
+      ok: false,
+      status: 409,
+      errorCode: 'ACTIVE_CONFIG_MISSING',
+      error: 'Aucune configuration active ne peut servir de base.',
+    };
+  }
+
+  if (activeConfig.version !== cleanBaseVersion) {
+    return {
+      ok: false,
+      status: 409,
+      errorCode: 'STALE_DRAFT_BASE',
+      error:
+        'La configuration active a changé. Rechargez les paramètres avant d’enregistrer le brouillon.',
+      activeConfigVersion: activeConfig.version,
+      baseConfigVersion: cleanBaseVersion,
+    };
+  }
+
+  const draftRef = db
+    .collection('occupationVigilanceConfigDrafts')
+    .doc();
+
+  const serverTimestamp = () =>
+    FieldValue?.serverTimestamp
+      ? FieldValue.serverTimestamp()
+      : new Date();
+
+  await draftRef.set({
+    status: 'draft',
+    baseConfigVersion: cleanBaseVersion,
+    candidateConfig: {
+      ...(candidateConfig || {}),
+      status: 'draft',
+    },
+    createdByUid: text(uid) || null,
+    createdByEmail: text(email) || null,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    schemaVersion: 'occupationVigilanceConfigDraft.v1',
+  });
+
+  return {
+    ok: true,
+    status: 200,
+    id: draftRef.id,
+    baseConfigVersion: cleanBaseVersion,
+  };
+}
+
+async function handleOccupationVigilanceActiveConfig({
+  request,
+  response,
+  auth,
+  db,
+} = {}) {
+  if (request?.method !== 'POST') {
+    response.status(405).json({
+      ok: false,
+      error: 'Méthode non autorisée',
+    });
+    return;
+  }
+
+  const decoded = await authenticateAdminRequest({
+    request,
+    response,
+    auth,
+    db,
+  });
+
+  if (!decoded) return;
+
+  const config = await getActiveOccupationVigilanceConfigForAdmin(db);
+
+  response.status(200).json({
+    ok: true,
+    config,
+  });
+}
+
+async function handleOccupationVigilanceAnalysis({
+  request,
+  response,
+  auth,
+  db,
+} = {}) {
+  if (request?.method !== 'POST') {
+    response.status(405).json({
+      ok: false,
+      error: 'Méthode non autorisée',
+    });
+    return;
+  }
+
+  const decoded = await authenticateAdminRequest({
+    request,
+    response,
+    auth,
+    db,
+  });
+
+  if (!decoded) return;
+
+  const result = await getOccupationAnalysisForAdmin({
+    db,
+    romeCode: request?.body?.romeCode,
+  });
+
+  response.status(result.status).json(result);
+}
+
+async function handleOccupationVigilanceDraftSave({
+  request,
+  response,
+  auth,
+  db,
+  FieldValue,
+} = {}) {
+  if (request?.method !== 'POST') {
+    response.status(405).json({
+      ok: false,
+      error: 'Méthode non autorisée',
+    });
+    return;
+  }
+
+  const decoded = await authenticateAdminRequest({
+    request,
+    response,
+    auth,
+    db,
+  });
+
+  if (!decoded) return;
+
+  const result = await saveOccupationVigilanceDraft({
+    candidateConfig: request?.body?.candidateConfig,
+    baseConfigVersion: request?.body?.baseConfigVersion,
+    uid: decoded.uid,
+    email: decoded.email || null,
+    db,
+    FieldValue,
+  });
+
+  response.status(result.status).json(result);
+}
+
 async function handleOccupationVigilanceConfigHistory({
   request,
   response,
@@ -1156,8 +1451,14 @@ module.exports = {
   listOccupationVigilanceConfigHistory,
   compareOccupationConfigRows,
   compareOccupationVigilanceVersions,
+  getActiveOccupationVigilanceConfigForAdmin,
+  getOccupationAnalysisForAdmin,
+  saveOccupationVigilanceDraft,
   authenticateAdminRequest,
   handleOccupationVigilanceConfigPreview,
+  handleOccupationVigilanceActiveConfig,
+  handleOccupationVigilanceAnalysis,
+  handleOccupationVigilanceDraftSave,
   handleOccupationVigilanceConfigHistory,
   handleOccupationVigilanceConfigComparison,
   activateOccupationVigilanceDraft,
