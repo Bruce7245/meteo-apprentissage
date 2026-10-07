@@ -3,10 +3,20 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const OpenAI = require('openai');
+const {
+  validatePublicOccupationQuery,
+  mergeOccupationSearchResults,
+  buildPublicOccupationLookup,
+  createPublicRateLimiter,
+} = require('./lib/public-occupation-search.cjs');
 
 admin.initializeApp();
 
 const db = admin.firestore();
+const publicOccupationSearchRateLimit = createPublicRateLimiter({
+  windowMs: 60_000,
+  maxRequests: 60,
+});
 const API_APPRENTISSAGE_TOKEN = defineSecret('API_APPRENTISSAGE_TOKEN');
 const INSEE_API_KEY = defineSecret('INSEE_API_KEY');
 const BACKFILL_ADMIN_KEY = defineSecret('BACKFILL_ADMIN_KEY');
@@ -13032,5 +13042,174 @@ exports.activateOccupationVigilanceConfigHttp = onRequest(
       db,
       FieldValue: admin.firestore.FieldValue,
     });
+  }
+);
+
+
+exports.getPublicOccupationSearchHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    try {
+      if (request.method === 'OPTIONS') {
+        response.status(204).send('');
+        return;
+      }
+
+      if (request.method !== 'GET') {
+        response.set('Allow', 'GET, OPTIONS');
+        response.status(405).json({
+          ok: false,
+          error: 'Method not allowed',
+        });
+        return;
+      }
+
+      const forwardedFor = String(request.get('x-forwarded-for') || '')
+        .split(',')[0]
+        .trim();
+      const requesterKey = request.ip || forwardedFor || 'anonymous';
+      const rateLimit = publicOccupationSearchRateLimit(requesterKey);
+
+      if (!rateLimit.allowed) {
+        response.set('Retry-After', String(rateLimit.retryAfterSeconds));
+        response.status(429).json({
+          ok: false,
+          error: 'Too many search requests',
+        });
+        return;
+      }
+
+      const validation = validatePublicOccupationQuery(request.query.q);
+
+      if (!validation.ok) {
+        response.status(validation.status).json({
+          ok: false,
+          error: validation.message,
+        });
+        return;
+      }
+
+      const { normalizedQuery } = validation;
+      const lookup = buildPublicOccupationLookup(normalizedQuery);
+
+      const metaSnapshot = await db
+        .collection('publicOccupationSearchIndexMeta')
+        .doc('current')
+        .get();
+
+      if (!metaSnapshot.exists) {
+        response.status(503).json({
+          ok: false,
+          error: 'Occupation search index is not available',
+        });
+        return;
+      }
+
+      const meta = metaSnapshot.data() || {};
+      const runId = String(meta.runId || '').trim();
+
+      if (!runId) {
+        response.status(503).json({
+          ok: false,
+          error: 'Occupation search index is not available',
+        });
+        return;
+      }
+
+      const runRef = db.collection('publicOccupationSearchIndexes').doc(runId);
+      const runSnapshot = await runRef.get();
+
+      if (!runSnapshot.exists || runSnapshot.data()?.status !== 'ready') {
+        response.status(503).json({
+          ok: false,
+          error: 'Occupation search index is not ready',
+        });
+        return;
+      }
+
+      const entriesRef = runRef.collection('entries');
+      const prefixQuery = entriesRef
+        .where('searchPrefixes', 'array-contains', lookup.prefixKey)
+        .limit(80);
+
+      const exactLabelQuery = entriesRef
+        .where('normalizedLabel', '==', normalizedQuery)
+        .limit(20);
+
+      const directReads = [];
+
+      if (lookup.exactRomeCode) {
+        directReads.push(
+          entriesRef.doc('occupation_' + lookup.exactRomeCode).get()
+        );
+      }
+
+      const rncpMatch = normalizedQuery.match(/^rncp(\d{2,8})$/);
+      if (rncpMatch) {
+        directReads.push(
+          entriesRef.doc('training_rncp_' + rncpMatch[1]).get()
+        );
+      }
+
+      const [prefixSnapshot, exactSnapshot, ...directSnapshots] =
+        await Promise.all([
+          prefixQuery.get(),
+          exactLabelQuery.get(),
+          ...directReads,
+        ]);
+
+      const candidates = new Map();
+
+      for (const snapshot of [prefixSnapshot, exactSnapshot]) {
+        for (const document of snapshot.docs) {
+          candidates.set(document.id, document.data());
+        }
+      }
+
+      for (const snapshot of directSnapshots) {
+        if (snapshot.exists) {
+          candidates.set(snapshot.id, snapshot.data());
+        }
+      }
+
+      const values = Array.from(candidates.values());
+      const occupations = values.filter(
+        (item) => item?.type === 'occupation'
+      );
+      const trainings = values.filter(
+        (item) => item?.type === 'training'
+      );
+
+      const results = mergeOccupationSearchResults({
+        normalizedQuery,
+        occupations,
+        trainings,
+        limit: 12,
+      });
+
+      response.set('Cache-Control', 'public, max-age=300, s-maxage=600');
+      response.json({
+        ok: true,
+        exists: true,
+        query: normalizedQuery,
+        asOfDate: meta.asOfDate || null,
+        results,
+      });
+    } catch (error) {
+      console.error('getPublicOccupationSearchHttp error', {
+        name: error?.name || 'Error',
+        message: String(error?.message || error).slice(0, 500),
+      });
+
+      response.status(500).json({
+        ok: false,
+        error: 'Unable to search occupations and training',
+      });
+    }
   }
 );

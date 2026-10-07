@@ -65,24 +65,78 @@ jobs:
           node --check functions/index.js
           node --check functions/admin-occupation-vigilance-config.cjs
           node --check functions/lib/occupation-search.cjs
+          node --check functions/lib/public-occupation-search.cjs
           node --check functions/lib/occupation-vigilance.cjs
 
       - name: Run targeted backend tests
         working-directory: functions
         run: |
           set -euo pipefail
-          node --test             test/admin-occupation-vigilance-config.test.cjs             test/occupation-vigilance.test.cjs
+          node --test             test/admin-occupation-vigilance-config.test.cjs             test/occupation-vigilance.test.cjs             test/public-occupation-search.test.cjs
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
 
+      - name: Verify occupation search index is ready
+        working-directory: functions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const { initializeApp, getApps } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
+
+          if (getApps().length === 0) {
+            initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = getFirestore();
+
+          (async () => {
+            const metaSnap = await db
+              .collection('publicOccupationSearchIndexMeta')
+              .doc('current')
+              .get();
+
+            if (!metaSnap.exists) {
+              throw new Error('publicOccupationSearchIndexMeta/current is missing');
+            }
+
+            const meta = metaSnap.data() || {};
+            const runId = String(meta.runId || '').trim();
+
+            if (!runId) {
+              throw new Error('Occupation search index runId is missing');
+            }
+
+            const runSnap = await db
+              .collection('publicOccupationSearchIndexes')
+              .doc(runId)
+              .get();
+
+            if (!runSnap.exists || runSnap.data()?.status !== 'ready') {
+              throw new Error('Occupation search index run is not ready: ' + runId);
+            }
+
+            console.log(JSON.stringify({
+              runId,
+              status: runSnap.data()?.status,
+              asOfDate: meta.asOfDate || null,
+            }, null, 2));
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
+
       - name: Deploy admin vigilance Functions
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes firebase-tools@latest deploy             --project meteo-apprentissage             --only "functions:getActiveOccupationVigilanceConfigHttp,functions:getOccupationVigilanceAnalysisHttp,functions:saveOccupationVigilanceConfigDraftHttp,functions:previewOccupationVigilanceConfigHttp,functions:getOccupationVigilanceConfigHistoryHttp,functions:compareOccupationVigilanceConfigsHttp,functions:activateOccupationVigilanceConfigHttp"             --non-interactive
+          npx --yes firebase-tools@latest deploy             --project meteo-apprentissage             --only "functions:getPublicOccupationSearchHttp,functions:getActiveOccupationVigilanceConfigHttp,functions:getOccupationVigilanceAnalysisHttp,functions:saveOccupationVigilanceConfigDraftHttp,functions:previewOccupationVigilanceConfigHttp,functions:getOccupationVigilanceConfigHistoryHttp,functions:compareOccupationVigilanceConfigsHttp,functions:activateOccupationVigilanceConfigHttp"             --non-interactive
 
       - name: Verify Functions are reachable and protected
         shell: bash
@@ -118,6 +172,35 @@ jobs:
           check_401             "compareOccupationVigilanceConfigsHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/compareOccupationVigilanceConfigsHttp"
 
           check_401             "activateOccupationVigilanceConfigHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/activateOccupationVigilanceConfigHttp"
+
+      - name: Verify public occupation search
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          body_file="$(mktemp)"
+          status="$(curl --silent --show-error             --output "$body_file"             --write-out "%{http_code}"             --max-time 30             --get             --data-urlencode "q=D1108"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getPublicOccupationSearchHttp")"
+
+          echo "getPublicOccupationSearchHttp -> HTTP $status"
+          cat "$body_file"
+          echo
+
+          if [ "$status" != "200" ]; then
+            echo "Occupation search smoke test failed." >&2
+            exit 1
+          fi
+
+          node - "$body_file" <<'NODE'
+          const fs = require('node:fs');
+          const file = process.argv[2];
+          const payload = JSON.parse(fs.readFileSync(file, 'utf8'));
+
+          if (!payload?.ok || !Array.isArray(payload?.results)) {
+            throw new Error('Invalid occupation search payload');
+          }
+
+          console.log('Search results:', payload.results.length);
+          NODE
 
       - name: Deploy Hosting
         shell: bash
@@ -156,7 +239,7 @@ jobs:
             echo "- Branch: \`$GITHUB_REF_NAME\`"
             echo
             echo "### Intended scope"
-            echo "- 7 admin vigilance Functions"
+            echo "- 8 Functions (7 admin + 1 public occupation search)"
             echo "- Firebase Hosting"
             echo
             echo "### Explicitly excluded"
