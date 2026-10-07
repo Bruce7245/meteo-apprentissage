@@ -1678,3 +1678,63 @@ h2 {
     grid-template-columns: 1fr;
   }
 }
+
+
+.admin-publication-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.admin-publication-signal {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(29, 53, 87, 0.12);
+  border-radius: 18px;
+  padding: 18px;
+  background: #ffffff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.admin-publication-signal:hover,
+.admin-publication-signal:focus-visible {
+  border-color: rgba(69, 123, 157, 0.45);
+  box-shadow: 0 10px 28px rgba(17, 35, 58, 0.08);
+}
+
+.admin-publication-signal:focus-visible {
+  outline: 3px solid rgba(54, 95, 138, 0.18);
+  outline-offset: 2px;
+}
+
+.admin-publication-signal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-publication-signal-head strong {
+  color: #1d3557;
+  font-size: 1rem;
+}
+
+.admin-publication-signal-value {
+  color: #13233a;
+  font-size: 1.12rem;
+  font-weight: 900;
+}
+
+.admin-publication-signal-meta {
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 760px) {
+  .admin-publication-signal-grid {
+    grid-template-columns: 1fr;
+  }
+}
