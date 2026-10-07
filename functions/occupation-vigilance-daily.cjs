@@ -159,6 +159,9 @@ async function buildDailyOccupationVigilanceRun({
           romeKnown: !!reference,
           recentTrend: history.recentTrend || { status: 'unknown' },
           seasonality: history.seasonality || { status: 'unavailable', factor: 1 },
+          interannualTrend:
+            history.interannualTrend ||
+            { status: 'unavailable', direction: 'unknown', factor: 1 },
         }, dependencies.config);
 
         if (vigilance.publishedLevel === 'insufficient_data') {
