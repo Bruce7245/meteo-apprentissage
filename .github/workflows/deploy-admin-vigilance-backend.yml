@@ -37,8 +37,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ "$GITHUB_REF_NAME" != "feat/admin-vigilance-backend-58" ]; then
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
             echo "Deployment refused from branch: $GITHUB_REF_NAME" >&2
+            echo "Deploy only from main after PR validation and merge." >&2
             exit 1
           fi
 
