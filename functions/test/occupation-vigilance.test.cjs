@@ -375,3 +375,49 @@ test('interannual improvement can soften the expected level without overriding c
   assert.equal(result.factors.historicalTrend, 0.9);
   assert.equal(result.expectedOffers, 18);
 });
+
+
+test('legacy config without historicalTrend keeps the historical factor neutral', () => {
+  const config = validConfig();
+  delete config.historicalTrend;
+  config.calculationVersion = 'occupationVigilance.v1.1';
+
+  const result = vigilance.computeExpectedOffers(
+    baseInput({
+      interannualTrend: {
+        status: 'active',
+        direction: 'degrading',
+        annualTrendRatio: -0.4,
+        sampleYears: 4,
+      },
+    }),
+    config
+  );
+
+  assert.equal(result.factors.historicalTrend, 1);
+  assert.equal(result.expectedOffers, 20);
+});
+
+test('legacy vigilance does not emit interannual reason codes when the feature is not versioned in config', () => {
+  const config = validConfig();
+  delete config.historicalTrend;
+  config.calculationVersion = 'occupationVigilance.v1.1';
+
+  const result = vigilance.computeOccupationVigilance(
+    baseInput({
+      activeOffersCount: 15,
+      interannualTrend: {
+        status: 'active',
+        direction: 'degrading',
+        annualTrendRatio: -0.4,
+        sampleYears: 4,
+      },
+    }),
+    config
+  );
+
+  assert.equal(
+    result.reasonCodes.includes('INTERANNUAL_TREND_DEGRADING'),
+    false
+  );
+});
