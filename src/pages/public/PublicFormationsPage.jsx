@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import PublicLayout from '../../layouts/PublicLayout.jsx';
 import JobsFormationsSwitcher from '../../components/JobsFormationsSwitcher.jsx';
+import FullscreenSearchDialog from '../../components/FullscreenSearchDialog.jsx';
 import DepartmentKpiCard from '../../components/dashboard/DepartmentKpiCard.jsx';
 import { getLatestPublicVigilanceIndex } from '../../services/vigilanceService.js';
 import { getPublicFormationDepartmentStats } from '../../services/formationPublicService.js';
@@ -21,6 +22,7 @@ export default function PublicFormationsPage() {
   const [loadingFormation, setLoadingFormation] = useState(false);
   const [departmentsError, setDepartmentsError] = useState('');
   const [formationError, setFormationError] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -134,15 +136,28 @@ export default function PublicFormationsPage() {
             Aucun niveau de vigilance formation n’est affiché tant que ce moteur
             n’est pas validé.
           </p>
+
+          <div className="jobs-formations-primary-actions">
+            <button
+              type="button"
+              className="jobs-formations-search-trigger"
+              onClick={() => setSearchOpen(true)}
+            >
+              <span>Rechercher une formation</span>
+              <small>Commencer par un département</small>
+            </button>
+          </div>
         </div>
+      </section>
 
-        <aside className="occupation-search-card occupation-sector-card jobs-formations-selector-card">
-          <p className="eyebrow">Exploration territoriale</p>
-          <h2>Choisir un département</h2>
-          <p>
-            Consultez la couverture de l’offre de formation et les sessions recensées.
-          </p>
-
+      <FullscreenSearchDialog
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        eyebrow="Recherche formation"
+        title="Choisir un département"
+        description="Consultez la couverture de l’offre de formation et les sessions recensées."
+      >
+        <div className="jobs-formations-dialog-form">
           <label
             className="occupation-search-label"
             htmlFor="formation-department-select"
@@ -155,9 +170,10 @@ export default function PublicFormationsPage() {
             className="occupation-domain-select"
             value={selectedDepartmentCode}
             disabled={loadingDepartments}
-            onChange={(event) =>
-              setSelectedDepartmentCode(event.target.value)
-            }
+            onChange={(event) => {
+              setSelectedDepartmentCode(event.target.value);
+              if (event.target.value) setSearchOpen(false);
+            }}
           >
             <option value="">
               {loadingDepartments
@@ -187,14 +203,14 @@ export default function PublicFormationsPage() {
             </p>
           ) : null}
 
-          {!selectedDepartmentCode && !departmentsError ? (
+          {!departmentsError ? (
             <p className="occupation-domain-helper">
-              La recherche détaillée par formation, RNCP et métier ROME sera ajoutée
-              sur ce même parcours sans changer son niveau dans l’interface.
+              La recherche détaillée par intitulé, RNCP et métier ROME sera ajoutée
+              dans ce même espace.
             </p>
           ) : null}
-        </aside>
-      </section>
+        </div>
+      </FullscreenSearchDialog>
 
       {selectedDepartmentCode ? (
         <section className="jobs-formations-results">
