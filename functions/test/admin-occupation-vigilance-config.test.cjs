@@ -5,6 +5,7 @@ const {
   activateOccupationVigilanceDraft,
   bearerToken,
   compareOccupationConfigRows,
+  enrichOccupationRowsWithPrevious,
   getActiveOccupationVigilanceConfigForAdmin,
   manualCandidateFromDraft,
   occupationConfigSummary,
@@ -723,4 +724,98 @@ test('summarizeOccupationAnalysisRows returns null total when no expected value 
   assert.equal(summary.expectedOffersAvailableCount, 0);
   assert.equal(summary.missingExpectedOffersCount, 3);
   assert.equal(summary.expectedCoverageRatio, 0);
+});
+
+
+test('enrichOccupationRowsWithPrevious exposes real level transitions and comparable deltas', () => {
+  const result = enrichOccupationRowsWithPrevious(
+    [
+      {
+        departmentCode: '72',
+        departmentName: 'Sarthe',
+        publishedLevel: 'red',
+        activeOffersCount: 11,
+        expectedOffers: 20,
+        observedVsExpectedRatio: 0.55,
+        confidenceLevel: 'high',
+      },
+      {
+        departmentCode: '44',
+        departmentName: 'Loire-Atlantique',
+        publishedLevel: 'yellow',
+        activeOffersCount: 14,
+        expectedOffers: 18,
+        observedVsExpectedRatio: 14 / 18,
+        confidenceLevel: 'high',
+      },
+      {
+        departmentCode: '53',
+        departmentName: 'Mayenne',
+        publishedLevel: 'green',
+        activeOffersCount: 8,
+        expectedOffers: 8,
+        observedVsExpectedRatio: 1,
+        confidenceLevel: 'medium',
+      },
+    ],
+    [
+      {
+        departmentCode: '72',
+        publishedLevel: 'yellow',
+        activeOffersCount: 18,
+        expectedOffers: 20,
+        observedVsExpectedRatio: 0.9,
+        confidenceLevel: 'high',
+      },
+      {
+        departmentCode: '44',
+        publishedLevel: 'orange',
+        activeOffersCount: 10,
+        expectedOffers: 18,
+        observedVsExpectedRatio: 10 / 18,
+        confidenceLevel: 'medium',
+      },
+    ]
+  );
+
+  assert.equal(result.transitions.comparableCount, 2);
+  assert.equal(result.transitions.changedCount, 2);
+  assert.equal(result.transitions.worsenedCount, 1);
+  assert.equal(result.transitions.improvedCount, 1);
+  assert.equal(result.transitions.newCount, 1);
+  assert.equal(result.transitions.matrix['yellow->red'], 1);
+  assert.equal(result.transitions.matrix['orange->yellow'], 1);
+
+  const sarthe = result.rows.find(
+    (row) => row.departmentCode === '72'
+  );
+
+  assert.equal(sarthe.previousPublishedLevel, 'yellow');
+  assert.equal(sarthe.publishedLevel, 'red');
+  assert.equal(sarthe.transitionDirection, 'worsened');
+  assert.equal(sarthe.previousActiveOffersCount, 18);
+  assert.equal(sarthe.activeOffersDelta, -7);
+  assert.equal(sarthe.previousExpectedOffers, 20);
+  assert.equal(sarthe.previousObservedVsExpectedRatio, 0.9);
+
+  const loireAtlantique = result.rows.find(
+    (row) => row.departmentCode === '44'
+  );
+
+  assert.equal(
+    loireAtlantique.transitionDirection,
+    'improved'
+  );
+  assert.equal(
+    loireAtlantique.activeOffersDelta,
+    4
+  );
+
+  const mayenne = result.rows.find(
+    (row) => row.departmentCode === '53'
+  );
+
+  assert.equal(mayenne.transitionDirection, 'new');
+  assert.equal(mayenne.previousPublishedLevel, null);
+  assert.equal(mayenne.activeOffersDelta, null);
 });
