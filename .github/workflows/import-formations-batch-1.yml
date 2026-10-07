@@ -1,0 +1,212 @@
+name: Import formation batch 1
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type WRITE to import formations for departments 01 to 10"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: import-formation-batch-1
+  cancel-in-progress: false
+
+jobs:
+  import:
+    name: Import departments 01 to 10
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - name: Verify confirmation
+        shell: bash
+        run: |
+          if [ "${{ inputs.confirmation }}" != "WRITE" ]; then
+            echo "Confirmation must be exactly WRITE."
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: meteo-apprentissage
+
+      - name: Import complete batch 1 with checkpoint resume
+        id: import
+        shell: bash
+        run: |
+          set -u
+
+          SUMMARY="/tmp/formation-batch-1-import.md"
+          CHECKED_AT="$(TZ=Europe/Paris date '+%Y-%m-%d %H:%M:%S %Z')"
+          RESPONSE_DIR="/tmp/formation-batch-1-import-segments"
+          mkdir -p "$RESPONSE_DIR"
+
+          KEY="$(gcloud secrets versions access latest             --secret=BACKFILL_ADMIN_KEY             --project=meteo-apprentissage)"
+          echo "::add-mask::$KEY"
+
+          MAX_SEGMENTS=20
+          SEGMENT=1
+          FINAL_STATUS=""
+          FAILED=0
+          LAST_RESPONSE=""
+
+          while [ "$SEGMENT" -le "$MAX_SEGMENTS" ]; do
+            RESPONSE="$RESPONSE_DIR/segment-$SEGMENT.json"
+            LAST_RESPONSE="$RESPONSE"
+
+            echo "Import segment $SEGMENT"
+
+            CURL_EXIT=0
+            HTTP_CODE="$(curl --silent --show-error               --max-time 500               --output "$RESPONSE"               --write-out "%{http_code}"               -H "x-admin-key: $KEY"               "https://europe-west1-meteo-apprentissage.cloudfunctions.net/importLbaFormationsBatchHttp?batch=1&write=1&pageSize=100&maxPages=60&maxRunSeconds=420&delayMs=300&retryCount=2")" || CURL_EXIT=$?
+
+            if [ "$CURL_EXIT" -ne 0 ] || [[ ! "$HTTP_CODE" =~ ^2 ]]; then
+              echo "Segment $SEGMENT failed: curl=$CURL_EXIT HTTP=$HTTP_CODE"
+              FAILED=1
+              break
+            fi
+
+            if ! python - "$RESPONSE" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], "r", encoding="utf-8") as handle:
+              payload = json.load(handle)
+
+          if payload.get("ok") is False:
+              raise SystemExit("API returned ok=false")
+          PY
+            then
+              FAILED=1
+              break
+            fi
+
+            FINAL_STATUS="$(python - "$RESPONSE" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              print((json.load(handle).get("status") or "unknown"))
+          PY
+          )"
+
+            if [ "$FINAL_STATUS" = "completed" ]; then
+              break
+            fi
+
+            if [ "$FINAL_STATUS" = "failed" ]; then
+              FAILED=1
+              break
+            fi
+
+            SEGMENT=$((SEGMENT + 1))
+          done
+
+          unset KEY
+
+          if [ "$FINAL_STATUS" != "completed" ]; then
+            FAILED=1
+          fi
+
+          python - "$LAST_RESPONSE" "$SUMMARY" "$CHECKED_AT" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}" "$FINAL_STATUS" "$FAILED" "$SEGMENT" "$MAX_SEGMENTS" <<'PY'
+          import json
+          import os
+          import sys
+
+          response_path, summary_path, checked_at, repository, run_id, final_status, failed, segment, max_segments = sys.argv[1:]
+
+          payload = {}
+          if response_path and os.path.exists(response_path):
+              try:
+                  with open(response_path, "r", encoding="utf-8") as handle:
+                      payload = json.load(handle)
+              except Exception:
+                  payload = {}
+
+          batch = payload.get("batch") or {}
+          totals = payload.get("totals") or {}
+          states = payload.get("departmentStates") or {}
+
+          codes = [
+              str(item.get("code"))
+              for item in (batch.get("items") or [])
+              if item.get("code")
+          ]
+
+          completed_departments = sorted(
+              code
+              for code, state in states.items()
+              if isinstance(state, dict) and state.get("status") == "completed"
+          )
+          failed_departments = sorted(
+              code
+              for code, state in states.items()
+              if isinstance(state, dict) and state.get("status") == "failed"
+          )
+
+          icon = "✅" if final_status == "completed" and failed == "0" else "❌"
+
+          with open(summary_path, "w", encoding="utf-8") as out:
+              out.write("### Import formations — lot 1\n\n")
+              out.write(f"**Vérification :** {checked_at}\n\n")
+              out.write(f"{icon} **Statut final :** `{final_status or 'unknown'}`\n\n")
+              out.write("- Écriture Firestore métier : **oui** (`write=1`)\n")
+              out.write("- Checkpoint persistant : **oui** (`formationImportBatches/batch_01`)\n")
+              out.write("- Réinitialisation automatique : **non**\n")
+              out.write(f"- Segments exécutés : **{segment} / {max_segments} max**\n")
+              out.write(f"- Départements du lot : **{', '.join(codes) or 'non renseignés'}**\n")
+              out.write(f"- Départements terminés : **{len(completed_departments)} / {len(codes) or 10}**\n")
+              out.write(f"- Pages traitées : **{totals.get('pagesProcessed', 0)}**\n")
+              out.write(f"- Résultats API reçus : **{totals.get('receivedCount', 0)}**\n")
+              out.write(f"- Formations écrites/mergées : **{totals.get('writtenCount', 0)}**\n")
+              out.write(f"- Ignorés sans identifiant : **{totals.get('skippedNoId', 0)}**\n")
+              out.write(f"- Ignorés hors département : **{totals.get('skippedOutsideDepartment', 0)}**\n")
+              out.write(f"- Département courant (index) : **{payload.get('currentDepartmentIndex')}**\n")
+              out.write(f"- Page courante : **{payload.get('currentPageIndex')}**\n")
+              out.write(f"- Raison d'arrêt : **{payload.get('stoppedReason') or '—'}**\n\n")
+
+              if completed_departments:
+                  out.write(f"✅ Départements terminés : **{', '.join(completed_departments)}**\n\n")
+
+              if failed_departments:
+                  out.write(f"❌ Départements en échec : **{', '.join(failed_departments)}**\n\n")
+              elif final_status == "completed":
+                  out.write("✅ Aucun département marqué en échec.\n\n")
+
+              out.write(f"**Run Actions :** https://github.com/{repository}/actions/runs/{run_id}\n")
+          PY
+
+          cat "$SUMMARY"
+          cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish result in Issue 7
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f /tmp/formation-batch-1-import.md ]; then
+            echo "No import summary was generated."
+            exit 1
+          fi
+
+          gh issue comment 7             --repo "${GITHUB_REPOSITORY}"             --body-file /tmp/formation-batch-1-import.md
+
+      - name: Fail workflow when import failed
+        if: steps.import.outputs.failed == 'true'
+        run: exit 1

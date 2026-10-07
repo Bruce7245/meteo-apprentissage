@@ -1,0 +1,251 @@
+name: Release admin vigilance métier
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_release:
+        description: "Type RELEASE to confirm production release"
+        required: true
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release admin vigilance
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - name: Enforce main and explicit confirmation
+        shell: bash
+        env:
+          CONFIRM_RELEASE: ${{ inputs.confirm_release }}
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Release refused from branch: $GITHUB_REF_NAME" >&2
+            echo "Expected: main" >&2
+            exit 1
+          fi
+
+          if [ "$CONFIRM_RELEASE" != "RELEASE" ]; then
+            echo "Production release requires confirm_release=RELEASE" >&2
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Validate frontend
+        run: npm run build
+
+      - name: Validate backend syntax
+        run: |
+          set -euo pipefail
+          node --check functions/index.js
+          node --check functions/admin-occupation-vigilance-config.cjs
+          node --check functions/lib/occupation-search.cjs
+          node --check functions/lib/public-occupation-search.cjs
+          node --check functions/lib/occupation-vigilance.cjs
+
+      - name: Run targeted backend tests
+        working-directory: functions
+        run: |
+          set -euo pipefail
+          node --test             test/admin-occupation-vigilance-config.test.cjs             test/occupation-vigilance.test.cjs             test/public-occupation-search.test.cjs
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Verify occupation search index is ready
+        working-directory: functions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const { initializeApp, getApps } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
+
+          if (getApps().length === 0) {
+            initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = getFirestore();
+
+          (async () => {
+            const metaSnap = await db
+              .collection('publicOccupationSearchIndexMeta')
+              .doc('current')
+              .get();
+
+            if (!metaSnap.exists) {
+              throw new Error('publicOccupationSearchIndexMeta/current is missing');
+            }
+
+            const meta = metaSnap.data() || {};
+            const runId = String(meta.runId || '').trim();
+
+            if (!runId) {
+              throw new Error('Occupation search index runId is missing');
+            }
+
+            const runSnap = await db
+              .collection('publicOccupationSearchIndexes')
+              .doc(runId)
+              .get();
+
+            if (!runSnap.exists || runSnap.data()?.status !== 'ready') {
+              throw new Error('Occupation search index run is not ready: ' + runId);
+            }
+
+            console.log(JSON.stringify({
+              runId,
+              status: runSnap.data()?.status,
+              asOfDate: meta.asOfDate || null,
+            }, null, 2));
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Deploy admin vigilance Functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy             --project meteo-apprentissage             --only "functions:getPublicOccupationSearchHttp,functions:getActiveOccupationVigilanceConfigHttp,functions:getOccupationVigilanceAnalysisHttp,functions:saveOccupationVigilanceConfigDraftHttp,functions:previewOccupationVigilanceConfigHttp,functions:getOccupationVigilanceConfigHistoryHttp,functions:compareOccupationVigilanceConfigsHttp,functions:activateOccupationVigilanceConfigHttp"             --non-interactive
+
+      - name: Verify Functions are reachable and protected
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_401() {
+            name="$1"
+            url="$2"
+            body_file="$(mktemp)"
+            status="$(curl --silent --show-error               --output "$body_file"               --write-out "%{http_code}"               --max-time 30               --request POST               --header "Content-Type: application/json"               --data '{}'               "$url")"
+
+            echo "$name -> HTTP $status"
+            cat "$body_file"
+            echo
+
+            if [ "$status" != "401" ]; then
+              echo "Unexpected status for $name: expected 401 without auth." >&2
+              exit 1
+            fi
+          }
+
+          check_401             "getActiveOccupationVigilanceConfigHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getActiveOccupationVigilanceConfigHttp"
+
+          check_401             "getOccupationVigilanceAnalysisHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getOccupationVigilanceAnalysisHttp"
+
+          check_401             "saveOccupationVigilanceConfigDraftHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/saveOccupationVigilanceConfigDraftHttp"
+
+          check_401             "previewOccupationVigilanceConfigHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/previewOccupationVigilanceConfigHttp"
+
+          check_401             "getOccupationVigilanceConfigHistoryHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getOccupationVigilanceConfigHistoryHttp"
+
+          check_401             "compareOccupationVigilanceConfigsHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/compareOccupationVigilanceConfigsHttp"
+
+          check_401             "activateOccupationVigilanceConfigHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/activateOccupationVigilanceConfigHttp"
+
+      - name: Verify public occupation search
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          body_file="$(mktemp)"
+          status="$(curl --silent --show-error             --output "$body_file"             --write-out "%{http_code}"             --max-time 30             --get             --data-urlencode "q=D1108"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getPublicOccupationSearchHttp")"
+
+          echo "getPublicOccupationSearchHttp -> HTTP $status"
+          cat "$body_file"
+          echo
+
+          if [ "$status" != "200" ]; then
+            echo "Occupation search smoke test failed." >&2
+            exit 1
+          fi
+
+          node - "$body_file" <<'NODE'
+          const fs = require('node:fs');
+          const file = process.argv[2];
+          const payload = JSON.parse(fs.readFileSync(file, 'utf8'));
+
+          if (!payload?.ok || !Array.isArray(payload?.results)) {
+            throw new Error('Invalid occupation search payload');
+          }
+
+          console.log('Search results:', payload.results.length);
+          NODE
+
+      - name: Deploy Hosting
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy             --project meteo-apprentissage             --only hosting             --non-interactive
+
+      - name: Verify Hosting
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for url in             "https://meteo-apprentissage.web.app/"             "https://meteo-apprentissage.web.app/admin/secteurs"
+          do
+            body_file="$(mktemp)"
+            status="$(curl --silent --show-error               --location               --output "$body_file"               --write-out "%{http_code}"               --max-time 30               "$url")"
+
+            echo "$url -> HTTP $status"
+
+            if [ "$status" != "200" ]; then
+              echo "Unexpected Hosting status for $url" >&2
+              exit 1
+            fi
+
+            test -s "$body_file"
+          done
+
+      - name: Release summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Admin vigilance release"
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Branch: \`$GITHUB_REF_NAME\`"
+            echo
+            echo "### Intended scope"
+            echo "- 8 Functions (7 admin + 1 public occupation search)"
+            echo "- Firebase Hosting"
+            echo
+            echo "### Explicitly excluded"
+            echo "- No runOccupationVigilanceHttp call"
+            echo "- No scheduler modification"
+            echo "- No configuration activation"
+            echo "- No vigilance recalculation"
+            echo "- No map republication"
+          } >> "$GITHUB_STEP_SUMMARY"

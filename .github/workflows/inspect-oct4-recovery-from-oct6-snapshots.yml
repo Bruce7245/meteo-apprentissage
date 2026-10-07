@@ -1,0 +1,213 @@
+name: Inspect Oct 4 recovery from Oct 6 snapshots
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/inspect-oct4-recovery-from-oct6-snapshots.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - run: npm ci --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Compare Oct 4 observations with Oct 6 snapshot offers
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const { createHash } = require('node:crypto');
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+
+          function normalizeDepartment(value) {
+            const raw = String(value || '').trim().toUpperCase();
+            if (/^\d$/.test(raw)) return `0${raw}`;
+            if (/^(?:\d{2}|2A|2B|97[1-6])$/.test(raw)) return raw;
+            return null;
+          }
+
+          function offerDocId(value) {
+            return createHash('sha256')
+              .update(String(value || ''))
+              .digest('hex');
+          }
+
+          (async () => {
+            const oct4Snap = await db
+              .collection('jobOfferObservations')
+              .where('date', '==', '2026-10-04')
+              .get();
+
+            const observations = oct4Snap.docs.map((doc) => ({
+              id: doc.id,
+              ...(doc.data() || {}),
+            }));
+
+            const result = {
+              oct4Observations: observations.length,
+              matchedOct6SnapshotDocs: 0,
+              matchedActiveOct6Run: 0,
+              locatedMatches: 0,
+              inRequestedDepartment: 0,
+              outOfRequestedDepartment: 0,
+              unknownLocation: 0,
+              unresolved: 0,
+              samples: [],
+            };
+
+            const oct6MetaByDepartment = new Map();
+
+            for (const observation of observations) {
+              const departmentCode =
+                normalizeDepartment(observation.departmentCode);
+
+              if (!departmentCode || oct6MetaByDepartment.has(departmentCode)) {
+                continue;
+              }
+
+              const meta = await db
+                .collection('dailyOfferSnapshots')
+                .doc('2026-10-06')
+                .collection('departments')
+                .doc(departmentCode)
+                .get();
+
+              oct6MetaByDepartment.set(
+                departmentCode,
+                meta.exists ? (meta.data() || {}) : null
+              );
+            }
+
+            for (let index = 0; index < observations.length; index += 30) {
+              const chunk = observations.slice(index, index + 30);
+              const rows = [];
+              const refs = [];
+
+              for (const observation of chunk) {
+                const departmentCode =
+                  normalizeDepartment(observation.departmentCode);
+                const offerId = String(observation.offerId || '').trim();
+
+                if (!departmentCode || !offerId) {
+                  rows.push({ observation, refIndex: null });
+                  continue;
+                }
+
+                const ref = db
+                  .collection('dailyOfferSnapshots')
+                  .doc('2026-10-06')
+                  .collection('departments')
+                  .doc(departmentCode)
+                  .collection('offers')
+                  .doc(offerDocId(offerId));
+
+                rows.push({
+                  observation,
+                  refIndex: refs.length,
+                  departmentCode,
+                  offerId,
+                });
+                refs.push(ref);
+              }
+
+              const snapshots = refs.length > 0
+                ? await db.getAll(...refs)
+                : [];
+
+              for (const row of rows) {
+                if (row.refIndex === null) {
+                  result.unresolved += 1;
+                  continue;
+                }
+
+                const snapshot = snapshots[row.refIndex];
+
+                if (!snapshot?.exists) {
+                  result.unresolved += 1;
+                  continue;
+                }
+
+                result.matchedOct6SnapshotDocs += 1;
+
+                const offer = snapshot.data() || {};
+                const meta = oct6MetaByDepartment.get(row.departmentCode);
+                const activeRunId = String(meta?.activeRunId || '').trim();
+
+                if (
+                  activeRunId &&
+                  String(offer.runId || '').trim() === activeRunId
+                ) {
+                  result.matchedActiveOct6Run += 1;
+                }
+
+                if (offer.locationQuality === 'in_department') {
+                  result.locatedMatches += 1;
+                  result.inRequestedDepartment += 1;
+                } else if (offer.locationQuality === 'out_of_department') {
+                  result.locatedMatches += 1;
+                  result.outOfRequestedDepartment += 1;
+                } else {
+                  result.unknownLocation += 1;
+                }
+
+                if (result.samples.length < 10) {
+                  result.samples.push({
+                    offerId: row.offerId,
+                    requestedDepartment: row.departmentCode,
+                    runId: offer.runId || null,
+                    activeRunId: activeRunId || null,
+                    locationQuality: offer.locationQuality || null,
+                    effectiveDepartmentCode:
+                      offer.effectiveDepartmentCode || null,
+                    postalCode: offer.postalCode || null,
+                    city: offer.city || null,
+                  });
+                }
+              }
+            }
+
+            result.snapshotMatchRate = Number(
+              (
+                result.matchedOct6SnapshotDocs /
+                Math.max(1, result.oct4Observations)
+              ).toFixed(4)
+            );
+            result.locatedRecoveryRate = Number(
+              (
+                result.locatedMatches /
+                Math.max(1, result.oct4Observations)
+              ).toFixed(4)
+            );
+
+            console.log(JSON.stringify(result, null, 2));
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE

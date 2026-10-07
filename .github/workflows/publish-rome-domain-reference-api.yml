@@ -1,0 +1,221 @@
+name: Publish ROME domain reference and APIs
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/publish-rome-domain-reference-api.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-rome-domain-reference-api
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Import domains, build indexes, deploy read APIs
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Validate syntax
+        run: |
+          node --check scripts/import-rome-reference.mjs
+          node --check functions/build-occupation-domain-index.cjs
+          node --check functions/build-occupation-search-index.cjs
+          node --check functions/index.js
+
+      - name: Run domain-focused tests
+        run: |
+          node --test             functions/test/rome-open-data.test.cjs             functions/test/rome-domain-import.test.cjs             functions/test/occupation-domain-index.test.cjs             functions/test/public-occupation-domains.test.cjs
+
+      - name: Run full Functions unit suite
+        run: npm run test:unit --prefix functions
+
+      - name: Dry-run official ROME and domain import
+        env:
+          DRY_RUN: "1"
+        run: node scripts/import-rome-reference.mjs
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Import and publish official ROME references
+        run: node scripts/import-rome-reference.mjs
+
+      - name: Build and publish public occupation domain index
+        run: node functions/build-occupation-domain-index.cjs
+
+      - name: Rebuild public occupation search index
+        run: node functions/build-occupation-search-index.cjs
+
+      - name: Verify published domain reference and G12
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+
+          (async () => {
+            const [
+              occupationMeta,
+              domainMeta,
+              indexMeta,
+            ] = await Promise.all([
+              db.collection('occupationReferenceMeta').doc('current').get(),
+              db.collection('occupationDomainReferenceMeta').doc('current').get(),
+              db.collection('publicOccupationDomainIndexMeta').doc('current').get(),
+            ]);
+
+            if (!occupationMeta.exists || !domainMeta.exists || !indexMeta.exists) {
+              throw new Error('Missing one or more current reference pointers');
+            }
+
+            const occupation = occupationMeta.data() || {};
+            const domain = domainMeta.data() || {};
+            const index = indexMeta.data() || {};
+            const runId = String(index.runId || '').trim();
+
+            const [run, domains, g12] = await Promise.all([
+              db.collection('publicOccupationDomainIndexes').doc(runId).get(),
+              db.collection('publicOccupationDomainIndexes').doc(runId).collection('domains').get(),
+              db.collection('publicOccupationDomainIndexes').doc(runId).collection('domains').doc('G12').get(),
+            ]);
+
+            const g12Data = g12.exists ? g12.data() || {} : {};
+            const g12RomeCodes = (Array.isArray(g12Data.occupations) ? g12Data.occupations : [])
+              .map((item) => item?.romeCode)
+              .filter(Boolean);
+
+            const result = {
+              ok:
+                run.exists &&
+                run.data()?.status === 'ready' &&
+                Number(domain.entriesCount || 0) === 110 &&
+                domains.size === 110 &&
+                String(domain.occupationRunId || '') === String(occupation.runId || '') &&
+                String(domain.occupationSourceVersion || '') === String(occupation.sourceVersion || '') &&
+                g12.exists &&
+                g12Data.domainCode === 'G12' &&
+                g12RomeCodes.includes('G1204'),
+              occupationRunId: occupation.runId || null,
+              occupationSourceVersion: occupation.sourceVersion || null,
+              domainRunId: domain.runId || null,
+              domainSourceVersion: domain.sourceVersion || null,
+              domainsCount: domains.size,
+              publicDomainIndexRunId: runId,
+              g12: {
+                exists: g12.exists,
+                label: g12Data.domainLabel || null,
+                occupationsCount: Number(g12Data.occupationsCount || 0),
+                containsG1204: g12RomeCodes.includes('G1204'),
+              },
+            };
+
+            console.log(JSON.stringify(result, null, 2));
+
+            if (!result.ok) {
+              throw new Error('Published domain reference verification failed: ' + JSON.stringify(result));
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Deploy only new public domain Functions
+        run: >-
+          npx --yes firebase-tools@latest deploy
+          --project meteo-apprentissage
+          --only
+          "functions:getPublicOccupationDomainsHttp,functions:getPublicOccupationDomainOccupationsHttp"
+          --non-interactive
+
+      - name: Smoke-test public domain endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base="https://europe-west1-meteo-apprentissage.cloudfunctions.net"
+
+          domains_status="$(
+            curl --silent --show-error               --output /tmp/domains.json               --write-out '%{http_code}'               "$base/getPublicOccupationDomainsHttp"
+          )"
+
+          g12_status="$(
+            curl --silent --show-error               --output /tmp/g12.json               --write-out '%{http_code}'               "$base/getPublicOccupationDomainOccupationsHttp?domain=G12"
+          )"
+
+          cat /tmp/domains.json
+          echo
+          cat /tmp/g12.json
+          echo
+          echo "Domains HTTP: $domains_status"
+          echo "G12 HTTP: $g12_status"
+
+          [ "$domains_status" = "200" ]
+          [ "$g12_status" = "200" ]
+
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const domains = JSON.parse(fs.readFileSync('/tmp/domains.json', 'utf8'));
+          const g12 = JSON.parse(fs.readFileSync('/tmp/g12.json', 'utf8'));
+
+          if (!domains.ok || !Array.isArray(domains.domains) || domains.domains.length !== 110) {
+            throw new Error('Unexpected public domain list payload');
+          }
+
+          if (
+            !g12.ok ||
+            g12.domainCode !== 'G12' ||
+            !Array.isArray(g12.occupations) ||
+            !g12.occupations.some((item) => item.romeCode === 'G1204')
+          ) {
+            throw new Error('Unexpected public G12 payload');
+          }
+
+          const serialized = JSON.stringify({ domains, g12 });
+          for (const forbidden of ['sourceUrl', 'importRunId', 'sourceVersion', 'siret', 'SIRET']) {
+            if (serialized.includes(forbidden)) {
+              throw new Error('Private/internal field leaked: ' + forbidden);
+            }
+          }
+
+          console.log(JSON.stringify({
+            ok: true,
+            domainsCount: domains.domains.length,
+            g12Label: g12.domainLabel,
+            g12OccupationsCount: g12.occupations.length,
+            containsG1204: true,
+          }, null, 2));
+          NODE

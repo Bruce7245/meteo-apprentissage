@@ -1,0 +1,289 @@
+name: Inspect Oct 4 location recovery
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/inspect-oct4-location-recovery.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - run: npm ci --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Measure recovery coverage
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+          const targetDate = '2026-10-04';
+
+          function sanitizeOfferDocId(value) {
+            return String(value || 'unknown')
+              .trim()
+              .replace(/[\/#?\[\]]/g, '_')
+              .slice(0, 120);
+          }
+
+          function normalizeDepartment(value) {
+            const raw = String(value || '').trim().toUpperCase();
+            if (/^\d$/.test(raw)) return `0${raw}`;
+            if (/^(?:\d{2}|2A|2B|97[1-6])$/.test(raw)) return raw;
+            return null;
+          }
+
+          function departmentFromPostalCode(value) {
+            const postal = String(value || '').trim();
+
+            if (/^97[1-6]\d{2}$/.test(postal)) return postal.slice(0, 3);
+
+            if (/^20\d{3}$/.test(postal)) {
+              const numeric = Number(postal);
+              if (numeric >= 20000 && numeric <= 20199) return '2A';
+              if (numeric >= 20200 && numeric <= 20699) return '2B';
+              return null;
+            }
+
+            if (/^\d{5}$/.test(postal)) return postal.slice(0, 2);
+
+            return null;
+          }
+
+          async function loadByIds(collectionName, ids, transformId = (id) => id) {
+            const unique = Array.from(
+              new Set(
+                ids
+                  .map((id) => String(id || '').trim())
+                  .filter(Boolean)
+              )
+            );
+
+            const output = new Map();
+
+            for (let index = 0; index < unique.length; index += 30) {
+              const chunk = unique.slice(index, index + 30);
+              const refs = [];
+
+              for (const id of chunk) {
+                const transformed = transformId(id);
+                if (!transformed || transformed.includes('/')) continue;
+                refs.push(db.collection(collectionName).doc(transformed));
+              }
+
+              if (refs.length === 0) continue;
+
+              const snapshots = await db.getAll(...refs);
+
+              snapshots.forEach((snapshot) => {
+                if (!snapshot.exists) return;
+                output.set(snapshot.id, snapshot.data() || {});
+              });
+            }
+
+            return output;
+          }
+
+          function locationFromCandidate(source, data) {
+            if (!data) return null;
+
+            const variants = {
+              jobOfferDetails: {
+                departmentCode:
+                  data.workplaceDepartment ||
+                  data?.insee?.departmentCode ||
+                  null,
+                postalCode:
+                  data.workplaceZipcode ||
+                  data?.insee?.postalCode ||
+                  null,
+                city:
+                  data.workplaceCity ||
+                  data?.insee?.city ||
+                  null,
+              },
+              lbaCurrentOffers: {
+                departmentCode: data.departmentCode || null,
+                postalCode: data.postalCode || null,
+                city: data.city || null,
+              },
+              lbaCompaniesFromOffers: {
+                departmentCode: data.departmentCode || null,
+                postalCode: data.postalCode || null,
+                city: data.city || null,
+              },
+              inseeEstablishments: {
+                departmentCode: data.departmentCode || null,
+                postalCode: data.postalCode || null,
+                city: data.city || null,
+              },
+            };
+
+            const value = variants[source];
+            if (!value) return null;
+
+            const departmentCode =
+              normalizeDepartment(value.departmentCode) ||
+              departmentFromPostalCode(value.postalCode);
+
+            if (!departmentCode) return null;
+
+            return {
+              source,
+              departmentCode,
+              postalCode: value.postalCode || null,
+              city: value.city || null,
+            };
+          }
+
+          (async () => {
+            const obsSnap = await db
+              .collection('jobOfferObservations')
+              .where('date', '==', targetDate)
+              .get();
+
+            const observations = obsSnap.docs.map((doc) => ({
+              id: doc.id,
+              ...(doc.data() || {}),
+            }));
+
+            const offerIds = observations
+              .map((item) => item.offerId)
+              .filter(Boolean);
+
+            const sirets = observations
+              .map((item) => item.workplaceSiret)
+              .filter(Boolean);
+
+            const [
+              details,
+              currentOffers,
+              companies,
+              inseeEstablishments,
+            ] = await Promise.all([
+              loadByIds('jobOfferDetails', offerIds),
+              loadByIds(
+                'lbaCurrentOffers',
+                offerIds,
+                sanitizeOfferDocId
+              ),
+              loadByIds('lbaCompaniesFromOffers', sirets),
+              loadByIds('inseeEstablishments', sirets),
+            ]);
+
+            const result = {
+              date: targetDate,
+              totalObservations: observations.length,
+              observationsWithSiret: sirets.length,
+              matchedDocuments: {
+                jobOfferDetails: details.size,
+                lbaCurrentOffers: currentOffers.size,
+                lbaCompaniesFromOffers: companies.size,
+                inseeEstablishments: inseeEstablishments.size,
+              },
+              resolved: 0,
+              unresolved: 0,
+              matchedRequestedDepartment: 0,
+              outOfRequestedDepartment: 0,
+              bySource: {
+                jobOfferDetails: 0,
+                lbaCurrentOffers: 0,
+                lbaCompaniesFromOffers: 0,
+                inseeEstablishments: 0,
+              },
+              samples: [],
+            };
+
+            for (const observation of observations) {
+              const offerId = String(observation.offerId || '').trim();
+              const siret = String(observation.workplaceSiret || '').trim();
+              const requestedDepartment =
+                normalizeDepartment(observation.departmentCode);
+
+              const candidates = [
+                locationFromCandidate(
+                  'jobOfferDetails',
+                  details.get(offerId)
+                ),
+                locationFromCandidate(
+                  'lbaCurrentOffers',
+                  currentOffers.get(sanitizeOfferDocId(offerId))
+                ),
+                locationFromCandidate(
+                  'lbaCompaniesFromOffers',
+                  companies.get(siret)
+                ),
+                locationFromCandidate(
+                  'inseeEstablishments',
+                  inseeEstablishments.get(siret)
+                ),
+              ].filter(Boolean);
+
+              const resolved = candidates[0] || null;
+
+              if (!resolved) {
+                result.unresolved += 1;
+                continue;
+              }
+
+              result.resolved += 1;
+              result.bySource[resolved.source] += 1;
+
+              if (resolved.departmentCode === requestedDepartment) {
+                result.matchedRequestedDepartment += 1;
+              } else {
+                result.outOfRequestedDepartment += 1;
+              }
+
+              if (result.samples.length < 12) {
+                result.samples.push({
+                  offerId,
+                  siret: siret || null,
+                  requestedDepartment,
+                  ...resolved,
+                });
+              }
+            }
+
+            result.resolutionRate = Number(
+              (result.resolved / Math.max(1, result.totalObservations)).toFixed(4)
+            );
+            result.requestedDepartmentMatchRateAmongResolved = Number(
+              (
+                result.matchedRequestedDepartment /
+                Math.max(1, result.resolved)
+              ).toFixed(4)
+            );
+
+            console.log(JSON.stringify(result, null, 2));
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE

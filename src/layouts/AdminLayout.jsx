@@ -6,7 +6,7 @@ const adminLinks = [
   { href: '/admin/bulletins', label: 'Bulletins' },
   { href: '/admin/carte-publiee', label: 'Carte publiée' },
   { href: '/admin/carte-a-publier', label: 'Carte à publier' },
-  { href: '/admin/secteurs', label: 'Secteurs' },
+  { href: '/admin/secteurs', label: 'Moteur métiers' },
   { href: '/admin/entreprises', label: 'Entreprises' },
 ];
 

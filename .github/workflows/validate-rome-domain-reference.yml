@@ -1,0 +1,65 @@
+name: Validate ROME domain reference
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/validate-rome-domain-reference.yml
+      - scripts/import-rome-reference.mjs
+      - functions/build-occupation-domain-index.cjs
+      - functions/lib/rome-open-data.cjs
+      - functions/lib/rome-domain-import.cjs
+      - functions/lib/occupation-domain-index.cjs
+      - functions/test/rome-open-data.test.cjs
+      - functions/test/rome-domain-import.test.cjs
+      - functions/test/occupation-domain-index.test.cjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-rome-domain-reference
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Validate syntax
+        run: |
+          node --check scripts/import-rome-reference.mjs
+          node --check functions/build-occupation-domain-index.cjs
+          node --check functions/lib/rome-open-data.cjs
+          node --check functions/lib/rome-domain-import.cjs
+          node --check functions/lib/occupation-domain-index.cjs
+
+      - name: Run domain reference and index tests
+        run: |
+          node --test \
+            functions/test/rome-open-data.test.cjs \
+            functions/test/rome-domain-import.test.cjs \
+            functions/test/occupation-domain-index.test.cjs
+
+      - name: Dry-run official occupation and domain references
+        env:
+          DRY_RUN: "1"
+        run: node scripts/import-rome-reference.mjs

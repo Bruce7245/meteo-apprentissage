@@ -1,0 +1,213 @@
+name: Inspect historical offer observations
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/inspect-historical-offer-observations.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    name: Inspect 2026-10-04 and 2026-10-05
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - run: npm ci --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Inspect historical observations
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+
+          (async () => {
+            const dates = ['2026-10-04', '2026-10-05'];
+            const result = {};
+
+            for (const date of dates) {
+              const [statsSnap, obsSnap] = await Promise.all([
+                db.collection('departmentDailyStats')
+                  .where('date', '==', date)
+                  .get(),
+                db.collection('jobOfferObservations')
+                  .where('date', '==', date)
+                  .get(),
+              ]);
+
+              const departments = new Set();
+              const romeCodes = new Set();
+              let withRome = 0;
+              let openings = 0;
+              let withZipcode = 0;
+              let withAddress = 0;
+              let withWorkplaceDepartment = 0;
+              let withWorkplaceCity = 0;
+              let withSiret = 0;
+              const departmentSamples = new Set();
+              const addressSamples = new Set();
+              const zipcodeSamples = new Set();
+
+              for (const doc of obsSnap.docs) {
+                const data = doc.data() || {};
+                if (data.departmentCode) departments.add(data.departmentCode);
+                const codes = Array.isArray(data.romeCodes) ? data.romeCodes : [];
+                if (codes.length > 0) withRome += 1;
+                codes.forEach((code) => romeCodes.add(code));
+                openings += Number(data.openingCount || 0);
+
+                if (data.workplaceZipcode) {
+                  withZipcode += 1;
+                  if (zipcodeSamples.size < 10) {
+                    zipcodeSamples.add(String(data.workplaceZipcode));
+                  }
+                }
+                if (data.workplaceAddress) {
+                  withAddress += 1;
+                  if (addressSamples.size < 10) {
+                    addressSamples.add(String(data.workplaceAddress));
+                  }
+                }
+                if (data.workplaceDepartment) {
+                  withWorkplaceDepartment += 1;
+                  if (departmentSamples.size < 20) {
+                    departmentSamples.add(String(data.workplaceDepartment));
+                  }
+                }
+                if (data.workplaceCity) withWorkplaceCity += 1;
+                if (data.workplaceSiret) withSiret += 1;
+              }
+
+              const [
+                lbaObsSnap,
+                rawCaptureSnap,
+                detailsSnap,
+              ] = await Promise.all([
+                db.collection('lbaOfferObservations')
+                  .where('observedDate', '==', date)
+                  .get(),
+                db.collection('lbaRawOfferCaptureItems')
+                  .where('observedDate', '==', date)
+                  .get(),
+                db.collection('jobOfferDetails')
+                  .where('detailLastFetchedDate', '==', date)
+                  .get(),
+              ]);
+
+              function coverage(snapshot, extractor) {
+                let rowsWithDepartment = 0;
+                let rowsWithPostalCode = 0;
+                let rowsWithCity = 0;
+                const samples = [];
+
+                for (const doc of snapshot.docs) {
+                  const row = extractor(doc.data() || {});
+                  if (row.departmentCode) rowsWithDepartment += 1;
+                  if (row.postalCode) rowsWithPostalCode += 1;
+                  if (row.city) rowsWithCity += 1;
+                  if (
+                    samples.length < 5 &&
+                    (row.departmentCode || row.postalCode || row.city)
+                  ) {
+                    samples.push(row);
+                  }
+                }
+
+                return {
+                  count: snapshot.size,
+                  rowsWithDepartment,
+                  rowsWithPostalCode,
+                  rowsWithCity,
+                  samples,
+                };
+              }
+
+              result[date] = {
+                departmentDailyStats: statsSnap.size,
+                observations: obsSnap.size,
+                observationDepartments: departments.size,
+                observationsWithRome: withRome,
+                distinctRomeCodes: romeCodes.size,
+                openings,
+                locationCoverage: {
+                  withZipcode,
+                  withAddress,
+                  withWorkplaceDepartment,
+                  withWorkplaceCity,
+                  withSiret,
+                },
+                samples: {
+                  workplaceDepartments: Array.from(departmentSamples),
+                  addresses: Array.from(addressSamples),
+                  zipcodes: Array.from(zipcodeSamples),
+                },
+                alternateHistoricalSources: {
+                  lbaOfferObservations: coverage(
+                    lbaObsSnap,
+                    (data) => ({
+                      offerId: data.offerId || null,
+                      departmentCode: data.departmentCode || null,
+                      postalCode: data.postalCode || null,
+                      city: data.city || null,
+                    })
+                  ),
+                  lbaRawOfferCaptureItems: coverage(
+                    rawCaptureSnap,
+                    (data) => ({
+                      offerId: data.offerId || null,
+                      departmentCode:
+                        data?.normalized?.inferredDepartmentCode ||
+                        data?.normalized?.departmentCode ||
+                        null,
+                      postalCode:
+                        data?.normalized?.postalCode || null,
+                      city:
+                        data?.normalized?.city || null,
+                    })
+                  ),
+                  jobOfferDetails: coverage(
+                    detailsSnap,
+                    (data) => ({
+                      offerId: data.offerId || null,
+                      departmentCode:
+                        data.workplaceDepartment || null,
+                      postalCode:
+                        data.workplaceZipcode || null,
+                      city:
+                        data.workplaceCity || null,
+                    })
+                  ),
+                },
+              };
+            }
+
+            console.log(JSON.stringify(result, null, 2));
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE

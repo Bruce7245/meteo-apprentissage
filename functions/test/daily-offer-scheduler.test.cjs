@@ -53,3 +53,28 @@ test("scheduled and manual imports keep distinct audit metadata", () => {
   assert.match(importer, /departmentDailyStats\.lba\.scheduled\.v1/);
   assert.match(importer, /departmentDailyStats\.lba\.manual\.v1/);
 });
+
+
+test("shared daily offer importer also publishes occupation vigilance snapshots", () => {
+  const importer = sliceBetween(
+    "async function importDailyOffersForDepartments",
+    "exports.importDailyOffersHttp = onRequest("
+  );
+
+  assert.match(importer, /buildOccupationOfferSnapshot\s*\(/);
+  assert.match(importer, /collection\(['"]dailyOfferSnapshots['"]\)/);
+  assert.match(importer, /collection\(['"]departments['"]\)/);
+  assert.match(importer, /collection\(['"]offers['"]\)/);
+  assert.match(importer, /activeRunId/);
+});
+
+
+test("daily offer observation forwards LBA address text to occupation snapshot projection", () => {
+  const normalizer = sliceBetween(
+    "function normalizeJobOfferObservation",
+    "async function importDailyOffersForDepartments"
+  );
+
+  assert.match(normalizer, /workplaceAddress\s*:/);
+  assert.match(normalizer, /location\.address/);
+});

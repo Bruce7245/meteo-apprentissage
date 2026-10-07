@@ -1,0 +1,209 @@
+name: Quarantine invalid Oct 4 occupation snapshot
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/quarantine-invalid-oct4-snapshot.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quarantine-invalid-oct4-snapshot
+  cancel-in-progress: false
+
+jobs:
+  quarantine:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - run: npm ci --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Quarantine Oct 4 derived data
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+          const targetDate = '2026-10-04';
+          const invalidDraftVersion =
+            'occupationVigilance.v1.1.cal.886d4e8408d6';
+
+          async function deleteQueryInBatches(query, batchSize = 400) {
+            let deleted = 0;
+
+            while (true) {
+              const snapshot = await query.limit(batchSize).get();
+              if (snapshot.empty) break;
+
+              const batch = db.batch();
+              snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+              await batch.commit();
+
+              deleted += snapshot.size;
+              if (snapshot.size < batchSize) break;
+            }
+
+            return deleted;
+          }
+
+          (async () => {
+            const departmentsRef = db
+              .collection('dailyOfferSnapshots')
+              .doc(targetDate)
+              .collection('departments');
+
+            const departments = await departmentsRef.get();
+
+            if (departments.size !== 101) {
+              throw new Error(
+                `Unexpected Oct 4 snapshot department count: ${departments.size}`
+              );
+            }
+
+            let batch = db.batch();
+            let count = 0;
+
+            for (const doc of departments.docs) {
+              batch.set(
+                doc.ref,
+                {
+                  activeRunId: admin.firestore.FieldValue.delete(),
+                  strictSummary: admin.firestore.FieldValue.delete(),
+                  qualityStatus: 'quarantined',
+                  qualityReason: 'historical_location_missing',
+                  quarantinedAt:
+                    admin.firestore.FieldValue.serverTimestamp(),
+                },
+                { merge: true }
+              );
+
+              count += 1;
+
+              if (count >= 400) {
+                await batch.commit();
+                batch = db.batch();
+                count = 0;
+              }
+            }
+
+            if (count > 0) {
+              await batch.commit();
+            }
+
+            const deletedContexts = await deleteQueryInBatches(
+              db.collection('occupationContextStats')
+                .where('date', '==', targetDate)
+            );
+
+            await db
+              .collection('occupationContextStatsRuns')
+              .doc(targetDate)
+              .delete();
+
+            const invalidDraftRef = db
+              .collection('occupationVigilanceConfigs')
+              .doc(invalidDraftVersion);
+            const invalidDraft = await invalidDraftRef.get();
+
+            let deletedDraft = false;
+
+            if (
+              invalidDraft.exists &&
+              invalidDraft.data()?.status === 'draft'
+            ) {
+              await invalidDraftRef.delete();
+              deletedDraft = true;
+            }
+
+            await db
+              .collection('apiImports')
+              .doc(`historical_snapshot_${targetDate}`)
+              .set(
+                {
+                  qualityStatus: 'quarantined',
+                  qualityReason: 'historical_location_missing',
+                  quarantinedAt:
+                    admin.firestore.FieldValue.serverTimestamp(),
+                },
+                { merge: true }
+              );
+
+            const [remainingContexts, verifyDepartments, verifyDraft] =
+              await Promise.all([
+                db.collection('occupationContextStats')
+                  .where('date', '==', targetDate)
+                  .limit(1)
+                  .get(),
+                departmentsRef.get(),
+                invalidDraftRef.get(),
+              ]);
+
+            let activePointers = 0;
+            let strictSummaries = 0;
+            let quarantinedDepartments = 0;
+
+            for (const doc of verifyDepartments.docs) {
+              const data = doc.data() || {};
+              if (data.activeRunId) activePointers += 1;
+              if (data.strictSummary) strictSummaries += 1;
+              if (data.qualityStatus === 'quarantined') {
+                quarantinedDepartments += 1;
+              }
+            }
+
+            const result = {
+              ok:
+                remainingContexts.empty &&
+                activePointers === 0 &&
+                strictSummaries === 0 &&
+                quarantinedDepartments === 101 &&
+                !verifyDraft.exists,
+              date: targetDate,
+              sourceObservationsPreserved: true,
+              departments: verifyDepartments.size,
+              quarantinedDepartments,
+              activePointers,
+              strictSummaries,
+              deletedContexts,
+              invalidDraftVersion,
+              deletedDraft,
+              invalidDraftExistsAfter: verifyDraft.exists,
+              remainingContextSampleCount: remainingContexts.size,
+            };
+
+            console.log(JSON.stringify(result, null, 2));
+
+            if (!result.ok) {
+              throw new Error(
+                'Oct 4 quarantine verification failed: ' +
+                  JSON.stringify(result)
+              );
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE

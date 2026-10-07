@@ -41,6 +41,12 @@ const LEVEL_META = {
     css: 'rouge',
     order: 3,
   },
+  insufficient_data: {
+    key: 'insufficient_data',
+    label: 'Données insuffisantes',
+    css: 'insuffisant',
+    order: -1,
+  },
 };
 
 export function normalizeLevelKey(level) {
@@ -52,7 +58,7 @@ export function normalizeLevelKey(level) {
 }
 
 export function getLevelMeta(level) {
-  return LEVEL_META[normalizeLevelKey(level)] || LEVEL_META.green;
+  return LEVEL_META[normalizeLevelKey(level)] || LEVEL_META.insufficient_data;
 }
 
 export function getLevelLabel(level) {
@@ -69,7 +75,10 @@ export function getLevelOrder(level) {
 
 export function sortByVigilanceThenCode(items) {
   return [...items].sort((a, b) => {
-    const levelDiff = getLevelOrder(b.level || b.publishedLevel) - getLevelOrder(a.level || a.publishedLevel);
+    const levelDiff =
+      getLevelOrder(b.level || b.publishedLevel) -
+      getLevelOrder(a.level || a.publishedLevel);
+
     if (levelDiff !== 0) return levelDiff;
 
     return String(a.code || a.departmentCode || '').localeCompare(

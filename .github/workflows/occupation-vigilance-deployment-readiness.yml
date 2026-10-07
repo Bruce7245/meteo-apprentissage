@@ -1,0 +1,207 @@
+name: Occupation vigilance deployment readiness
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/occupation-vigilance-deployment-readiness.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  readiness:
+    name: Check production readiness
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Inspect production prerequisites
+        working-directory: functions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const { initializeApp, getApps } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
+
+          if (getApps().length === 0) {
+            initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = getFirestore();
+
+          function millis(value) {
+            if (!value) return 0;
+            if (typeof value.toMillis === 'function') return value.toMillis();
+
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+          }
+
+          async function collectionCount(name) {
+            const snap = await db.collection(name).count().get();
+            return snap.data().count;
+          }
+
+          async function latestValidatedConfig() {
+            const snap = await db
+              .collection('occupationVigilanceConfigs')
+              .where('status', '==', 'validated')
+              .get();
+
+            return snap.docs
+              .map((doc) => ({ id: doc.id, ...doc.data() }))
+              .sort(
+                (a, b) =>
+                  millis(b.validatedAt || b.createdAt) -
+                  millis(a.validatedAt || a.createdAt)
+              )[0] || null;
+          }
+
+          async function latestReadyRun() {
+            const snap = await db.collection('occupationVigilanceRuns').get();
+
+            return snap.docs
+              .map((doc) => ({ id: doc.id, ...doc.data() }))
+              .filter((run) =>
+                ['ready', 'published'].includes(String(run.status || ''))
+              )
+              .sort((a, b) => {
+                const dateCompare = String(b.date || '').localeCompare(
+                  String(a.date || '')
+                );
+
+                if (dateCompare !== 0) return dateCompare;
+
+                return (
+                  Math.max(
+                    millis(b.publishedAt),
+                    millis(b.updatedAt),
+                    millis(b.startedAt)
+                  ) -
+                  Math.max(
+                    millis(a.publishedAt),
+                    millis(a.updatedAt),
+                    millis(a.startedAt)
+                  )
+                );
+              })[0] || null;
+          }
+
+          (async () => {
+            const [config, run] = await Promise.all([
+              latestValidatedConfig(),
+              latestReadyRun(),
+            ]);
+
+            let runEntries = 0;
+
+            if (run) {
+              const entries = await db
+                .collection('occupationVigilanceSnapshots')
+                .doc(run.id)
+                .collection('entries')
+                .count()
+                .get();
+
+              runEntries = entries.data().count;
+            }
+
+            const [
+              configCount,
+              contextCount,
+              historyCount,
+              draftCount,
+            ] = await Promise.all([
+              collectionCount('occupationVigilanceConfigs'),
+              collectionCount('occupationContextStats'),
+              collectionCount('occupationHistoryStats'),
+              collectionCount('occupationVigilanceConfigDrafts'),
+            ]);
+
+            const summary = {
+              project: 'meteo-apprentissage',
+              activeConfigVersion: config?.version || config?.id || null,
+              activeCalculationVersion:
+                config?.calculationVersion || null,
+              configsCount: configCount,
+              latestRunId: run?.id || null,
+              latestRunDate: run?.date || null,
+              latestRunStatus: run?.status || null,
+              latestRunEntries: runEntries,
+              occupationContextStatsCount: contextCount,
+              occupationHistoryStatsCount: historyCount,
+              existingDraftsCount: draftCount,
+            };
+
+            console.log(JSON.stringify(summary, null, 2));
+
+            const blockers = [];
+
+            if (!config) {
+              blockers.push('no validated occupation vigilance config');
+            }
+
+            if (!run) {
+              blockers.push('no ready/published occupation vigilance run');
+            }
+
+            if (run && runEntries === 0) {
+              blockers.push('latest occupation vigilance run has no entries');
+            }
+
+            if (contextCount === 0) {
+              blockers.push('occupationContextStats is empty');
+            }
+
+            if (historyCount === 0) {
+              blockers.push('occupationHistoryStats is empty');
+            }
+
+            if (blockers.length > 0) {
+              console.error('BLOCKERS: ' + blockers.join(' | '));
+              process.exitCode = 2;
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Readiness summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Occupation vigilance deployment readiness"
+            echo
+            echo "- Read-only production check."
+            echo "- No Firestore writes."
+            echo "- No Functions deployment."
+            echo "- No scheduler execution."
+            echo "- No configuration activation."
+            echo "- No public map publication."
+          } >> "$GITHUB_STEP_SUMMARY"

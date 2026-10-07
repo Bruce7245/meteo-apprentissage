@@ -12,6 +12,7 @@ const {
   isValidDepartmentCode: isValidPublicDepartmentCode,
 } = require("./lib/public-formation-stats.cjs");
 const {
+  normalizePublicRomeCode,
   buildPublicOffersPayload,
   buildRecentDateCandidates,
   buildPublicOffersHistory,
@@ -1132,6 +1133,19 @@ exports.getPublicDepartmentOffersHttp = onRequest(
       }
 
       const limit = Math.min(Math.max(toInt(req.query.limit, 20), 1), 20);
+      const rawRomeCode = cleanText(req.query.rome);
+      const romeCode = rawRomeCode
+        ? normalizePublicRomeCode(rawRomeCode)
+        : null;
+
+      if (rawRomeCode && !romeCode) {
+        res.status(400).json({
+          ok: false,
+          error: "INVALID_ROME",
+        });
+        return;
+      }
+
       const recentSnapshots = await findRecentPublicOfferSnapshots(departmentCode);
       const latest = recentSnapshots[0] || null;
 
@@ -1170,13 +1184,15 @@ exports.getPublicDepartmentOffersHttp = onRequest(
         strictSummary: meta.strictSummary || {},
         offers: offersSnapshot.docs.map((document) => document.data()),
         limit,
+        romeCode,
       });
 
       const history = buildPublicOffersHistory(
         recentSnapshots.map((item) => ({
           date: item.date,
           strictSummary: item.snapshot.data()?.strictSummary || null,
-        }))
+        })),
+        romeCode
       );
 
       payload.history = history;
@@ -1190,6 +1206,7 @@ exports.getPublicDepartmentOffersHttp = onRequest(
         ok: true,
         exists: true,
         departmentCode,
+        ...(romeCode ? { romeCode } : {}),
         data: payload,
       });
     } catch (error) {

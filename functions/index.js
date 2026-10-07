@@ -19,10 +19,30 @@ const {
   normalizeDepartmentCode: normalizePublicFormationDepartmentCode,
   sanitizePublicFormationStats,
 } = require('./lib/public-formation-stats.cjs');
+const {
+  validatePublicOccupationQuery,
+  mergeOccupationSearchResults,
+  buildPublicOccupationLookup,
+  createPublicRateLimiter,
+} = require('./lib/public-occupation-search.cjs');
+const {
+  normalizePublicRomeCode,
+  resolvePublishedOccupationRun,
+  sanitizePublicOccupationMap,
+  sanitizePublicOccupationDepartment,
+} = require('./lib/public-occupation-vigilance.cjs');
+const {
+  getPublicOccupationDomains,
+  getPublicOccupationDomainOccupations,
+} = require('./lib/public-occupation-domains.cjs');
 
 admin.initializeApp();
 
 const db = admin.firestore();
+const publicOccupationSearchRateLimit = createPublicRateLimiter({
+  windowMs: 60_000,
+  maxRequests: 60,
+});
 const API_APPRENTISSAGE_TOKEN = defineSecret('API_APPRENTISSAGE_TOKEN');
 const INSEE_API_KEY = defineSecret('INSEE_API_KEY');
 const BACKFILL_ADMIN_KEY = defineSecret('BACKFILL_ADMIN_KEY');
@@ -7495,6 +7515,586 @@ async function buildFormationDepartmentStats({
   };
 }
 
+exports.getPublicOccupationSearchHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    try {
+      if (request.method === 'OPTIONS') {
+        response.status(204).send('');
+        return;
+      }
+
+      if (request.method !== 'GET') {
+        response.set('Allow', 'GET, OPTIONS');
+        response.status(405).json({
+          ok: false,
+          error: 'Method not allowed',
+        });
+        return;
+      }
+
+      const forwardedFor = String(request.get('x-forwarded-for') || '')
+        .split(',')[0]
+        .trim();
+      const requesterKey = request.ip || forwardedFor || 'anonymous';
+      const rateLimit = publicOccupationSearchRateLimit(requesterKey);
+
+      if (!rateLimit.allowed) {
+        response.set('Retry-After', String(rateLimit.retryAfterSeconds));
+        response.status(429).json({
+          ok: false,
+          error: 'Too many search requests',
+        });
+        return;
+      }
+
+      const validation = validatePublicOccupationQuery(request.query.q);
+
+      if (!validation.ok) {
+        response.status(validation.status).json({
+          ok: false,
+          error: validation.message,
+        });
+        return;
+      }
+
+      const { normalizedQuery } = validation;
+      const lookup = buildPublicOccupationLookup(normalizedQuery);
+
+      const metaSnapshot = await db
+        .collection('publicOccupationSearchIndexMeta')
+        .doc('current')
+        .get();
+
+      if (!metaSnapshot.exists) {
+        response.status(503).json({
+          ok: false,
+          error: 'Occupation search index is not available',
+        });
+        return;
+      }
+
+      const meta = metaSnapshot.data() || {};
+      const runId = String(meta.runId || '').trim();
+
+      if (!runId) {
+        response.status(503).json({
+          ok: false,
+          error: 'Occupation search index is not available',
+        });
+        return;
+      }
+
+      const runRef = db.collection('publicOccupationSearchIndexes').doc(runId);
+      const runSnapshot = await runRef.get();
+
+      if (!runSnapshot.exists || runSnapshot.data()?.status !== 'ready') {
+        response.status(503).json({
+          ok: false,
+          error: 'Occupation search index is not ready',
+        });
+        return;
+      }
+
+      const entriesRef = runRef.collection('entries');
+      const prefixQuery = entriesRef
+        .where('searchPrefixes', 'array-contains', lookup.prefixKey)
+        .limit(80);
+
+      const exactLabelQuery = entriesRef
+        .where('normalizedLabel', '==', normalizedQuery)
+        .limit(20);
+
+      const directReads = [];
+
+      if (lookup.exactRomeCode) {
+        directReads.push(
+          entriesRef.doc(`occupation_${lookup.exactRomeCode}`).get()
+        );
+      }
+
+      const rncpMatch = normalizedQuery.match(/^rncp(\d{2,8})$/);
+      if (rncpMatch) {
+        directReads.push(
+          entriesRef.doc(`training_rncp_${rncpMatch[1]}`).get()
+        );
+      }
+
+      const [prefixSnapshot, exactSnapshot, ...directSnapshots] = await Promise.all([
+        prefixQuery.get(),
+        exactLabelQuery.get(),
+        ...directReads,
+      ]);
+
+      const candidates = new Map();
+
+      for (const snapshot of [prefixSnapshot, exactSnapshot]) {
+        for (const document of snapshot.docs) {
+          candidates.set(document.id, document.data());
+        }
+      }
+
+      for (const snapshot of directSnapshots) {
+        if (snapshot.exists) {
+          candidates.set(snapshot.id, snapshot.data());
+        }
+      }
+
+      const values = Array.from(candidates.values());
+      const occupations = values.filter((item) => item?.type === 'occupation');
+      const trainings = values.filter((item) => item?.type === 'training');
+
+      const results = mergeOccupationSearchResults({
+        normalizedQuery,
+        occupations,
+        trainings,
+        limit: 12,
+      });
+
+      response.set('Cache-Control', 'public, max-age=300, s-maxage=600');
+      response.json({
+        ok: true,
+        exists: true,
+        query: normalizedQuery,
+        asOfDate: meta.asOfDate || null,
+        results,
+      });
+    } catch (error) {
+      console.error('getPublicOccupationSearchHttp error', {
+        name: error?.name || 'Error',
+        message: String(error?.message || error).slice(0, 500),
+      });
+
+      response.status(500).json({
+        ok: false,
+        error: 'Unable to search occupations and training',
+      });
+    }
+  }
+);
+
+
+
+const publicOccupationDomainRepository = {
+  async loadCurrentIndexPointer() {
+    const snapshot = await db
+      .collection('publicOccupationDomainIndexMeta')
+      .doc('current')
+      .get();
+
+    return snapshot.exists
+      ? snapshot.data() || {}
+      : null;
+  },
+
+  async loadIndexRun(runId) {
+    const snapshot = await db
+      .collection('publicOccupationDomainIndexes')
+      .doc(runId)
+      .get();
+
+    return snapshot.exists
+      ? {
+          runId: snapshot.id,
+          ...(snapshot.data() || {}),
+        }
+      : null;
+  },
+
+  async loadDomains(runId) {
+    const snapshot = await db
+      .collection('publicOccupationDomainIndexes')
+      .doc(runId)
+      .collection('domains')
+      .get();
+
+    return snapshot.docs.map(
+      (document) => document.data() || {}
+    );
+  },
+
+  async loadDomain(runId, domainCode) {
+    const snapshot = await db
+      .collection('publicOccupationDomainIndexes')
+      .doc(runId)
+      .collection('domains')
+      .doc(domainCode)
+      .get();
+
+    return snapshot.exists
+      ? snapshot.data() || {}
+      : null;
+  },
+};
+
+function publicOccupationRequesterKey(request) {
+  const forwardedFor = String(
+    request.get('x-forwarded-for') || ''
+  )
+    .split(',')[0]
+    .trim();
+
+  return (
+    request.ip ||
+    forwardedFor ||
+    'anonymous'
+  );
+}
+
+function enforceOccupationPublicReadMethod(
+  request,
+  response
+) {
+  if (request.method === 'OPTIONS') {
+    response.status(204).send('');
+    return false;
+  }
+
+  if (request.method !== 'GET') {
+    response.set('Allow', 'GET, OPTIONS');
+    response.status(405).json({
+      ok: false,
+      error: 'Method not allowed',
+    });
+    return false;
+  }
+
+  const rateLimit = publicOccupationSearchRateLimit(
+    publicOccupationRequesterKey(request)
+  );
+
+  if (!rateLimit.allowed) {
+    response.set(
+      'Retry-After',
+      String(rateLimit.retryAfterSeconds)
+    );
+    response.status(429).json({
+      ok: false,
+      error: 'Too many requests',
+    });
+    return false;
+  }
+
+  return true;
+}
+
+exports.getPublicOccupationDomainsHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    try {
+      if (
+        !enforceOccupationPublicReadMethod(
+          request,
+          response
+        )
+      ) {
+        return;
+      }
+
+      const result =
+        await getPublicOccupationDomains(
+          publicOccupationDomainRepository
+        );
+
+      if (result.status === 200) {
+        response.set(
+          'Cache-Control',
+          'public, max-age=300, s-maxage=600'
+        );
+      }
+
+      response
+        .status(result.status)
+        .json(result.body);
+    } catch (error) {
+      console.error(
+        'getPublicOccupationDomainsHttp error',
+        {
+          name: error?.name || 'Error',
+          message: String(
+            error?.message || error
+          ).slice(0, 500),
+        }
+      );
+
+      response.status(500).json({
+        ok: false,
+        error:
+          'PUBLIC_OCCUPATION_DOMAINS_UNAVAILABLE',
+      });
+    }
+  }
+);
+
+exports.getPublicOccupationDomainOccupationsHttp =
+  onRequest(
+    {
+      region: 'europe-west1',
+      timeoutSeconds: 30,
+      memory: '256MiB',
+      cors: true,
+    },
+    async (request, response) => {
+      try {
+        if (
+          !enforceOccupationPublicReadMethod(
+            request,
+            response
+          )
+        ) {
+          return;
+        }
+
+        const result =
+          await getPublicOccupationDomainOccupations(
+            publicOccupationDomainRepository,
+            request.query.domain
+          );
+
+        if (result.status === 200) {
+          response.set(
+            'Cache-Control',
+            'public, max-age=300, s-maxage=600'
+          );
+        }
+
+        response
+          .status(result.status)
+          .json(result.body);
+      } catch (error) {
+        console.error(
+          'getPublicOccupationDomainOccupationsHttp error',
+          {
+            name: error?.name || 'Error',
+            message: String(
+              error?.message || error
+            ).slice(0, 500),
+          }
+        );
+
+        response.status(500).json({
+          ok: false,
+          error:
+            'PUBLIC_OCCUPATION_DOMAIN_OCCUPATIONS_UNAVAILABLE',
+        });
+      }
+    }
+  );
+
+async function loadCurrentPublishedOccupationRun() {
+  const pointerSnapshot = await db
+    .collection('publicOccupationVigilanceIndex')
+    .doc('current')
+    .get();
+
+  if (!pointerSnapshot.exists) {
+    return {
+      ok: false,
+      error: 'NO_PUBLISHED_OCCUPATION_RUN',
+    };
+  }
+
+  const pointer = pointerSnapshot.data() || {};
+  const runId = String(pointer.runId || '').trim();
+
+  if (!runId) {
+    return {
+      ok: false,
+      error: 'NO_PUBLISHED_OCCUPATION_RUN',
+    };
+  }
+
+  const runSnapshot = await db
+    .collection('occupationVigilanceRuns')
+    .doc(runId)
+    .get();
+
+  const run = runSnapshot.exists
+    ? { runId: runSnapshot.id, ...runSnapshot.data() }
+    : null;
+
+  return resolvePublishedOccupationRun(pointer, run);
+}
+
+exports.getPublicOccupationMapHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    try {
+      const romeCode = normalizePublicRomeCode(request.query.rome);
+
+      if (!romeCode) {
+        response.status(400).json({
+          ok: false,
+          error: 'INVALID_ROME',
+        });
+        return;
+      }
+
+      const published = await loadCurrentPublishedOccupationRun();
+
+      if (!published.ok) {
+        response.status(503).json({
+          ok: false,
+          exists: false,
+          error: published.error,
+        });
+        return;
+      }
+
+      const entriesSnapshot = await db
+        .collection('publicOccupationVigilanceMaps')
+        .doc(published.runId)
+        .collection('entries')
+        .where('romeCode', '==', romeCode)
+        .get();
+
+      if (entriesSnapshot.empty) {
+        response.status(404).json({
+          ok: false,
+          exists: false,
+          romeCode,
+          data: null,
+        });
+        return;
+      }
+
+      const entries = entriesSnapshot.docs.map((document) => document.data() || {});
+      const first = entries[0] || {};
+      const data = sanitizePublicOccupationMap({
+        date: published.date || first.date || null,
+        romeCode,
+        romeLabel: first.romeLabel || romeCode,
+        departments: entries,
+      });
+
+      response.set('Cache-Control', 'public, max-age=300, s-maxage=600');
+      response.json({
+        ok: true,
+        exists: true,
+        romeCode,
+        data,
+      });
+    } catch (error) {
+      console.error('getPublicOccupationMapHttp error', {
+        message: String(error?.message || error).slice(0, 500),
+      });
+
+      response.status(500).json({
+        ok: false,
+        error: 'PUBLIC_OCCUPATION_MAP_UNAVAILABLE',
+      });
+    }
+  }
+);
+
+exports.getPublicOccupationDepartmentHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    try {
+      const romeCode = normalizePublicRomeCode(request.query.rome);
+      const departmentCode = normalizePublicFormationDepartmentCode(
+        request.query.department
+      );
+
+      if (!romeCode) {
+        response.status(400).json({
+          ok: false,
+          error: 'INVALID_ROME',
+        });
+        return;
+      }
+
+      if (!isValidPublicFormationDepartmentCode(departmentCode)) {
+        response.status(400).json({
+          ok: false,
+          error: 'INVALID_DEPARTMENT',
+        });
+        return;
+      }
+
+      const published = await loadCurrentPublishedOccupationRun();
+
+      if (!published.ok) {
+        response.status(503).json({
+          ok: false,
+          exists: false,
+          error: published.error,
+        });
+        return;
+      }
+
+      const entrySnapshot = await db
+        .collection('publicOccupationVigilanceDetails')
+        .doc(published.runId)
+        .collection('entries')
+        .doc(`${departmentCode}_${romeCode}`)
+        .get();
+
+      if (!entrySnapshot.exists) {
+        response.status(404).json({
+          ok: false,
+          exists: false,
+          departmentCode,
+          romeCode,
+          data: null,
+        });
+        return;
+      }
+
+      const data = sanitizePublicOccupationDepartment(
+        entrySnapshot.data() || {}
+      );
+
+      if (!data) {
+        response.status(500).json({
+          ok: false,
+          error: 'INVALID_PUBLIC_OCCUPATION_DETAIL',
+        });
+        return;
+      }
+
+      response.set('Cache-Control', 'public, max-age=300, s-maxage=600');
+      response.json({
+        ok: true,
+        exists: true,
+        departmentCode,
+        romeCode,
+        data,
+      });
+    } catch (error) {
+      console.error('getPublicOccupationDepartmentHttp error', {
+        message: String(error?.message || error).slice(0, 500),
+      });
+
+      response.status(500).json({
+        ok: false,
+        error: 'PUBLIC_OCCUPATION_DEPARTMENT_UNAVAILABLE',
+      });
+    }
+  }
+);
+
+
 exports.getPublicFormationDepartmentStatsHttp = onRequest(
   {
     region: 'europe-west1',
@@ -13309,6 +13909,12 @@ exports.purgeInseeCollectionBatchHttp = onRequest(
 );
 
 // IMPORT_DAILY_OFFERS_HTTP_V1
+const {
+  buildOccupationOfferSnapshot,
+  dedupeOccupationOffers,
+  buildOccupationOfferSummary,
+} = require('./lib/daily-offer-snapshot.cjs');
+
 
 function normalizeManualOfferImportDate(value) {
   const clean = String(value || '').trim();
@@ -13356,6 +13962,8 @@ function normalizeJobOfferObservation(job, department, targetDate) {
   const domain = workplace?.domain || {};
   const location = workplace?.location || {};
   const publication = offer?.publication || {};
+  const contract = job?.contract || {};
+  const apply = job?.apply || {};
 
   const offerId = getJobId(job);
 
@@ -13408,6 +14016,20 @@ function normalizeJobOfferObservation(job, department, targetDate) {
     workplaceCity: location.city || null,
     workplaceZipcode: location.zipcode || null,
     workplaceDepartment: location.department || null,
+    workplaceAddress:
+      typeof location.address === 'string'
+        ? location.address
+        : null,
+
+    contractStartDate: contract.start
+      ? String(contract.start).slice(0, 10)
+      : null,
+    contractTypes: Array.isArray(contract.type)
+      ? contract.type
+      : contract.type
+        ? [contract.type]
+        : [],
+    applyUrl: apply.url || null,
 
     nafCode: domain?.naf?.code || null,
     nafLabel: domain?.naf?.label || null,
@@ -13441,6 +14063,9 @@ async function importDailyOffersForDepartments({
     ? 'departmentDailyStats.lba.scheduled.v1'
     : 'departmentDailyStats.lba.manual.v1';
 
+  const occupationSnapshotRunId =
+    `daily_offer_${targetDate}_${Date.now().toString(36)}`;
+
   let successCount = 0;
   let errorCount = 0;
   const rows = [];
@@ -13467,6 +14092,35 @@ async function importDailyOffersForDepartments({
       const offerObservations = result.jobs
         .map((job) => normalizeJobOfferObservation(job, department, targetDate))
         .filter((item) => item.offerId);
+
+      const occupationOffers = dedupeOccupationOffers(
+        result.jobs
+          .filter(
+            (job) =>
+              String(job?.identifier?.partner_label || '').trim() !==
+              'recruteurs_lba'
+          )
+          .map((job) =>
+            normalizeJobOfferObservation(job, department, targetDate)
+          )
+          .filter((item) => item.offerId)
+          .map((observation) =>
+            buildOccupationOfferSnapshot(observation, {
+              runId: occupationSnapshotRunId,
+              targetDate,
+              departmentCode: department.code,
+            })
+          )
+      );
+
+      const occupationSummary =
+        buildOccupationOfferSummary(occupationOffers);
+      const strictOccupationSummary =
+        buildOccupationOfferSummary(
+          occupationOffers.filter(
+            (offer) => offer.locationQuality === 'in_department'
+          )
+        );
 
       const previousDate = dateWithOffsetFromDateString(targetDate, -1);
       const previousId = `${previousDate}_${department.code}`;
@@ -13516,6 +14170,58 @@ async function importDailyOffersForDepartments({
           .collection('departmentDailyStats')
           .doc(`${targetDate}_${department.code}`)
           .set(dailyDocument, { merge: true });
+
+        const occupationDepartmentRef = db
+          .collection('dailyOfferSnapshots')
+          .doc(targetDate)
+          .collection('departments')
+          .doc(department.code);
+
+        let occupationOfferBatch = db.batch();
+        let occupationOfferBatchCount = 0;
+
+        for (const offer of occupationOffers) {
+          occupationOfferBatch.set(
+            occupationDepartmentRef
+              .collection('offers')
+              .doc(offer.offerDocId),
+            {
+              ...offer,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          occupationOfferBatchCount += 1;
+
+          if (occupationOfferBatchCount >= 400) {
+            await occupationOfferBatch.commit();
+            occupationOfferBatch = db.batch();
+            occupationOfferBatchCount = 0;
+          }
+        }
+
+        if (occupationOfferBatchCount > 0) {
+          await occupationOfferBatch.commit();
+        }
+
+        await occupationDepartmentRef.set(
+          {
+            date: targetDate,
+            departmentCode: department.code,
+            activeRunId: occupationSnapshotRunId,
+            source: 'api-apprentissage-job-v1-search',
+            sourceRoute: '/job/v1/search',
+            executionMode,
+            rawJobsCount: result.jobs.length,
+            storedOffersCount: occupationOffers.length,
+            summary: occupationSummary,
+            strictSummary: strictOccupationSummary,
+            importedAt: admin.firestore.FieldValue.serverTimestamp(),
+            schemaVersion: 'dailyOfferSnapshots.sharedImport.v1',
+          },
+          { merge: true }
+        );
 
         let observationBatch = db.batch();
         let observationBatchCount = 0;
@@ -13570,6 +14276,8 @@ async function importDailyOffersForDepartments({
         notSeenSinceYesterdayCount: notSeenSinceYesterdayIds.length,
         sectorStatsCount: sectorStats.length,
         offerObservationsCount: offerObservations.length,
+        occupationSnapshotOffersCount: occupationOffers.length,
+        occupationSnapshotRunId,
         createdTodayCount: offerObservations.filter((item) => item.isCreatedToday).length,
         expiresWithin7DaysCount: offerObservations.filter((item) => item.expiresWithin7Days).length,
       });
@@ -13724,3 +14432,209 @@ exports.getPublicDepartmentOffersHttp = lbaDailyOffers.getPublicDepartmentOffers
 exports.startOfferBackfillJobHttp = lbaDailyOffers.startOfferBackfillJobHttp;
 exports.resumeOfferBackfillJob = lbaDailyOffers.resumeOfferBackfillJob;
 exports.getOfferBackfillJobStatusHttp = lbaDailyOffers.getOfferBackfillJobStatusHttp;
+
+
+// OCCUPATION_VIGILANCE_DAILY_V1
+const occupationVigilanceDaily = require('./occupation-vigilance-daily.cjs');
+const occupationVigilancePrecompute = require('./occupation-vigilance-precompute.cjs');
+
+function occupationVigilanceParisDateOffset(offsetDays) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + Number(offsetDays || 0));
+
+  return new Intl.DateTimeFormat('fr-CA', {
+    timeZone: 'Europe/Paris',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+async function executeOccupationVigilanceDate(date) {
+  const preparationRepository =
+    occupationVigilancePrecompute.createFirestoreOccupationPrecomputeRepository(
+      db,
+      {
+        FieldValue: admin.firestore.FieldValue,
+        FieldPath: admin.firestore.FieldPath,
+      }
+    );
+
+  await occupationVigilancePrecompute.prepareOccupationVigilanceInputs({
+    date,
+    repository: preparationRepository,
+  });
+
+  return occupationVigilanceDaily.executeOccupationVigilanceForDate({
+    date,
+    db,
+    FieldValue: admin.firestore.FieldValue,
+  });
+}
+
+exports.buildDailyOccupationVigilance = onSchedule(
+  {
+    schedule: '30 3 * * *',
+    timeZone: 'Europe/Paris',
+    region: 'europe-west1',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+  },
+  async () => {
+    const date = occupationVigilanceParisDateOffset(-1);
+    const result = await executeOccupationVigilanceDate(date);
+
+    if (result?.status === 'failed') {
+      throw new Error(
+        `Occupation vigilance daily run failed for ${date}: ${result.errorCode || 'unknown'}`
+      );
+    }
+
+    console.log(
+      `Occupation vigilance daily run ${date}: ${JSON.stringify(result)}`
+    );
+
+    return result;
+  }
+);
+
+exports.runOccupationVigilanceHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    secrets: [BACKFILL_ADMIN_KEY],
+  },
+  async (request, response) => {
+    await occupationVigilanceDaily.handleOccupationVigilanceAdminRequest({
+      request,
+      response,
+      expectedAdminKey: BACKFILL_ADMIN_KEY.value(),
+      execute: executeOccupationVigilanceDate,
+    });
+  }
+);
+
+
+const occupationVigilanceAdminConfig = require('./admin-occupation-vigilance-config.cjs');
+
+exports.getActiveOccupationVigilanceConfigHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceActiveConfig({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
+exports.getOccupationVigilanceAnalysisHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceAnalysis({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
+exports.saveOccupationVigilanceConfigDraftHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceDraftSave({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+      FieldValue: admin.firestore.FieldValue,
+    });
+  }
+);
+
+exports.previewOccupationVigilanceConfigHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceConfigPreview({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
+exports.getOccupationVigilanceConfigHistoryHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceConfigHistory({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
+exports.compareOccupationVigilanceConfigsHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceConfigComparison({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
+exports.activateOccupationVigilanceConfigHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceConfigActivation({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+      FieldValue: admin.firestore.FieldValue,
+    });
+  }
+);
