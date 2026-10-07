@@ -56,6 +56,24 @@ function normalizeSeasonality(value = {}) {
   };
 }
 
+function normalizeInterannualTrend(value = {}) {
+  return {
+    status: text(value.status) || 'unavailable',
+    direction: text(value.direction) || 'unknown',
+    annualTrendRatio: numberOrNull(value.annualTrendRatio),
+    lastYearChangeRatio: numberOrNull(value.lastYearChangeRatio),
+    factor: numberOrNull(value.factor) ?? 1,
+    sampleYears: numberOrNull(value.sampleYears) ?? 0,
+    latestHistoricalYear: numberOrNull(value.latestHistoricalYear),
+    latestHistoricalOffers: numberOrNull(value.latestHistoricalOffers),
+    previousHistoricalOffers: numberOrNull(value.previousHistoricalOffers),
+    normalMedian: numberOrNull(value.normalMedian),
+    normalLow: numberOrNull(value.normalLow),
+    normalHigh: numberOrNull(value.normalHigh),
+  };
+}
+
+
 function buildInternalOccupationSnapshot(input = {}) {
   const context = input.context || {};
   const vigilance = input.vigilance || {};
@@ -83,6 +101,7 @@ function buildInternalOccupationSnapshot(input = {}) {
 
     recentTrend: normalizeRecentTrend(history.recentTrend),
     seasonality: normalizeSeasonality(history.seasonality),
+    interannualTrend: normalizeInterannualTrend(history.interannualTrend),
 
     publishedLevel: text(vigilance.publishedLevel) || 'insufficient_data',
     confidenceLevel: text(vigilance.confidenceLevel) || 'low',
@@ -93,6 +112,11 @@ function buildInternalOccupationSnapshot(input = {}) {
     factors: vigilance.factors && typeof vigilance.factors === 'object'
       ? { ...vigilance.factors }
       : null,
+    effectiveThresholds:
+      vigilance.effectiveThresholds &&
+      typeof vigilance.effectiveThresholds === 'object'
+        ? { ...vigilance.effectiveThresholds }
+        : null,
 
     calculationVersion: text(input.calculationVersion || vigilance.calculationVersion),
     configVersion: text(input.configVersion || vigilance.configVersion),
