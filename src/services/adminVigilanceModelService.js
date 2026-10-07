@@ -1,4 +1,4 @@
-import { auth } from '../firebase.js';
+import { getReadyAdminUser } from './adminSessionService.js';
 import { normalizeRomeCode } from '../utils/occupationUtils.js';
 
 const ACTIVE_CONFIG_OCCUPATION_VIGILANCE_ENDPOINT =
@@ -47,10 +47,12 @@ function cleanConfigForDraft(config) {
 }
 
 async function postAdminOccupationConfig(endpoint, body, fallbackMessage) {
-  const user = auth.currentUser;
+  const user = await getReadyAdminUser();
 
   if (!user) {
-    throw new Error('Session administrateur absente.');
+    const error = new Error('Session administrateur absente.');
+    error.status = 401;
+    throw error;
   }
 
   const token = await user.getIdToken();
