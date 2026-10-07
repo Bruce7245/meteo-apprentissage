@@ -179,6 +179,10 @@ export async function getOccupationAnalysisForRome(romeCode) {
 }
 
 
+const CONFIG_HISTORY_OCCUPATION_VIGILANCE_ENDPOINT =
+  'https://europe-west1-meteo-apprentissage.cloudfunctions.net/getOccupationVigilanceConfigHistoryHttp';
+const CONFIG_COMPARE_OCCUPATION_VIGILANCE_ENDPOINT =
+  'https://europe-west1-meteo-apprentissage.cloudfunctions.net/compareOccupationVigilanceConfigsHttp';
 const PREVIEW_OCCUPATION_VIGILANCE_CONFIG_ENDPOINT =
   'https://europe-west1-meteo-apprentissage.cloudfunctions.net/previewOccupationVigilanceConfigHttp';
 const ACTIVATE_OCCUPATION_VIGILANCE_CONFIG_ENDPOINT =
@@ -250,6 +254,38 @@ async function postAdminOccupationConfig(endpoint, body, fallbackMessage) {
   }
 
   return payload || {};
+}
+
+export async function getOccupationVigilanceConfigHistory() {
+  return postAdminOccupationConfig(
+    CONFIG_HISTORY_OCCUPATION_VIGILANCE_ENDPOINT,
+    {},
+    'Impossible de charger l’historique des versions du moteur.'
+  );
+}
+
+export async function compareOccupationVigilanceConfigVersions(
+  leftVersion,
+  rightVersion,
+  romeCode
+) {
+  const rome = normalizeRomeCode(romeCode);
+
+  if (!rome) {
+    throw new Error(
+      'Choisissez un métier ROME avant de comparer les versions.'
+    );
+  }
+
+  return postAdminOccupationConfig(
+    CONFIG_COMPARE_OCCUPATION_VIGILANCE_ENDPOINT,
+    {
+      leftVersion: String(leftVersion || '').trim(),
+      rightVersion: String(rightVersion || '').trim(),
+      romeCode: rome,
+    },
+    'Impossible de comparer les versions du moteur.'
+  );
 }
 
 export async function previewOccupationVigilanceConfig(
