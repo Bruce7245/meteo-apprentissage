@@ -167,10 +167,12 @@ test('getPublicOccupationDomainOccupations returns only approved occupation fiel
       {
         romeCode: 'G1204',
         label: 'Educateur sportif / Educatrice sportive',
+        dataStatus: 'available',
       },
       {
         romeCode: 'G1205',
         label: "Opérateur / Opératrice d'attraction",
+        dataStatus: 'insufficient_data',
       },
     ],
   });
