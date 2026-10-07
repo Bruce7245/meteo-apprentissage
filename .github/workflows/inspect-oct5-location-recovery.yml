@@ -1,0 +1,312 @@
+name: Inspect Oct 5 location recovery
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/inspect-oct5-location-recovery.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - run: npm ci --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Measure Oct 5 recovery from Oct 6 snapshots and INSEE
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const { createHash } = require('node:crypto');
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+
+          function normalizeDepartment(value) {
+            const raw = String(value || '').trim().toUpperCase();
+            if (/^\d$/.test(raw)) return `0${raw}`;
+            if (/^(?:\d{2}|2A|2B|97[1-6])$/.test(raw)) return raw;
+            return null;
+          }
+
+          function departmentFromPostalCode(value) {
+            const postal = String(value || '').trim();
+
+            if (/^97[1-6]\d{2}$/.test(postal)) return postal.slice(0, 3);
+
+            if (/^20\d{3}$/.test(postal)) {
+              const numeric = Number(postal);
+              if (numeric >= 20000 && numeric <= 20199) return '2A';
+              if (numeric >= 20200 && numeric <= 20699) return '2B';
+              return null;
+            }
+
+            if (/^\d{5}$/.test(postal)) return postal.slice(0, 2);
+
+            return null;
+          }
+
+          function offerDocId(value) {
+            return createHash('sha256')
+              .update(String(value || ''))
+              .digest('hex');
+          }
+
+          async function loadInseeBySiret(sirets) {
+            const unique = Array.from(
+              new Set(
+                sirets
+                  .map((value) => String(value || '').trim())
+                  .filter(Boolean)
+              )
+            );
+
+            const output = new Map();
+
+            for (let index = 0; index < unique.length; index += 30) {
+              const chunk = unique.slice(index, index + 30);
+              const refs = chunk.map((siret) =>
+                db.collection('inseeEstablishments').doc(siret)
+              );
+
+              const snapshots = await db.getAll(...refs);
+
+              for (const snapshot of snapshots) {
+                if (!snapshot.exists) continue;
+                output.set(snapshot.id, snapshot.data() || {});
+              }
+            }
+
+            return output;
+          }
+
+          (async () => {
+            const oct5Snap = await db
+              .collection('jobOfferObservations')
+              .where('date', '==', '2026-10-05')
+              .get();
+
+            const observations = oct5Snap.docs.map((doc) => ({
+              id: doc.id,
+              ...(doc.data() || {}),
+            }));
+
+            const inseeBySiret = await loadInseeBySiret(
+              observations.map((row) => row.workplaceSiret)
+            );
+
+            const oct6MetaByDepartment = new Map();
+
+            for (const observation of observations) {
+              const departmentCode =
+                normalizeDepartment(observation.departmentCode);
+
+              if (!departmentCode || oct6MetaByDepartment.has(departmentCode)) {
+                continue;
+              }
+
+              const meta = await db
+                .collection('dailyOfferSnapshots')
+                .doc('2026-10-06')
+                .collection('departments')
+                .doc(departmentCode)
+                .get();
+
+              oct6MetaByDepartment.set(
+                departmentCode,
+                meta.exists ? (meta.data() || {}) : null
+              );
+            }
+
+            const result = {
+              date: '2026-10-05',
+              observations: observations.length,
+              observationsWithSiret: observations.filter(
+                (row) => String(row.workplaceSiret || '').trim()
+              ).length,
+              resolved: 0,
+              unresolved: 0,
+              inRequestedDepartment: 0,
+              outOfRequestedDepartment: 0,
+              bySource: {
+                oct6Snapshot: 0,
+                inseeEstablishments: 0,
+              },
+              oct6SnapshotDocsFound: 0,
+              oct6ActiveSnapshotMatches: 0,
+              inseeMatchedSirets: inseeBySiret.size,
+              samples: [],
+            };
+
+            for (let index = 0; index < observations.length; index += 30) {
+              const chunk = observations.slice(index, index + 30);
+              const refs = [];
+              const rows = [];
+
+              for (const observation of chunk) {
+                const departmentCode =
+                  normalizeDepartment(observation.departmentCode);
+                const offerId = String(observation.offerId || '').trim();
+
+                if (!departmentCode || !offerId) {
+                  rows.push({ observation, refIndex: null });
+                  continue;
+                }
+
+                rows.push({
+                  observation,
+                  departmentCode,
+                  offerId,
+                  refIndex: refs.length,
+                });
+
+                refs.push(
+                  db
+                    .collection('dailyOfferSnapshots')
+                    .doc('2026-10-06')
+                    .collection('departments')
+                    .doc(departmentCode)
+                    .collection('offers')
+                    .doc(offerDocId(offerId))
+                );
+              }
+
+              const snapshots = refs.length > 0
+                ? await db.getAll(...refs)
+                : [];
+
+              for (const row of rows) {
+                const observation = row.observation;
+                const requestedDepartment =
+                  normalizeDepartment(observation.departmentCode);
+
+                let recovered = null;
+
+                if (row.refIndex !== null) {
+                  const snapshot = snapshots[row.refIndex];
+
+                  if (snapshot?.exists) {
+                    result.oct6SnapshotDocsFound += 1;
+
+                    const offer = snapshot.data() || {};
+                    const activeRunId = String(
+                      oct6MetaByDepartment.get(row.departmentCode)?.activeRunId || ''
+                    ).trim();
+
+                    if (
+                      activeRunId &&
+                      String(offer.runId || '').trim() === activeRunId
+                    ) {
+                      result.oct6ActiveSnapshotMatches += 1;
+                    }
+
+                    const departmentCode =
+                      normalizeDepartment(offer.effectiveDepartmentCode) ||
+                      departmentFromPostalCode(offer.postalCode);
+
+                    if (departmentCode) {
+                      recovered = {
+                        source: 'oct6Snapshot',
+                        departmentCode,
+                        postalCode: offer.postalCode || null,
+                        city: offer.city || null,
+                      };
+                    }
+                  }
+                }
+
+                if (!recovered) {
+                  const siret = String(
+                    observation.workplaceSiret || ''
+                  ).trim();
+                  const establishment = inseeBySiret.get(siret);
+
+                  if (establishment) {
+                    const departmentCode =
+                      normalizeDepartment(
+                        establishment.departmentCode
+                      ) ||
+                      departmentFromPostalCode(
+                        establishment.postalCode
+                      );
+
+                    if (departmentCode) {
+                      recovered = {
+                        source: 'inseeEstablishments',
+                        departmentCode,
+                        postalCode:
+                          establishment.postalCode || null,
+                        city: establishment.city || null,
+                      };
+                    }
+                  }
+                }
+
+                if (!recovered) {
+                  result.unresolved += 1;
+                  continue;
+                }
+
+                result.resolved += 1;
+                result.bySource[recovered.source] += 1;
+
+                if (recovered.departmentCode === requestedDepartment) {
+                  result.inRequestedDepartment += 1;
+                } else {
+                  result.outOfRequestedDepartment += 1;
+                }
+
+                if (result.samples.length < 12) {
+                  result.samples.push({
+                    offerId:
+                      String(observation.offerId || '').trim() || null,
+                    requestedDepartment,
+                    ...recovered,
+                  });
+                }
+              }
+            }
+
+            result.resolutionRate = Number(
+              (
+                result.resolved /
+                Math.max(1, result.observations)
+              ).toFixed(4)
+            );
+
+            result.inRequestedDepartmentRate = Number(
+              (
+                result.inRequestedDepartment /
+                Math.max(1, result.resolved)
+              ).toFixed(4)
+            );
+
+            console.log(JSON.stringify(result, null, 2));
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE

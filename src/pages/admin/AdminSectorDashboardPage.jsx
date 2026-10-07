@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import AdminLayout from '../../layouts/AdminLayout.jsx';
 import MetricCard from '../../components/dashboard/MetricCard.jsx';
-import AdminOccupationSearch from '../../components/admin/AdminOccupationSearch.jsx';
+import OccupationSearch from '../../components/occupation/OccupationSearch.jsx';
 import AdminVigilanceConfigEditor from '../../components/admin/AdminVigilanceConfigEditor.jsx';
 import AdminVigilanceVersionHistory from '../../components/admin/AdminVigilanceVersionHistory.jsx';
 import {
@@ -10,7 +10,7 @@ import {
 } from '../../services/adminVigilanceModelService.js';
 import { getLevelCss, getLevelLabel } from '../../utils/levelUtils.js';
 import { normalizeRomeCode } from '../../utils/occupationUtils.js';
-import '../../adminVigilance.css';
+import '../../occupation.css';
 
 function formatNumber(value, maximumFractionDigits = 2) {
   if (value === null || value === undefined || value === '') return '—';
@@ -265,7 +265,7 @@ export default function AdminSectorDashboardPage() {
           ) : null}
         </div>
 
-        <AdminOccupationSearch
+        <OccupationSearch
           onOccupationSelect={selectOccupation}
           initialRomeCode={romeCode}
           initialLabel={romeLabel}

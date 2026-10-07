@@ -1,0 +1,60 @@
+name: Occupation vigilance unit tests
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - functions/admin-occupation-vigilance-config.cjs
+      - functions/lib/occupation-history.cjs
+      - functions/lib/occupation-vigilance.cjs
+      - functions/lib/occupation-calibration.cjs
+      - functions/lib/occupation-vigilance-projection.cjs
+      - functions/occupation-vigilance-precompute.cjs
+      - functions/occupation-vigilance-daily.cjs
+      - functions/build-occupation-history-stats.cjs
+      - functions/config/occupation-vigilance.v1.schema.json
+      - functions/test/admin-occupation-vigilance-config.test.cjs
+      - functions/test/occupation-history.test.cjs
+      - functions/test/occupation-vigilance.test.cjs
+      - functions/test/occupation-calibration.test.cjs
+      - functions/test/occupation-vigilance-precompute.test.cjs
+      - functions/test/occupation-vigilance-daily.test.cjs
+      - functions/test/occupation-vigilance-projection.test.cjs
+      - .github/workflows/occupation-vigilance-unit-tests.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Test occupation vigilance engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Run vigilance unit tests
+        working-directory: functions
+        run: >
+          node --test
+          test/admin-occupation-vigilance-config.test.cjs
+          test/occupation-history.test.cjs
+          test/occupation-vigilance.test.cjs
+          test/occupation-calibration.test.cjs
+          test/occupation-vigilance-precompute.test.cjs
+          test/occupation-vigilance-daily.test.cjs
+          test/occupation-vigilance-projection.test.cjs

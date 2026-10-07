@@ -4,11 +4,37 @@ const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const OpenAI = require('openai');
 const {
+  DEFAULT_FORMATION_CAPACITY,
+  FORMATION_NEED_METHOD_VERSION,
+  getFormationNeedTimeCoefficient,
+} = require('./lib/formation-need.cjs');
+const {
+  getDepartmentBatch,
+  getNextPageIndex,
+  getNextIncompleteBatchNumber,
+  registerBatchFailure,
+} = require('./lib/formation-import-batch.cjs');
+const {
+  isValidDepartmentCode: isValidPublicFormationDepartmentCode,
+  normalizeDepartmentCode: normalizePublicFormationDepartmentCode,
+  sanitizePublicFormationStats,
+} = require('./lib/public-formation-stats.cjs');
+const {
   validatePublicOccupationQuery,
   mergeOccupationSearchResults,
   buildPublicOccupationLookup,
   createPublicRateLimiter,
 } = require('./lib/public-occupation-search.cjs');
+const {
+  normalizePublicRomeCode,
+  resolvePublishedOccupationRun,
+  sanitizePublicOccupationMap,
+  sanitizePublicOccupationDepartment,
+} = require('./lib/public-occupation-vigilance.cjs');
+const {
+  getPublicOccupationDomains,
+  getPublicOccupationDomainOccupations,
+} = require('./lib/public-occupation-domains.cjs');
 
 admin.initializeApp();
 
@@ -1225,127 +1251,22 @@ exports.importDailyOffers = onSchedule(
   async () => {
     const token = API_APPRENTISSAGE_TOKEN.value();
     const today = parisDateString(new Date());
-    const departments = await loadDepartments();
 
-    let successCount = 0;
-    let errorCount = 0;
+    console.log(`Import quotidien planifié ${today}.`);
 
-    console.log(`Import quotidien ${today} pour ${departments.length} départements.`);
+    const result = await importDailyOffersForDepartments({
+      targetDate: today,
+      departmentCodes: [],
+      token,
+      write: true,
+      publish: true,
+      delayMs: 1200,
+      executionMode: 'scheduled',
+    });
 
-    for (const department of departments) {
-      try {
-        const result = await fetchDepartment(department.code, token);
-
-        const todayJobs = result.jobs.filter((job) => {
-          return getJobCreationDate(job) === today;
-        });
-
-        const expiringSoonJobs = result.jobs.filter((job) => {
-          const expirationDate = getJobExpirationDate(job);
-          return (
-            expirationDate &&
-            expirationDate >= today &&
-            expirationDate <= parisDateWithOffset(7)
-          );
-        });
-
-        const activeOfferIds = result.jobs.map(getJobId).filter(Boolean);
-
-      const offerObservations = result.jobs
-        .map((job) => normalizeJobOfferObservation(job, department, targetDate))
-        .filter((item) => item.offerId);
-        const previousActiveIds = await getPreviousActiveIds(department.code);
-        const activeSet = new Set(activeOfferIds);
-        const notSeenSinceYesterdayIds = previousActiveIds.filter(
-          (id) => !activeSet.has(id)
-        );
-
-        const aggregation = aggregateJobs(todayJobs);
-
-        const dailyDocument = {
-          date: today,
-          code: department.code,
-          name: department.name,
-
-          period: 'today',
-          returnedActiveJobsCount: result.jobs.length,
-          jobsCount: todayJobs.length,
-          openingCount: countOpening(todayJobs),
-          recruitersCount: result.recruiters.length,
-          warningsCount: result.warnings.length,
-          expiringSoonCount: expiringSoonJobs.length,
-
-          activeOfferIds,
-          todayOfferIds: todayJobs.map(getJobId).filter(Boolean),
-          notSeenSinceYesterdayCount: notSeenSinceYesterdayIds.length,
-          notSeenSinceYesterdayIds,
-
-          ...aggregation,
-
-          source: 'api-apprentissage-job-v1-search',
-          limitedResults: true,
-          importedAt: admin.firestore.FieldValue.serverTimestamp(),
-        };
-
-        await db
-          .collection('departmentDailyStats')
-          .doc(`${today}_${department.code}`)
-          .set(dailyDocument, { merge: true });
-
-        const sectorStats = buildDepartmentSectorStats(todayJobs, department, today);
-
-        const batch = db.batch();
-
-        sectorStats.forEach((sector) => {
-          const documentId = `${department.code}_${sector.sectorCode}`;
-          const reference = db.collection('departmentSectorStats').doc(documentId);
-          batch.set(reference, sector, { merge: true });
-        });
-
-        if (sectorStats.length > 0) {
-          await batch.commit();
-        }
-
-        successCount += 1;
-        console.log(`OK ${department.code}: ${todayJobs.length} offre(s) du jour`);
-      } catch (error) {
-        errorCount += 1;
-        console.error(`Erreur ${department.code}:`, error.message);
-
-        await db
-          .collection('departmentDailyStats')
-          .doc(`${today}_${department.code}`)
-          .set(
-            {
-              date: today,
-              code: department.code,
-              name: department.name,
-              lastError: error.message,
-              importedAt: admin.firestore.FieldValue.serverTimestamp(),
-            },
-            { merge: true }
-          );
-      }
-
-      await sleep(1200);
-    }
-
-    await db.collection('apiImports').doc(`daily_${today}`).set(
-      {
-        type: 'daily_scheduled_import',
-        date: today,
-        departmentsCount: departments.length,
-        successCount,
-        errorCount,
-        finishedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
+    console.log(
+      `Import quotidien terminé. Succès: ${result.successCount}, erreurs: ${result.errorCount}`
     );
-
-    await publishDepartmentVigilanceDaily(today);
-    await publishVigilancePublicIndexLatest(today);
-
-    console.log(`Import quotidien terminé. Succès: ${successCount}, erreurs: ${errorCount}`);
   }
 );
 
@@ -5423,6 +5344,239 @@ async function fetchLbaFormationSearchPage({
   return payload;
 }
 
+async function fetchLbaFormationSearchPageWithRetry(args, {
+  retries = 2,
+  delayMs = 800,
+} = {}) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await fetchLbaFormationSearchPage(args);
+    } catch (error) {
+      lastError = error;
+      const status = Number(error?.httpStatus || 0);
+      const retryable = status === 429 || status >= 500 || status === 0;
+
+      if (!retryable || attempt >= retries) {
+        throw error;
+      }
+
+      await sleep(delayMs * (attempt + 1));
+    }
+  }
+
+  throw lastError || new Error('LBA formation search failed');
+}
+
+async function importLbaFormationPage({
+  token,
+  departmentCode,
+  longitude,
+  latitude,
+  radius,
+  pageIndex,
+  pageSize,
+  write,
+  filterDepartment = true,
+  romes = null,
+  rncp = null,
+  targetDiplomaLevel = null,
+  retryCount = 2,
+}) {
+  const payload = await fetchLbaFormationSearchPageWithRetry({
+    token,
+    longitude,
+    latitude,
+    radius,
+    romes,
+    rncp,
+    targetDiplomaLevel,
+    pageIndex,
+    pageSize,
+  }, {
+    retries: retryCount,
+  });
+
+  const formations = extractArrayFromFormationSearchPayload(payload);
+  const batch = db.batch();
+
+  let writtenCount = 0;
+  let skippedNoId = 0;
+  let skippedOutsideDepartment = 0;
+
+  const sectorCounter = {};
+  const romeCounter = {};
+  const rncpCounter = {};
+  const sessionStartCounter = {};
+  const sample = [];
+
+  const importContext = {
+    departmentCode,
+    latitude,
+    longitude,
+    radius,
+  };
+
+  for (const formation of formations) {
+    const normalized = normalizeFormationForImport(formation, importContext);
+
+    if (!normalized.docId || !normalized.data.formationId) {
+      skippedNoId += 1;
+      continue;
+    }
+
+    const formationDepartmentCode = normalized.data.venue.departmentCode;
+
+    if (filterDepartment && formationDepartmentCode !== departmentCode) {
+      skippedOutsideDepartment += 1;
+      continue;
+    }
+
+    const sectorCode = normalized.data.sectorCode || 'unknown';
+
+    sectorCounter[sectorCode] = (sectorCounter[sectorCode] || 0) + 1;
+
+    for (const romeCode of normalized.data.romeCodes || []) {
+      romeCounter[romeCode] = (romeCounter[romeCode] || 0) + 1;
+    }
+
+    if (normalized.data.rncp) {
+      rncpCounter[normalized.data.rncp] = (rncpCounter[normalized.data.rncp] || 0) + 1;
+    }
+
+    for (const session of normalized.data.sessions || []) {
+      const startDate = session.debut ? String(session.debut).slice(0, 10) : 'unknown';
+      sessionStartCounter[startDate] = (sessionStartCounter[startDate] || 0) + 1;
+    }
+
+    if (sample.length < 10) {
+      sample.push({
+        formationId: normalized.data.formationId,
+        intitule: normalized.data.intitule,
+        rncp: normalized.data.rncp,
+        romeCodes: normalized.data.romeCodes,
+        sectorCode: normalized.data.sectorCode,
+        session: normalized.data.primarySession,
+        venue: normalized.data.venue,
+      });
+    }
+
+    if (write) {
+      batch.set(
+        db.collection('formationDetails').doc(normalized.docId),
+        normalized.data,
+        { merge: true }
+      );
+    }
+
+    writtenCount += 1;
+  }
+
+  const pagination = payload?.pagination || null;
+
+  if (write && writtenCount > 0) {
+    await batch.commit();
+  }
+
+  if (write) {
+    await db.collection('apiImports').doc(`lba_formations_${departmentCode}_page_${pageIndex}`).set(
+      {
+        type: 'lba_formations_import_page',
+        departmentCode,
+        longitude,
+        latitude,
+        radius,
+        pageIndex,
+        pageSize,
+        filterDepartment,
+        receivedCount: formations.length,
+        writtenCount,
+        skippedNoId,
+        skippedOutsideDepartment,
+        pagination,
+        sectorCounter,
+        romeCounter,
+        rncpCounter,
+        sessionStartCounter,
+        finishedAt: admin.firestore.FieldValue.serverTimestamp(),
+        schemaVersion: 'lba_formations_import_page.v2',
+      },
+      { merge: true }
+    );
+  }
+
+  return {
+    ok: true,
+    write,
+    departmentCode,
+    longitude,
+    latitude,
+    radius,
+    pageIndex,
+    pageSize,
+    filterDepartment,
+    receivedCount: formations.length,
+    writtenCount,
+    skippedNoId,
+    skippedOutsideDepartment,
+    pagination,
+    sectorCounter,
+    sessionStartCounter,
+    sample,
+  };
+}
+
+async function resolveDepartmentFormationSearch(departmentCode, departmentName) {
+  const ref = db.collection('departments').doc(departmentCode);
+  const snapshot = await ref.get();
+  const data = snapshot.exists ? snapshot.data() : {};
+  const search = data?.formationSearch || {};
+
+  const latitude = Number(search.latitude);
+  const longitude = Number(search.longitude);
+  const radiusKm = Number(search.radiusKm || getDepartmentFormationRadiusKm(departmentCode));
+
+  if (
+    search.enabled !== false &&
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude)
+  ) {
+    return {
+      departmentCode,
+      departmentName: data.name || departmentName || null,
+      latitude,
+      longitude,
+      radius: Number.isFinite(radiusKm) ? radiusKm : 100,
+      source: 'departments.formationSearch',
+    };
+  }
+
+  const communesUrl = new URL(
+    `https://geo.api.gouv.fr/departements/${encodeURIComponent(departmentCode)}/communes`
+  );
+  communesUrl.searchParams.set('fields', 'nom,code,population,centre');
+  communesUrl.searchParams.set('format', 'json');
+  communesUrl.searchParams.set('geometry', 'centre');
+
+  const communesPayload = await fetchGeoApiJson(communesUrl.toString());
+  const communes = Array.isArray(communesPayload) ? communesPayload : [];
+  const mainCommune = findMainCommune(communes);
+
+  if (!mainCommune?.center) {
+    throw new Error(`No formation search center for department ${departmentCode}`);
+  }
+
+  return {
+    departmentCode,
+    departmentName: data.name || departmentName || null,
+    latitude: mainCommune.center.latitude,
+    longitude: mainCommune.center.longitude,
+    radius: getDepartmentFormationRadiusKm(departmentCode),
+    source: 'geo.api.gouv.fr_fallback',
+  };
+}
+
 exports.importLbaFormationsPage = onRequest(
   {
     region: 'europe-west1',
@@ -5458,148 +5612,29 @@ exports.importLbaFormationsPage = onRequest(
       const latitude = request.query.latitude ?? '48.0061';
       const radius = Number(request.query.radius || 100);
       const pageIndex = Math.max(Number(request.query.pageIndex ?? request.query.page_index ?? 0), 0);
-      const pageSize = Math.min(Math.max(Number(request.query.pageSize ?? request.query.page_size ?? 100), 1), 100);
+      const pageSize = Math.min(
+        Math.max(Number(request.query.pageSize ?? request.query.page_size ?? 100), 1),
+        100
+      );
       const shouldWrite = String(request.query.write || '') === '1';
       const filterDepartment = String(request.query.filterDepartment || '1') !== '0';
 
-      const payload = await fetchLbaFormationSearchPage({
+      const result = await importLbaFormationPage({
         token,
+        departmentCode,
         longitude,
         latitude,
         radius,
+        pageIndex,
+        pageSize,
+        write: shouldWrite,
+        filterDepartment,
         romes: request.query.romes || null,
         rncp: request.query.rncp || null,
         targetDiplomaLevel: request.query.target_diploma_level || null,
-        pageIndex,
-        pageSize,
       });
 
-      const formations = extractArrayFromFormationSearchPayload(payload);
-
-      const batch = db.batch();
-
-      let writtenCount = 0;
-      let skippedNoId = 0;
-      let skippedOutsideDepartment = 0;
-
-      const sectorCounter = {};
-      const romeCounter = {};
-      const rncpCounter = {};
-      const sessionStartCounter = {};
-      const sample = [];
-
-      const importContext = {
-        departmentCode,
-        latitude,
-        longitude,
-        radius,
-      };
-
-      for (const formation of formations) {
-        const normalized = normalizeFormationForImport(formation, importContext);
-
-        if (!normalized.docId || !normalized.data.formationId) {
-          skippedNoId += 1;
-          continue;
-        }
-
-        const formationDepartmentCode = normalized.data.venue.departmentCode;
-
-        if (filterDepartment && formationDepartmentCode !== departmentCode) {
-          skippedOutsideDepartment += 1;
-          continue;
-        }
-
-        const sectorCode = normalized.data.sectorCode || 'unknown';
-
-        sectorCounter[sectorCode] = (sectorCounter[sectorCode] || 0) + 1;
-
-        for (const romeCode of normalized.data.romeCodes || []) {
-          romeCounter[romeCode] = (romeCounter[romeCode] || 0) + 1;
-        }
-
-        if (normalized.data.rncp) {
-          rncpCounter[normalized.data.rncp] = (rncpCounter[normalized.data.rncp] || 0) + 1;
-        }
-
-        for (const session of normalized.data.sessions || []) {
-          const start = session.debut ? String(session.debut).slice(0, 10) : 'unknown';
-          sessionStartCounter[start] = (sessionStartCounter[start] || 0) + 1;
-        }
-
-        if (sample.length < 10) {
-          sample.push({
-            formationId: normalized.data.formationId,
-            intitule: normalized.data.intitule,
-            rncp: normalized.data.rncp,
-            romeCodes: normalized.data.romeCodes,
-            sectorCode: normalized.data.sectorCode,
-            session: normalized.data.primarySession,
-            venue: normalized.data.venue,
-          });
-        }
-
-        if (shouldWrite) {
-          batch.set(
-            db.collection('formationDetails').doc(normalized.docId),
-            normalized.data,
-            { merge: true }
-          );
-        }
-
-        writtenCount += 1;
-      }
-
-      if (shouldWrite && writtenCount > 0) {
-        await batch.commit();
-
-        await db.collection('apiImports').doc(`lba_formations_${departmentCode}_page_${pageIndex}`).set(
-          {
-            type: 'lba_formations_import_page',
-            departmentCode,
-            longitude,
-            latitude,
-            radius,
-            pageIndex,
-            pageSize,
-            filterDepartment,
-            receivedCount: formations.length,
-            writtenCount,
-            skippedNoId,
-            skippedOutsideDepartment,
-            pagination: payload?.pagination || null,
-            sectorCounter,
-            romeCounter,
-            rncpCounter,
-            sessionStartCounter,
-            finishedAt: admin.firestore.FieldValue.serverTimestamp(),
-            schemaVersion: 'lba_formations_import_page.v1',
-          },
-          { merge: true }
-        );
-      }
-
-      const pagination = payload?.pagination || null;
-
-      response.json({
-        ok: true,
-        write: shouldWrite,
-        departmentCode,
-        longitude,
-        latitude,
-        radius,
-        pageIndex,
-        pageSize,
-        filterDepartment,
-        receivedCount: formations.length,
-        writtenCount,
-        skippedNoId,
-        skippedOutsideDepartment,
-        pagination,
-        sectorCounter,
-        sessionStartCounter,
-        sample,
-      });
+      response.json(result);
     } catch (error) {
       console.error('importLbaFormationsPage error', error);
       response.status(500).json({
@@ -5607,6 +5642,711 @@ exports.importLbaFormationsPage = onRequest(
         error: String(error.message || error),
         httpStatus: error.httpStatus || null,
         lbaPayload: error.payload || null,
+      });
+    }
+  }
+);
+
+exports.importLbaFormationsBatchHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    secrets: [API_APPRENTISSAGE_TOKEN, BACKFILL_ADMIN_KEY],
+  },
+  async (request, response) => {
+    const startedAtMs = Date.now();
+
+    try {
+      const adminKey = request.get('x-admin-key') || '';
+      const expectedKey = BACKFILL_ADMIN_KEY.value();
+
+      if (!expectedKey || adminKey !== expectedKey) {
+        response.status(403).json({
+          ok: false,
+          error: 'Forbidden',
+        });
+        return;
+      }
+
+      const token = API_APPRENTISSAGE_TOKEN.value();
+
+      if (!token) {
+        response.status(500).json({
+          ok: false,
+          error: 'Secret API_APPRENTISSAGE_TOKEN absent ou vide',
+        });
+        return;
+      }
+
+      const batchNumber = Math.max(1, Number.parseInt(String(request.query.batch || '1'), 10));
+      const shouldWrite = String(request.query.write || '') === '1';
+      const reset = String(request.query.reset || '0') === '1';
+      const dryRunStartDepartmentIndex = Math.max(
+        0,
+        Number.parseInt(String(request.query.startDepartmentIndex || '0'), 10) || 0
+      );
+      const dryRunStartPageIndex = Math.max(
+        0,
+        Number.parseInt(String(request.query.startPageIndex || '0'), 10) || 0
+      );
+      const pageSize = Math.min(Math.max(Number(request.query.pageSize || 100), 1), 100);
+      const maxPagesPerRun = Math.min(Math.max(Number(request.query.maxPages || 30), 1), 60);
+      const maxRunMs = Math.min(
+        Math.max(Number(request.query.maxRunSeconds || 420), 30),
+        480
+      ) * 1000;
+      const delayMs = Math.min(Math.max(Number(request.query.delayMs || 300), 0), 5000);
+      const retryCount = Math.min(Math.max(Number(request.query.retryCount || 2), 0), 4);
+
+      const departmentRows = APPRENTIFR_DEPARTMENTS.map(
+        ([code, name, regionCode, regionName]) => ({
+          code,
+          name,
+          regionCode,
+          regionName,
+        })
+      );
+
+      let batchDefinition;
+      try {
+        batchDefinition = getDepartmentBatch(departmentRows, batchNumber, 10);
+      } catch (error) {
+        response.status(400).json({
+          ok: false,
+          error: String(error.message || error),
+        });
+        return;
+      }
+
+      const stateRef = db.collection('formationImportBatches')
+        .doc(`batch_${String(batchNumber).padStart(2, '0')}`);
+
+      let state = {
+        batchNumber,
+        batchSize: 10,
+        departmentCodes: batchDefinition.items.map((item) => item.code),
+        currentDepartmentIndex: 0,
+        currentPageIndex: 0,
+        pagesProcessed: 0,
+        receivedCount: 0,
+        writtenCount: 0,
+        skippedNoId: 0,
+        skippedOutsideDepartment: 0,
+        departmentStates: {},
+        status: 'pending',
+        schemaVersion: 'formationImportBatch.v1',
+      };
+
+      if (!shouldWrite) {
+        if (dryRunStartDepartmentIndex >= batchDefinition.items.length) {
+          response.status(400).json({
+            ok: false,
+            error: `startDepartmentIndex out of range for batch ${batchNumber}`,
+          });
+          return;
+        }
+
+        state.currentDepartmentIndex = dryRunStartDepartmentIndex;
+        state.currentPageIndex = dryRunStartPageIndex;
+      }
+
+      if (shouldWrite && !reset) {
+        const stateSnapshot = await stateRef.get();
+        if (stateSnapshot.exists) {
+          state = {
+            ...state,
+            ...stateSnapshot.data(),
+            departmentStates: stateSnapshot.data().departmentStates || {},
+          };
+        }
+      }
+
+      if (state.status === 'completed' && !reset) {
+        response.json({
+          ok: true,
+          alreadyCompleted: true,
+          batch: batchDefinition,
+          state,
+        });
+        return;
+      }
+
+      if (reset) {
+        state.currentDepartmentIndex = 0;
+        state.currentPageIndex = 0;
+        state.pagesProcessed = 0;
+        state.receivedCount = 0;
+        state.writtenCount = 0;
+        state.skippedNoId = 0;
+        state.skippedOutsideDepartment = 0;
+        state.departmentStates = {};
+        state.status = 'pending';
+      }
+
+      state.status = 'running';
+
+      if (shouldWrite) {
+        await stateRef.set({
+          ...state,
+          startedAt: state.startedAt || admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+
+      const runRows = [];
+      let pagesThisRun = 0;
+      let stoppedReason = null;
+
+      while (state.currentDepartmentIndex < batchDefinition.items.length) {
+        if (pagesThisRun >= maxPagesPerRun) {
+          stoppedReason = 'page_budget';
+          break;
+        }
+
+        if (Date.now() - startedAtMs >= maxRunMs) {
+          stoppedReason = 'time_budget';
+          break;
+        }
+
+        const department = batchDefinition.items[state.currentDepartmentIndex];
+        const departmentCode = department.code;
+
+        let departmentState = state.departmentStates[departmentCode] || {
+          status: 'pending',
+          pageIndex: state.currentPageIndex || 0,
+          pagesProcessed: 0,
+          receivedCount: 0,
+          writtenCount: 0,
+          skippedNoId: 0,
+          skippedOutsideDepartment: 0,
+        };
+
+        try {
+          const searchConfig = await resolveDepartmentFormationSearch(
+            departmentCode,
+            department.name
+          );
+
+          departmentState = {
+            ...departmentState,
+            status: 'running',
+            searchSource: searchConfig.source,
+            latitude: searchConfig.latitude,
+            longitude: searchConfig.longitude,
+            radius: searchConfig.radius,
+          };
+
+          const pageIndex = Number(departmentState.pageIndex || 0);
+
+          const pageResult = await importLbaFormationPage({
+            token,
+            departmentCode,
+            longitude: searchConfig.longitude,
+            latitude: searchConfig.latitude,
+            radius: searchConfig.radius,
+            pageIndex,
+            pageSize,
+            write: shouldWrite,
+            filterDepartment: true,
+            retryCount,
+          });
+
+          pagesThisRun += 1;
+          state.pagesProcessed += 1;
+          state.receivedCount += pageResult.receivedCount;
+          state.writtenCount += pageResult.writtenCount;
+          state.skippedNoId += pageResult.skippedNoId;
+          state.skippedOutsideDepartment += pageResult.skippedOutsideDepartment;
+
+          departmentState.pagesProcessed += 1;
+          departmentState.receivedCount += pageResult.receivedCount;
+          departmentState.writtenCount += pageResult.writtenCount;
+          departmentState.skippedNoId += pageResult.skippedNoId;
+          departmentState.skippedOutsideDepartment += pageResult.skippedOutsideDepartment;
+          departmentState.lastPageIndex = pageIndex;
+          departmentState.updatedAt = new Date().toISOString();
+
+          const nextPageIndex = getNextPageIndex({
+            pagination: pageResult.pagination,
+            pageIndex,
+            pageSize,
+            receivedCount: pageResult.receivedCount,
+          });
+
+          runRows.push({
+            departmentCode,
+            departmentName: department.name,
+            pageIndex,
+            receivedCount: pageResult.receivedCount,
+            writtenCount: pageResult.writtenCount,
+            skippedOutsideDepartment: pageResult.skippedOutsideDepartment,
+            nextPageIndex,
+          });
+
+          if (nextPageIndex === null) {
+            const stats = await buildFormationDepartmentStats({
+              departmentCode,
+              asOfDate: parisDateString(new Date()),
+              defaultCapacity: DEFAULT_FORMATION_CAPACITY,
+              write: shouldWrite,
+            });
+
+            departmentState.status = 'completed';
+            departmentState.pageIndex = 0;
+            departmentState.completedAt = new Date().toISOString();
+            departmentState.stats = {
+              scannedCount: stats.scannedCount,
+              sectorsCount: stats.sectorsCount,
+              estimatedNeedToSecure: stats.totals.estimatedNeedToSecure,
+              calculationMethod: stats.calculationMethod,
+            };
+
+            state.departmentStates[departmentCode] = departmentState;
+            state.currentDepartmentIndex += 1;
+            state.currentPageIndex = 0;
+          } else {
+            departmentState.pageIndex = nextPageIndex;
+            state.departmentStates[departmentCode] = departmentState;
+            state.currentPageIndex = nextPageIndex;
+          }
+
+          if (shouldWrite) {
+            await stateRef.set({
+              ...state,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+
+          if (delayMs > 0) {
+            await sleep(delayMs);
+          }
+        } catch (error) {
+          departmentState.status = 'failed';
+          departmentState.error = String(error.message || error);
+          departmentState.httpStatus = error.httpStatus || null;
+          departmentState.failedAt = new Date().toISOString();
+          state.departmentStates[departmentCode] = departmentState;
+          state.status = 'failed';
+          stoppedReason = 'department_error';
+
+          if (shouldWrite) {
+            await stateRef.set({
+              ...state,
+              lastError: {
+                departmentCode,
+                message: departmentState.error,
+                httpStatus: departmentState.httpStatus,
+              },
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+          }
+
+          break;
+        }
+      }
+
+      const completed = state.currentDepartmentIndex >= batchDefinition.items.length;
+
+      if (completed) {
+        state.status = 'completed';
+        state.currentPageIndex = 0;
+      } else if (state.status !== 'failed') {
+        state.status = 'paused';
+      }
+
+      if (shouldWrite) {
+        const finalPatch = {
+          ...state,
+          stoppedReason,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        if (completed) {
+          finalPatch.completedAt = admin.firestore.FieldValue.serverTimestamp();
+        }
+
+        await stateRef.set(finalPatch, { merge: true });
+
+        await db.collection('apiImports')
+          .doc(`lba_formations_batch_${String(batchNumber).padStart(2, '0')}`)
+          .set({
+            type: 'lba_formations_import_batch',
+            batchNumber,
+            batchSize: 10,
+            departmentCodes: batchDefinition.items.map((item) => item.code),
+            status: state.status,
+            currentDepartmentIndex: state.currentDepartmentIndex,
+            currentPageIndex: state.currentPageIndex,
+            pagesProcessed: state.pagesProcessed,
+            receivedCount: state.receivedCount,
+            writtenCount: state.writtenCount,
+            skippedNoId: state.skippedNoId,
+            skippedOutsideDepartment: state.skippedOutsideDepartment,
+            stoppedReason,
+            calculationMethod: FORMATION_NEED_METHOD_VERSION,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            schemaVersion: 'lba_formations_import_batch.v1',
+          }, { merge: true });
+      }
+
+      response.json({
+        ok: state.status !== 'failed',
+        write: shouldWrite,
+        batch: batchDefinition,
+        status: state.status,
+        stoppedReason,
+        pagesThisRun,
+        durationMs: Date.now() - startedAtMs,
+        currentDepartmentIndex: state.currentDepartmentIndex,
+        currentPageIndex: state.currentPageIndex,
+        nextCursor: completed
+          ? null
+          : {
+              departmentIndex: state.currentDepartmentIndex,
+              pageIndex: state.currentPageIndex,
+            },
+        totals: {
+          pagesProcessed: state.pagesProcessed,
+          receivedCount: state.receivedCount,
+          writtenCount: state.writtenCount,
+          skippedNoId: state.skippedNoId,
+          skippedOutsideDepartment: state.skippedOutsideDepartment,
+        },
+        departmentStates: state.departmentStates,
+        runRows,
+      });
+    } catch (error) {
+      console.error('importLbaFormationsBatchHttp error', error);
+      response.status(500).json({
+        ok: false,
+        error: String(error.message || error),
+      });
+    }
+  }
+);
+
+
+const FORMATION_AUTO_JOB_COLLECTION = 'adminJobs';
+const FORMATION_AUTO_JOB_ID = 'formationNationalBackgroundJob';
+const FORMATION_AUTO_TOTAL_BATCHES = 11;
+const FORMATION_AUTO_MAX_FAILURES = 3;
+
+async function formationAutoLoadBatchStates() {
+  const snapshots = await Promise.all(
+    Array.from({ length: FORMATION_AUTO_TOTAL_BATCHES }, (_, index) => {
+      const batchNumber = index + 1;
+      return db.collection('formationImportBatches')
+        .doc(`batch_${String(batchNumber).padStart(2, '0')}`)
+        .get();
+    })
+  );
+
+  const states = {};
+
+  snapshots.forEach((snapshot, index) => {
+    const batchNumber = index + 1;
+    states[batchNumber] = snapshot.exists
+      ? snapshot.data()
+      : { status: 'pending' };
+  });
+
+  return states;
+}
+
+async function formationAutoAcquireLease(source) {
+  const jobRef = db.collection(FORMATION_AUTO_JOB_COLLECTION).doc(FORMATION_AUTO_JOB_ID);
+  const nowMs = Date.now();
+  const leaseOwner = `${source}-${nowMs}`;
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(jobRef);
+    const job = snapshot.exists ? (snapshot.data() || {}) : {
+      status: 'running',
+      consecutiveFailures: 0,
+      currentBatchNumber: 1,
+      schemaVersion: 'formationNationalBackgroundJob.v1',
+    };
+
+    if (['paused', 'error', 'done'].includes(job.status)) {
+      return {
+        acquired: false,
+        reason: `status_${job.status}`,
+        job,
+      };
+    }
+
+    const leaseUntilMs = Number(job.leaseUntilMs || 0);
+
+    if (leaseUntilMs > nowMs) {
+      return {
+        acquired: false,
+        reason: 'locked',
+        leaseUntilMs,
+        job,
+      };
+    }
+
+    transaction.set(jobRef, {
+      ...job,
+      status: 'running',
+      leaseOwner,
+      leaseUntilMs: nowMs + 9 * 60 * 1000,
+      lastLeaseAt: admin.firestore.FieldValue.serverTimestamp(),
+      startedAt: job.startedAt || admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      schemaVersion: 'formationNationalBackgroundJob.v1',
+    }, { merge: true });
+
+    return {
+      acquired: true,
+      job: {
+        ...job,
+        leaseOwner,
+      },
+      leaseOwner,
+    };
+  });
+}
+
+async function formationAutoUpdateJob(update) {
+  await db.collection(FORMATION_AUTO_JOB_COLLECTION)
+    .doc(FORMATION_AUTO_JOB_ID)
+    .set({
+      ...update,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+}
+
+async function formationAutoRunOnce({ source = 'schedule-5min' } = {}) {
+  const startedAtMs = Date.now();
+  const acquired = await formationAutoAcquireLease(source);
+
+  if (!acquired.acquired) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: acquired.reason,
+      leaseUntilMs: acquired.leaseUntilMs || null,
+    };
+  }
+
+  let selectedBatchNumber = null;
+
+  try {
+    const batchStates = await formationAutoLoadBatchStates();
+    selectedBatchNumber = getNextIncompleteBatchNumber(
+      batchStates,
+      FORMATION_AUTO_TOTAL_BATCHES
+    );
+
+    if (selectedBatchNumber === null) {
+      await formationAutoUpdateJob({
+        status: 'done',
+        currentBatchNumber: null,
+        consecutiveFailures: 0,
+        leaseUntilMs: 0,
+        leaseOwner: null,
+        finishedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastRunSource: source,
+        lastRunDurationMs: Date.now() - startedAtMs,
+      });
+
+      return {
+        ok: true,
+        status: 'done',
+        completedBatches: FORMATION_AUTO_TOTAL_BATCHES,
+      };
+    }
+
+    await formationAutoUpdateJob({
+      status: 'running',
+      currentBatchNumber: selectedBatchNumber,
+      lastRunSource: source,
+      lastRunStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const result = await inseeBackgroundAdminFetch('importLbaFormationsBatchHttp', {
+      batch: selectedBatchNumber,
+      write: 1,
+      maxPages: 20,
+      maxRunSeconds: 240,
+      delayMs: 300,
+      retryCount: 2,
+    });
+
+    const nextBatchNumber = result.status === 'completed'
+      ? Math.min(selectedBatchNumber + 1, FORMATION_AUTO_TOTAL_BATCHES)
+      : selectedBatchNumber;
+
+    await formationAutoUpdateJob({
+      status: 'running',
+      currentBatchNumber: nextBatchNumber,
+      consecutiveFailures: 0,
+      errorMessage: null,
+      lastCompletedBatchNumber:
+        result.status === 'completed' ? selectedBatchNumber : null,
+      lastBatchStatus: result.status || null,
+      lastStoppedReason: result.stoppedReason || null,
+      lastRunPages: result.pagesThisRun || 0,
+      lastRunDurationMs: Date.now() - startedAtMs,
+      lastRunFinishedAt: admin.firestore.FieldValue.serverTimestamp(),
+      leaseUntilMs: 0,
+      leaseOwner: null,
+    });
+
+    return {
+      ok: true,
+      status: 'running',
+      batchNumber: selectedBatchNumber,
+      batchStatus: result.status || null,
+      stoppedReason: result.stoppedReason || null,
+      pagesThisRun: result.pagesThisRun || 0,
+      durationMs: Date.now() - startedAtMs,
+    };
+  } catch (error) {
+    const failure = registerBatchFailure(
+      acquired.job?.consecutiveFailures || 0,
+      FORMATION_AUTO_MAX_FAILURES
+    );
+    const errorMessage = String(error.message || error);
+
+    await formationAutoUpdateJob({
+      status: failure.shouldPause ? 'error' : 'running',
+      currentBatchNumber: selectedBatchNumber,
+      consecutiveFailures: failure.consecutiveFailures,
+      errorMessage,
+      errorAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastRunSource: source,
+      lastRunDurationMs: Date.now() - startedAtMs,
+      leaseUntilMs: 0,
+      leaseOwner: null,
+    });
+
+    console.error('formationAutoRunOnce error', error);
+
+    return {
+      ok: false,
+      status: failure.shouldPause ? 'error' : 'running',
+      batchNumber: selectedBatchNumber,
+      consecutiveFailures: failure.consecutiveFailures,
+      error: errorMessage,
+    };
+  }
+}
+
+exports.resumeFormationNationalBackgroundJob = onSchedule(
+  {
+    schedule: '*/5 * * * *',
+    timeZone: 'Europe/Paris',
+    region: 'europe-west1',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    secrets: [BACKFILL_ADMIN_KEY],
+  },
+  async () => {
+    return formationAutoRunOnce({
+      source: 'schedule-5min',
+    });
+  }
+);
+
+exports.getFormationNationalBackgroundJobStatusHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    secrets: [BACKFILL_ADMIN_KEY],
+  },
+  async (request, response) => {
+    try {
+      const adminKey = request.get('x-admin-key') || '';
+      const expectedKey = BACKFILL_ADMIN_KEY.value();
+
+      if (!expectedKey || adminKey !== expectedKey) {
+        response.status(403).json({
+          ok: false,
+          error: 'Forbidden',
+        });
+        return;
+      }
+
+      const [jobSnapshot, batchStates] = await Promise.all([
+        db.collection(FORMATION_AUTO_JOB_COLLECTION)
+          .doc(FORMATION_AUTO_JOB_ID)
+          .get(),
+        formationAutoLoadBatchStates(),
+      ]);
+
+      const batches = [];
+      const summary = {
+        totalBatches: FORMATION_AUTO_TOTAL_BATCHES,
+        completedBatches: 0,
+        completedDepartments: 0,
+        failedDepartments: 0,
+        pagesProcessed: 0,
+        receivedCount: 0,
+        writtenCount: 0,
+        skippedNoId: 0,
+        skippedOutsideDepartment: 0,
+      };
+
+      for (let batchNumber = 1; batchNumber <= FORMATION_AUTO_TOTAL_BATCHES; batchNumber += 1) {
+        const state = batchStates[batchNumber] || { status: 'pending' };
+        const departmentStates = state.departmentStates || {};
+        const departmentCodes = Array.isArray(state.departmentCodes)
+          ? state.departmentCodes
+          : [];
+
+        const completedDepartments = Object.values(departmentStates)
+          .filter((item) => item && item.status === 'completed')
+          .length;
+        const failedDepartments = Object.values(departmentStates)
+          .filter((item) => item && item.status === 'failed')
+          .length;
+
+        if (state.status === 'completed') {
+          summary.completedBatches += 1;
+        }
+
+        summary.completedDepartments += completedDepartments;
+        summary.failedDepartments += failedDepartments;
+        summary.pagesProcessed += Number(state.pagesProcessed || 0);
+        summary.receivedCount += Number(state.receivedCount || 0);
+        summary.writtenCount += Number(state.writtenCount || 0);
+        summary.skippedNoId += Number(state.skippedNoId || 0);
+        summary.skippedOutsideDepartment += Number(state.skippedOutsideDepartment || 0);
+
+        batches.push({
+          batchNumber,
+          status: state.status || 'pending',
+          departmentCodes,
+          completedDepartments,
+          failedDepartments,
+          currentDepartmentIndex: Number(state.currentDepartmentIndex || 0),
+          currentPageIndex: Number(state.currentPageIndex || 0),
+          pagesProcessed: Number(state.pagesProcessed || 0),
+          receivedCount: Number(state.receivedCount || 0),
+          writtenCount: Number(state.writtenCount || 0),
+          skippedNoId: Number(state.skippedNoId || 0),
+          skippedOutsideDepartment: Number(state.skippedOutsideDepartment || 0),
+          stoppedReason: state.stoppedReason || null,
+          lastError: state.lastError || null,
+        });
+      }
+
+      response.json({
+        ok: true,
+        exists: jobSnapshot.exists,
+        job: jobSnapshot.exists ? jobSnapshot.data() : null,
+        summary,
+        batches,
+      });
+    } catch (error) {
+      console.error('getFormationNationalBackgroundJobStatusHttp error', error);
+      response.status(500).json({
+        ok: false,
+        error: String(error.message || error),
       });
     }
   }
@@ -6579,23 +7319,7 @@ function bfdsDaysBetween(dateString, asOfDateString) {
 }
 
 function bfdsTimeCoefficient(daysBeforeStart) {
-  if (daysBeforeStart === null || daysBeforeStart === undefined) return 0;
-
-  const days = Number(daysBeforeStart);
-
-  if (!Number.isFinite(days)) return 0;
-
-  if (days > 180) return 0.10;
-  if (days > 120) return 0.20;
-  if (days > 90) return 0.35;
-  if (days > 60) return 0.50;
-  if (days > 30) return 0.70;
-  if (days > 15) return 0.85;
-  if (days >= 0) return 1.00;
-  if (days >= -30) return 0.60;
-  if (days >= -90) return 0.25;
-
-  return 0;
+  return getFormationNeedTimeCoefficient(daysBeforeStart);
 }
 
 function bfdsEmptySectorStats(departmentCode, sectorCode, sectorLabel, asOfDate, defaultCapacity) {
@@ -6663,6 +7387,771 @@ function bfdsApplySessionToSectorStats(stats, session, asOfDate, defaultCapacity
   }
 }
 
+async function buildFormationDepartmentStats({
+  departmentCode,
+  asOfDate,
+  defaultCapacity = DEFAULT_FORMATION_CAPACITY,
+  write = true,
+}) {
+  const snapshot = await db.collection('formationDetails')
+    .where('importDepartmentCode', '==', departmentCode)
+    .get();
+
+  const sectorMap = new Map();
+  const seenFormationsBySector = new Map();
+
+  let scannedCount = 0;
+
+  snapshot.docs.forEach((doc) => {
+    scannedCount += 1;
+
+    const data = doc.data();
+    const sectorCode = data.sectorCode || 'unknown';
+    const sectorLabel = data.sectorLabel || sectorCode;
+    const formationId = data.formationId || doc.id;
+
+    if (!sectorMap.has(sectorCode)) {
+      sectorMap.set(
+        sectorCode,
+        bfdsEmptySectorStats(departmentCode, sectorCode, sectorLabel, asOfDate, defaultCapacity)
+      );
+      seenFormationsBySector.set(sectorCode, new Set());
+    }
+
+    const stats = sectorMap.get(sectorCode);
+    const seen = seenFormationsBySector.get(sectorCode);
+
+    if (!seen.has(formationId)) {
+      stats.formationsCount += 1;
+      seen.add(formationId);
+    }
+
+    const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+
+    sessions.forEach((session) => {
+      bfdsApplySessionToSectorStats(stats, session, asOfDate, defaultCapacity);
+    });
+  });
+
+  const sectors = Array.from(sectorMap.values())
+    .map((stats) => ({
+      ...stats,
+      estimatedCapacityTotal: bfdsRound(stats.estimatedCapacityTotal, 2),
+      estimatedDefaultCapacityTotal: bfdsRound(stats.estimatedDefaultCapacityTotal, 2),
+      estimatedNeedToSecure: bfdsRound(stats.estimatedNeedToSecure, 2),
+    }))
+    .sort((a, b) => b.estimatedNeedToSecure - a.estimatedNeedToSecure);
+
+  const totals = sectors.reduce((acc, stats) => {
+    acc.formationsCount += stats.formationsCount;
+    acc.sessionsCount += stats.sessionsCount;
+    acc.upcomingSessionsCount += stats.upcomingSessionsCount;
+    acc.recentStartedSessionsCount += stats.recentStartedSessionsCount;
+    acc.knownCapacityTotal += stats.knownCapacityTotal;
+    acc.estimatedDefaultCapacityTotal += stats.estimatedDefaultCapacityTotal;
+    acc.estimatedCapacityTotal += stats.estimatedCapacityTotal;
+    acc.estimatedNeedToSecure += stats.estimatedNeedToSecure;
+    return acc;
+  }, {
+    formationsCount: 0,
+    sessionsCount: 0,
+    upcomingSessionsCount: 0,
+    recentStartedSessionsCount: 0,
+    knownCapacityTotal: 0,
+    estimatedDefaultCapacityTotal: 0,
+    estimatedCapacityTotal: 0,
+    estimatedNeedToSecure: 0,
+  });
+
+  Object.keys(totals).forEach((key) => {
+    totals[key] = bfdsRound(totals[key], 2);
+  });
+
+  if (write) {
+    const batch = db.batch();
+
+    sectors.forEach((stats) => {
+      batch.set(
+        db.collection('formationDepartmentSectorStats').doc(`${departmentCode}_${stats.sectorCode}`),
+        {
+          ...stats,
+          computedAt: admin.firestore.FieldValue.serverTimestamp(),
+          calculationMethod: FORMATION_NEED_METHOD_VERSION,
+          schemaVersion: 'formationDepartmentSectorStats.v2',
+        },
+        { merge: true }
+      );
+    });
+
+    batch.set(
+      db.collection('formationDepartmentStats').doc(departmentCode),
+      {
+        departmentCode,
+        asOfDate,
+        defaultCapacity,
+        ...totals,
+        sectorsCount: sectors.length,
+        computedAt: admin.firestore.FieldValue.serverTimestamp(),
+        calculationMethod: FORMATION_NEED_METHOD_VERSION,
+        schemaVersion: 'formationDepartmentStats.v2',
+      },
+      { merge: true }
+    );
+
+    await batch.commit();
+  }
+
+  return {
+    ok: true,
+    write,
+    departmentCode,
+    asOfDate,
+    defaultCapacity,
+    calculationMethod: FORMATION_NEED_METHOD_VERSION,
+    scannedCount,
+    sectorsCount: sectors.length,
+    totals,
+    topSectors: sectors.slice(0, 15),
+  };
+}
+
+exports.getPublicOccupationSearchHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    try {
+      if (request.method === 'OPTIONS') {
+        response.status(204).send('');
+        return;
+      }
+
+      if (request.method !== 'GET') {
+        response.set('Allow', 'GET, OPTIONS');
+        response.status(405).json({
+          ok: false,
+          error: 'Method not allowed',
+        });
+        return;
+      }
+
+      const forwardedFor = String(request.get('x-forwarded-for') || '')
+        .split(',')[0]
+        .trim();
+      const requesterKey = request.ip || forwardedFor || 'anonymous';
+      const rateLimit = publicOccupationSearchRateLimit(requesterKey);
+
+      if (!rateLimit.allowed) {
+        response.set('Retry-After', String(rateLimit.retryAfterSeconds));
+        response.status(429).json({
+          ok: false,
+          error: 'Too many search requests',
+        });
+        return;
+      }
+
+      const validation = validatePublicOccupationQuery(request.query.q);
+
+      if (!validation.ok) {
+        response.status(validation.status).json({
+          ok: false,
+          error: validation.message,
+        });
+        return;
+      }
+
+      const { normalizedQuery } = validation;
+      const lookup = buildPublicOccupationLookup(normalizedQuery);
+
+      const metaSnapshot = await db
+        .collection('publicOccupationSearchIndexMeta')
+        .doc('current')
+        .get();
+
+      if (!metaSnapshot.exists) {
+        response.status(503).json({
+          ok: false,
+          error: 'Occupation search index is not available',
+        });
+        return;
+      }
+
+      const meta = metaSnapshot.data() || {};
+      const runId = String(meta.runId || '').trim();
+
+      if (!runId) {
+        response.status(503).json({
+          ok: false,
+          error: 'Occupation search index is not available',
+        });
+        return;
+      }
+
+      const runRef = db.collection('publicOccupationSearchIndexes').doc(runId);
+      const runSnapshot = await runRef.get();
+
+      if (!runSnapshot.exists || runSnapshot.data()?.status !== 'ready') {
+        response.status(503).json({
+          ok: false,
+          error: 'Occupation search index is not ready',
+        });
+        return;
+      }
+
+      const entriesRef = runRef.collection('entries');
+      const prefixQuery = entriesRef
+        .where('searchPrefixes', 'array-contains', lookup.prefixKey)
+        .limit(80);
+
+      const exactLabelQuery = entriesRef
+        .where('normalizedLabel', '==', normalizedQuery)
+        .limit(20);
+
+      const directReads = [];
+
+      if (lookup.exactRomeCode) {
+        directReads.push(
+          entriesRef.doc(`occupation_${lookup.exactRomeCode}`).get()
+        );
+      }
+
+      const rncpMatch = normalizedQuery.match(/^rncp(\d{2,8})$/);
+      if (rncpMatch) {
+        directReads.push(
+          entriesRef.doc(`training_rncp_${rncpMatch[1]}`).get()
+        );
+      }
+
+      const [prefixSnapshot, exactSnapshot, ...directSnapshots] = await Promise.all([
+        prefixQuery.get(),
+        exactLabelQuery.get(),
+        ...directReads,
+      ]);
+
+      const candidates = new Map();
+
+      for (const snapshot of [prefixSnapshot, exactSnapshot]) {
+        for (const document of snapshot.docs) {
+          candidates.set(document.id, document.data());
+        }
+      }
+
+      for (const snapshot of directSnapshots) {
+        if (snapshot.exists) {
+          candidates.set(snapshot.id, snapshot.data());
+        }
+      }
+
+      const values = Array.from(candidates.values());
+      const occupations = values.filter((item) => item?.type === 'occupation');
+      const trainings = values.filter((item) => item?.type === 'training');
+
+      const results = mergeOccupationSearchResults({
+        normalizedQuery,
+        occupations,
+        trainings,
+        limit: 12,
+      });
+
+      response.set('Cache-Control', 'public, max-age=300, s-maxage=600');
+      response.json({
+        ok: true,
+        exists: true,
+        query: normalizedQuery,
+        asOfDate: meta.asOfDate || null,
+        results,
+      });
+    } catch (error) {
+      console.error('getPublicOccupationSearchHttp error', {
+        name: error?.name || 'Error',
+        message: String(error?.message || error).slice(0, 500),
+      });
+
+      response.status(500).json({
+        ok: false,
+        error: 'Unable to search occupations and training',
+      });
+    }
+  }
+);
+
+
+
+const publicOccupationDomainRepository = {
+  async loadCurrentIndexPointer() {
+    const snapshot = await db
+      .collection('publicOccupationDomainIndexMeta')
+      .doc('current')
+      .get();
+
+    return snapshot.exists
+      ? snapshot.data() || {}
+      : null;
+  },
+
+  async loadIndexRun(runId) {
+    const snapshot = await db
+      .collection('publicOccupationDomainIndexes')
+      .doc(runId)
+      .get();
+
+    return snapshot.exists
+      ? {
+          runId: snapshot.id,
+          ...(snapshot.data() || {}),
+        }
+      : null;
+  },
+
+  async loadDomains(runId) {
+    const snapshot = await db
+      .collection('publicOccupationDomainIndexes')
+      .doc(runId)
+      .collection('domains')
+      .get();
+
+    return snapshot.docs.map(
+      (document) => document.data() || {}
+    );
+  },
+
+  async loadDomain(runId, domainCode) {
+    const snapshot = await db
+      .collection('publicOccupationDomainIndexes')
+      .doc(runId)
+      .collection('domains')
+      .doc(domainCode)
+      .get();
+
+    return snapshot.exists
+      ? snapshot.data() || {}
+      : null;
+  },
+};
+
+function publicOccupationRequesterKey(request) {
+  const forwardedFor = String(
+    request.get('x-forwarded-for') || ''
+  )
+    .split(',')[0]
+    .trim();
+
+  return (
+    request.ip ||
+    forwardedFor ||
+    'anonymous'
+  );
+}
+
+function enforceOccupationPublicReadMethod(
+  request,
+  response
+) {
+  if (request.method === 'OPTIONS') {
+    response.status(204).send('');
+    return false;
+  }
+
+  if (request.method !== 'GET') {
+    response.set('Allow', 'GET, OPTIONS');
+    response.status(405).json({
+      ok: false,
+      error: 'Method not allowed',
+    });
+    return false;
+  }
+
+  const rateLimit = publicOccupationSearchRateLimit(
+    publicOccupationRequesterKey(request)
+  );
+
+  if (!rateLimit.allowed) {
+    response.set(
+      'Retry-After',
+      String(rateLimit.retryAfterSeconds)
+    );
+    response.status(429).json({
+      ok: false,
+      error: 'Too many requests',
+    });
+    return false;
+  }
+
+  return true;
+}
+
+exports.getPublicOccupationDomainsHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    try {
+      if (
+        !enforceOccupationPublicReadMethod(
+          request,
+          response
+        )
+      ) {
+        return;
+      }
+
+      const result =
+        await getPublicOccupationDomains(
+          publicOccupationDomainRepository
+        );
+
+      if (result.status === 200) {
+        response.set(
+          'Cache-Control',
+          'public, max-age=300, s-maxage=600'
+        );
+      }
+
+      response
+        .status(result.status)
+        .json(result.body);
+    } catch (error) {
+      console.error(
+        'getPublicOccupationDomainsHttp error',
+        {
+          name: error?.name || 'Error',
+          message: String(
+            error?.message || error
+          ).slice(0, 500),
+        }
+      );
+
+      response.status(500).json({
+        ok: false,
+        error:
+          'PUBLIC_OCCUPATION_DOMAINS_UNAVAILABLE',
+      });
+    }
+  }
+);
+
+exports.getPublicOccupationDomainOccupationsHttp =
+  onRequest(
+    {
+      region: 'europe-west1',
+      timeoutSeconds: 30,
+      memory: '256MiB',
+      cors: true,
+    },
+    async (request, response) => {
+      try {
+        if (
+          !enforceOccupationPublicReadMethod(
+            request,
+            response
+          )
+        ) {
+          return;
+        }
+
+        const result =
+          await getPublicOccupationDomainOccupations(
+            publicOccupationDomainRepository,
+            request.query.domain
+          );
+
+        if (result.status === 200) {
+          response.set(
+            'Cache-Control',
+            'public, max-age=300, s-maxage=600'
+          );
+        }
+
+        response
+          .status(result.status)
+          .json(result.body);
+      } catch (error) {
+        console.error(
+          'getPublicOccupationDomainOccupationsHttp error',
+          {
+            name: error?.name || 'Error',
+            message: String(
+              error?.message || error
+            ).slice(0, 500),
+          }
+        );
+
+        response.status(500).json({
+          ok: false,
+          error:
+            'PUBLIC_OCCUPATION_DOMAIN_OCCUPATIONS_UNAVAILABLE',
+        });
+      }
+    }
+  );
+
+async function loadCurrentPublishedOccupationRun() {
+  const pointerSnapshot = await db
+    .collection('publicOccupationVigilanceIndex')
+    .doc('current')
+    .get();
+
+  if (!pointerSnapshot.exists) {
+    return {
+      ok: false,
+      error: 'NO_PUBLISHED_OCCUPATION_RUN',
+    };
+  }
+
+  const pointer = pointerSnapshot.data() || {};
+  const runId = String(pointer.runId || '').trim();
+
+  if (!runId) {
+    return {
+      ok: false,
+      error: 'NO_PUBLISHED_OCCUPATION_RUN',
+    };
+  }
+
+  const runSnapshot = await db
+    .collection('occupationVigilanceRuns')
+    .doc(runId)
+    .get();
+
+  const run = runSnapshot.exists
+    ? { runId: runSnapshot.id, ...runSnapshot.data() }
+    : null;
+
+  return resolvePublishedOccupationRun(pointer, run);
+}
+
+exports.getPublicOccupationMapHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    try {
+      const romeCode = normalizePublicRomeCode(request.query.rome);
+
+      if (!romeCode) {
+        response.status(400).json({
+          ok: false,
+          error: 'INVALID_ROME',
+        });
+        return;
+      }
+
+      const published = await loadCurrentPublishedOccupationRun();
+
+      if (!published.ok) {
+        response.status(503).json({
+          ok: false,
+          exists: false,
+          error: published.error,
+        });
+        return;
+      }
+
+      const entriesSnapshot = await db
+        .collection('publicOccupationVigilanceMaps')
+        .doc(published.runId)
+        .collection('entries')
+        .where('romeCode', '==', romeCode)
+        .get();
+
+      if (entriesSnapshot.empty) {
+        response.status(404).json({
+          ok: false,
+          exists: false,
+          romeCode,
+          data: null,
+        });
+        return;
+      }
+
+      const entries = entriesSnapshot.docs.map((document) => document.data() || {});
+      const first = entries[0] || {};
+      const data = sanitizePublicOccupationMap({
+        date: published.date || first.date || null,
+        romeCode,
+        romeLabel: first.romeLabel || romeCode,
+        departments: entries,
+      });
+
+      response.set('Cache-Control', 'public, max-age=300, s-maxage=600');
+      response.json({
+        ok: true,
+        exists: true,
+        romeCode,
+        data,
+      });
+    } catch (error) {
+      console.error('getPublicOccupationMapHttp error', {
+        message: String(error?.message || error).slice(0, 500),
+      });
+
+      response.status(500).json({
+        ok: false,
+        error: 'PUBLIC_OCCUPATION_MAP_UNAVAILABLE',
+      });
+    }
+  }
+);
+
+exports.getPublicOccupationDepartmentHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    try {
+      const romeCode = normalizePublicRomeCode(request.query.rome);
+      const departmentCode = normalizePublicFormationDepartmentCode(
+        request.query.department
+      );
+
+      if (!romeCode) {
+        response.status(400).json({
+          ok: false,
+          error: 'INVALID_ROME',
+        });
+        return;
+      }
+
+      if (!isValidPublicFormationDepartmentCode(departmentCode)) {
+        response.status(400).json({
+          ok: false,
+          error: 'INVALID_DEPARTMENT',
+        });
+        return;
+      }
+
+      const published = await loadCurrentPublishedOccupationRun();
+
+      if (!published.ok) {
+        response.status(503).json({
+          ok: false,
+          exists: false,
+          error: published.error,
+        });
+        return;
+      }
+
+      const entrySnapshot = await db
+        .collection('publicOccupationVigilanceDetails')
+        .doc(published.runId)
+        .collection('entries')
+        .doc(`${departmentCode}_${romeCode}`)
+        .get();
+
+      if (!entrySnapshot.exists) {
+        response.status(404).json({
+          ok: false,
+          exists: false,
+          departmentCode,
+          romeCode,
+          data: null,
+        });
+        return;
+      }
+
+      const data = sanitizePublicOccupationDepartment(
+        entrySnapshot.data() || {}
+      );
+
+      if (!data) {
+        response.status(500).json({
+          ok: false,
+          error: 'INVALID_PUBLIC_OCCUPATION_DETAIL',
+        });
+        return;
+      }
+
+      response.set('Cache-Control', 'public, max-age=300, s-maxage=600');
+      response.json({
+        ok: true,
+        exists: true,
+        departmentCode,
+        romeCode,
+        data,
+      });
+    } catch (error) {
+      console.error('getPublicOccupationDepartmentHttp error', {
+        message: String(error?.message || error).slice(0, 500),
+      });
+
+      response.status(500).json({
+        ok: false,
+        error: 'PUBLIC_OCCUPATION_DEPARTMENT_UNAVAILABLE',
+      });
+    }
+  }
+);
+
+
+exports.getPublicFormationDepartmentStatsHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    try {
+      const departmentCode = normalizePublicFormationDepartmentCode(
+        request.query.department
+      );
+
+      if (!isValidPublicFormationDepartmentCode(departmentCode)) {
+        response.status(400).json({
+          ok: false,
+          error: 'Invalid department code',
+        });
+        return;
+      }
+
+      const snapshot = await db
+        .collection('formationDepartmentStats')
+        .doc(departmentCode)
+        .get();
+
+      if (!snapshot.exists) {
+        response.status(404).json({
+          ok: false,
+          exists: false,
+          departmentCode,
+          data: null,
+        });
+        return;
+      }
+
+      response.set('Cache-Control', 'public, max-age=300, s-maxage=600');
+      response.json({
+        ok: true,
+        exists: true,
+        departmentCode,
+        data: sanitizePublicFormationStats(
+          snapshot.data(),
+          departmentCode
+        ),
+      });
+    } catch (error) {
+      console.error('getPublicFormationDepartmentStatsHttp error', error);
+      response.status(500).json({
+        ok: false,
+        error: 'Unable to load public formation statistics',
+      });
+    }
+  }
+);
+
+
 exports.buildFormationDepartmentStatsHttp = onRequest(
   {
     region: 'europe-west1',
@@ -6685,7 +8174,10 @@ exports.buildFormationDepartmentStatsHttp = onRequest(
 
       const departmentCode = String(request.query.department || '').trim().toUpperCase();
       const asOfDate = String(request.query.date || new Date().toISOString().slice(0, 10));
-      const defaultCapacity = Math.max(1, Math.min(50, bfdsNumber(request.query.defaultCapacity, 8)));
+      const defaultCapacity = Math.max(
+        1,
+        Math.min(50, bfdsNumber(request.query.defaultCapacity, DEFAULT_FORMATION_CAPACITY))
+      );
       const shouldWrite = String(request.query.write || '1') === '1';
 
       if (!departmentCode) {
@@ -6696,123 +8188,14 @@ exports.buildFormationDepartmentStatsHttp = onRequest(
         return;
       }
 
-      const snapshot = await db.collection('formationDetails')
-        .where('importDepartmentCode', '==', departmentCode)
-        .get();
-
-      const sectorMap = new Map();
-      const seenFormationsBySector = new Map();
-
-      let scannedCount = 0;
-
-      snapshot.docs.forEach((doc) => {
-        scannedCount += 1;
-
-        const data = doc.data();
-        const sectorCode = data.sectorCode || 'unknown';
-        const sectorLabel = data.sectorLabel || sectorCode;
-        const formationId = data.formationId || doc.id;
-
-        if (!sectorMap.has(sectorCode)) {
-          sectorMap.set(
-            sectorCode,
-            bfdsEmptySectorStats(departmentCode, sectorCode, sectorLabel, asOfDate, defaultCapacity)
-          );
-          seenFormationsBySector.set(sectorCode, new Set());
-        }
-
-        const stats = sectorMap.get(sectorCode);
-        const seen = seenFormationsBySector.get(sectorCode);
-
-        if (!seen.has(formationId)) {
-          stats.formationsCount += 1;
-          seen.add(formationId);
-        }
-
-        const sessions = Array.isArray(data.sessions) ? data.sessions : [];
-
-        sessions.forEach((session) => {
-          bfdsApplySessionToSectorStats(stats, session, asOfDate, defaultCapacity);
-        });
-      });
-
-      const sectors = Array.from(sectorMap.values())
-        .map((stats) => ({
-          ...stats,
-          estimatedCapacityTotal: bfdsRound(stats.estimatedCapacityTotal, 2),
-          estimatedDefaultCapacityTotal: bfdsRound(stats.estimatedDefaultCapacityTotal, 2),
-          estimatedNeedToSecure: bfdsRound(stats.estimatedNeedToSecure, 2),
-        }))
-        .sort((a, b) => b.estimatedNeedToSecure - a.estimatedNeedToSecure);
-
-      const totals = sectors.reduce((acc, stats) => {
-        acc.formationsCount += stats.formationsCount;
-        acc.sessionsCount += stats.sessionsCount;
-        acc.upcomingSessionsCount += stats.upcomingSessionsCount;
-        acc.recentStartedSessionsCount += stats.recentStartedSessionsCount;
-        acc.knownCapacityTotal += stats.knownCapacityTotal;
-        acc.estimatedDefaultCapacityTotal += stats.estimatedDefaultCapacityTotal;
-        acc.estimatedCapacityTotal += stats.estimatedCapacityTotal;
-        acc.estimatedNeedToSecure += stats.estimatedNeedToSecure;
-        return acc;
-      }, {
-        formationsCount: 0,
-        sessionsCount: 0,
-        upcomingSessionsCount: 0,
-        recentStartedSessionsCount: 0,
-        knownCapacityTotal: 0,
-        estimatedDefaultCapacityTotal: 0,
-        estimatedCapacityTotal: 0,
-        estimatedNeedToSecure: 0,
-      });
-
-      Object.keys(totals).forEach((key) => {
-        totals[key] = bfdsRound(totals[key], 2);
-      });
-
-      if (shouldWrite) {
-        const batch = db.batch();
-
-        sectors.forEach((stats) => {
-          batch.set(
-            db.collection('formationDepartmentSectorStats').doc(`${departmentCode}_${stats.sectorCode}`),
-            {
-              ...stats,
-              computedAt: admin.firestore.FieldValue.serverTimestamp(),
-              schemaVersion: 'formationDepartmentSectorStats.v2',
-            },
-            { merge: true }
-          );
-        });
-
-        batch.set(
-          db.collection('formationDepartmentStats').doc(departmentCode),
-          {
-            departmentCode,
-            asOfDate,
-            defaultCapacity,
-            ...totals,
-            sectorsCount: sectors.length,
-            computedAt: admin.firestore.FieldValue.serverTimestamp(),
-            schemaVersion: 'formationDepartmentStats.v2',
-          },
-          { merge: true }
-        );
-
-        await batch.commit();
-      }
-
-      response.json({
-        ok: true,
-        write: shouldWrite,
+      const result = await buildFormationDepartmentStats({
         departmentCode,
         asOfDate,
         defaultCapacity,
-        scannedCount,
-        sectorsCount: sectors.length,
-        totals,
-        topSectors: sectors.slice(0, 15),
+        write: shouldWrite,
       });
+
+      response.json(result);
     } catch (error) {
       console.error('buildFormationDepartmentStatsHttp error', error);
       response.status(500).json({
@@ -12526,6 +13909,12 @@ exports.purgeInseeCollectionBatchHttp = onRequest(
 );
 
 // IMPORT_DAILY_OFFERS_HTTP_V1
+const {
+  buildOccupationOfferSnapshot,
+  dedupeOccupationOffers,
+  buildOccupationOfferSummary,
+} = require('./lib/daily-offer-snapshot.cjs');
+
 
 function normalizeManualOfferImportDate(value) {
   const clean = String(value || '').trim();
@@ -12573,6 +13962,8 @@ function normalizeJobOfferObservation(job, department, targetDate) {
   const domain = workplace?.domain || {};
   const location = workplace?.location || {};
   const publication = offer?.publication || {};
+  const contract = job?.contract || {};
+  const apply = job?.apply || {};
 
   const offerId = getJobId(job);
 
@@ -12625,6 +14016,20 @@ function normalizeJobOfferObservation(job, department, targetDate) {
     workplaceCity: location.city || null,
     workplaceZipcode: location.zipcode || null,
     workplaceDepartment: location.department || null,
+    workplaceAddress:
+      typeof location.address === 'string'
+        ? location.address
+        : null,
+
+    contractStartDate: contract.start
+      ? String(contract.start).slice(0, 10)
+      : null,
+    contractTypes: Array.isArray(contract.type)
+      ? contract.type
+      : contract.type
+        ? [contract.type]
+        : [],
+    applyUrl: apply.url || null,
 
     nafCode: domain?.naf?.code || null,
     nafLabel: domain?.naf?.label || null,
@@ -12645,6 +14050,7 @@ async function importDailyOffersForDepartments({
   write = true,
   publish = false,
   delayMs = 1200,
+  executionMode = 'manual',
 }) {
   const allDepartments = await loadDepartments();
   const wanted = new Set(departmentCodes || []);
@@ -12652,6 +14058,13 @@ async function importDailyOffersForDepartments({
   const departments = wanted.size > 0
     ? allDepartments.filter((department) => wanted.has(String(department.code || '').toUpperCase()))
     : allDepartments;
+
+  const dailyStatsSchemaVersion = executionMode === 'scheduled'
+    ? 'departmentDailyStats.lba.scheduled.v1'
+    : 'departmentDailyStats.lba.manual.v1';
+
+  const occupationSnapshotRunId =
+    `daily_offer_${targetDate}_${Date.now().toString(36)}`;
 
   let successCount = 0;
   let errorCount = 0;
@@ -12679,6 +14092,35 @@ async function importDailyOffersForDepartments({
       const offerObservations = result.jobs
         .map((job) => normalizeJobOfferObservation(job, department, targetDate))
         .filter((item) => item.offerId);
+
+      const occupationOffers = dedupeOccupationOffers(
+        result.jobs
+          .filter(
+            (job) =>
+              String(job?.identifier?.partner_label || '').trim() !==
+              'recruteurs_lba'
+          )
+          .map((job) =>
+            normalizeJobOfferObservation(job, department, targetDate)
+          )
+          .filter((item) => item.offerId)
+          .map((observation) =>
+            buildOccupationOfferSnapshot(observation, {
+              runId: occupationSnapshotRunId,
+              targetDate,
+              departmentCode: department.code,
+            })
+          )
+      );
+
+      const occupationSummary =
+        buildOccupationOfferSummary(occupationOffers);
+      const strictOccupationSummary =
+        buildOccupationOfferSummary(
+          occupationOffers.filter(
+            (offer) => offer.locationQuality === 'in_department'
+          )
+        );
 
       const previousDate = dateWithOffsetFromDateString(targetDate, -1);
       const previousId = `${previousDate}_${department.code}`;
@@ -12718,7 +14160,7 @@ async function importDailyOffersForDepartments({
         source: 'api-apprentissage-job-v1-search',
         limitedResults: true,
         importedAt: admin.firestore.FieldValue.serverTimestamp(),
-        schemaVersion: 'departmentDailyStats.lba.manual.v1',
+        schemaVersion: dailyStatsSchemaVersion,
       };
 
       const sectorStats = buildDepartmentSectorStats(todayJobs, department, targetDate);
@@ -12728,6 +14170,58 @@ async function importDailyOffersForDepartments({
           .collection('departmentDailyStats')
           .doc(`${targetDate}_${department.code}`)
           .set(dailyDocument, { merge: true });
+
+        const occupationDepartmentRef = db
+          .collection('dailyOfferSnapshots')
+          .doc(targetDate)
+          .collection('departments')
+          .doc(department.code);
+
+        let occupationOfferBatch = db.batch();
+        let occupationOfferBatchCount = 0;
+
+        for (const offer of occupationOffers) {
+          occupationOfferBatch.set(
+            occupationDepartmentRef
+              .collection('offers')
+              .doc(offer.offerDocId),
+            {
+              ...offer,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          occupationOfferBatchCount += 1;
+
+          if (occupationOfferBatchCount >= 400) {
+            await occupationOfferBatch.commit();
+            occupationOfferBatch = db.batch();
+            occupationOfferBatchCount = 0;
+          }
+        }
+
+        if (occupationOfferBatchCount > 0) {
+          await occupationOfferBatch.commit();
+        }
+
+        await occupationDepartmentRef.set(
+          {
+            date: targetDate,
+            departmentCode: department.code,
+            activeRunId: occupationSnapshotRunId,
+            source: 'api-apprentissage-job-v1-search',
+            sourceRoute: '/job/v1/search',
+            executionMode,
+            rawJobsCount: result.jobs.length,
+            storedOffersCount: occupationOffers.length,
+            summary: occupationSummary,
+            strictSummary: strictOccupationSummary,
+            importedAt: admin.firestore.FieldValue.serverTimestamp(),
+            schemaVersion: 'dailyOfferSnapshots.sharedImport.v1',
+          },
+          { merge: true }
+        );
 
         let observationBatch = db.batch();
         let observationBatchCount = 0;
@@ -12782,6 +14276,8 @@ async function importDailyOffersForDepartments({
         notSeenSinceYesterdayCount: notSeenSinceYesterdayIds.length,
         sectorStatsCount: sectorStats.length,
         offerObservationsCount: offerObservations.length,
+        occupationSnapshotOffersCount: occupationOffers.length,
+        occupationSnapshotRunId,
         createdTodayCount: offerObservations.filter((item) => item.isCreatedToday).length,
         expiresWithin7DaysCount: offerObservations.filter((item) => item.expiresWithin7Days).length,
       });
@@ -12810,7 +14306,7 @@ async function importDailyOffersForDepartments({
               departmentName: department.name,
               lastError: row.error,
               importedAt: admin.firestore.FieldValue.serverTimestamp(),
-              schemaVersion: 'departmentDailyStats.lba.manual.v1',
+              schemaVersion: dailyStatsSchemaVersion,
             },
             { merge: true }
           );
@@ -12823,9 +14319,21 @@ async function importDailyOffersForDepartments({
   }
 
   if (write) {
-    await db.collection('apiImports').doc(`daily_manual_${targetDate}`).set(
+    const isScheduled = executionMode === 'scheduled';
+    const importDocumentId = isScheduled
+      ? `daily_${targetDate}`
+      : `daily_manual_${targetDate}`;
+    const importType = isScheduled
+      ? 'daily_scheduled_import'
+      : 'daily_manual_import';
+    const schemaVersion = isScheduled
+      ? 'daily_scheduled_import.v1'
+      : 'daily_manual_import.v1';
+
+    await db.collection('apiImports').doc(importDocumentId).set(
       {
-        type: 'daily_manual_import',
+        type: importType,
+        executionMode,
         date: targetDate,
         source: 'api-apprentissage-job-v1-search',
         departmentsCount: departments.length,
@@ -12833,7 +14341,7 @@ async function importDailyOffersForDepartments({
         successCount,
         errorCount,
         finishedAt: admin.firestore.FieldValue.serverTimestamp(),
-        schemaVersion: 'daily_manual_import.v1',
+        schemaVersion,
       },
       { merge: true }
     );
@@ -12920,6 +14428,92 @@ const lbaDailyOffers = require("./lba-daily-offers");
 exports.backfillDailyOffers = lbaDailyOffers.backfillDailyOffers;
 exports.adminDailyOffers = lbaDailyOffers.adminDailyOffers;
 exports.adminNationalDailyOffers = lbaDailyOffers.adminNationalDailyOffers;
+exports.getPublicDepartmentOffersHttp = lbaDailyOffers.getPublicDepartmentOffersHttp;
+exports.startOfferBackfillJobHttp = lbaDailyOffers.startOfferBackfillJobHttp;
+exports.resumeOfferBackfillJob = lbaDailyOffers.resumeOfferBackfillJob;
+exports.getOfferBackfillJobStatusHttp = lbaDailyOffers.getOfferBackfillJobStatusHttp;
+
+
+// OCCUPATION_VIGILANCE_DAILY_V1
+const occupationVigilanceDaily = require('./occupation-vigilance-daily.cjs');
+const occupationVigilancePrecompute = require('./occupation-vigilance-precompute.cjs');
+
+function occupationVigilanceParisDateOffset(offsetDays) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + Number(offsetDays || 0));
+
+  return new Intl.DateTimeFormat('fr-CA', {
+    timeZone: 'Europe/Paris',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+async function executeOccupationVigilanceDate(date) {
+  const preparationRepository =
+    occupationVigilancePrecompute.createFirestoreOccupationPrecomputeRepository(
+      db,
+      {
+        FieldValue: admin.firestore.FieldValue,
+        FieldPath: admin.firestore.FieldPath,
+      }
+    );
+
+  await occupationVigilancePrecompute.prepareOccupationVigilanceInputs({
+    date,
+    repository: preparationRepository,
+  });
+
+  return occupationVigilanceDaily.executeOccupationVigilanceForDate({
+    date,
+    db,
+    FieldValue: admin.firestore.FieldValue,
+  });
+}
+
+exports.buildDailyOccupationVigilance = onSchedule(
+  {
+    schedule: '30 3 * * *',
+    timeZone: 'Europe/Paris',
+    region: 'europe-west1',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+  },
+  async () => {
+    const date = occupationVigilanceParisDateOffset(-1);
+    const result = await executeOccupationVigilanceDate(date);
+
+    if (result?.status === 'failed') {
+      throw new Error(
+        `Occupation vigilance daily run failed for ${date}: ${result.errorCode || 'unknown'}`
+      );
+    }
+
+    console.log(
+      `Occupation vigilance daily run ${date}: ${JSON.stringify(result)}`
+    );
+
+    return result;
+  }
+);
+
+exports.runOccupationVigilanceHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    secrets: [BACKFILL_ADMIN_KEY],
+  },
+  async (request, response) => {
+    await occupationVigilanceDaily.handleOccupationVigilanceAdminRequest({
+      request,
+      response,
+      expectedAdminKey: BACKFILL_ADMIN_KEY.value(),
+      execute: executeOccupationVigilanceDate,
+    });
+  }
+);
 
 
 const occupationVigilanceAdminConfig = require('./admin-occupation-vigilance-config.cjs');
@@ -13042,174 +14636,5 @@ exports.activateOccupationVigilanceConfigHttp = onRequest(
       db,
       FieldValue: admin.firestore.FieldValue,
     });
-  }
-);
-
-
-exports.getPublicOccupationSearchHttp = onRequest(
-  {
-    region: 'europe-west1',
-    timeoutSeconds: 30,
-    memory: '256MiB',
-    cors: true,
-  },
-  async (request, response) => {
-    try {
-      if (request.method === 'OPTIONS') {
-        response.status(204).send('');
-        return;
-      }
-
-      if (request.method !== 'GET') {
-        response.set('Allow', 'GET, OPTIONS');
-        response.status(405).json({
-          ok: false,
-          error: 'Method not allowed',
-        });
-        return;
-      }
-
-      const forwardedFor = String(request.get('x-forwarded-for') || '')
-        .split(',')[0]
-        .trim();
-      const requesterKey = request.ip || forwardedFor || 'anonymous';
-      const rateLimit = publicOccupationSearchRateLimit(requesterKey);
-
-      if (!rateLimit.allowed) {
-        response.set('Retry-After', String(rateLimit.retryAfterSeconds));
-        response.status(429).json({
-          ok: false,
-          error: 'Too many search requests',
-        });
-        return;
-      }
-
-      const validation = validatePublicOccupationQuery(request.query.q);
-
-      if (!validation.ok) {
-        response.status(validation.status).json({
-          ok: false,
-          error: validation.message,
-        });
-        return;
-      }
-
-      const { normalizedQuery } = validation;
-      const lookup = buildPublicOccupationLookup(normalizedQuery);
-
-      const metaSnapshot = await db
-        .collection('publicOccupationSearchIndexMeta')
-        .doc('current')
-        .get();
-
-      if (!metaSnapshot.exists) {
-        response.status(503).json({
-          ok: false,
-          error: 'Occupation search index is not available',
-        });
-        return;
-      }
-
-      const meta = metaSnapshot.data() || {};
-      const runId = String(meta.runId || '').trim();
-
-      if (!runId) {
-        response.status(503).json({
-          ok: false,
-          error: 'Occupation search index is not available',
-        });
-        return;
-      }
-
-      const runRef = db.collection('publicOccupationSearchIndexes').doc(runId);
-      const runSnapshot = await runRef.get();
-
-      if (!runSnapshot.exists || runSnapshot.data()?.status !== 'ready') {
-        response.status(503).json({
-          ok: false,
-          error: 'Occupation search index is not ready',
-        });
-        return;
-      }
-
-      const entriesRef = runRef.collection('entries');
-      const prefixQuery = entriesRef
-        .where('searchPrefixes', 'array-contains', lookup.prefixKey)
-        .limit(80);
-
-      const exactLabelQuery = entriesRef
-        .where('normalizedLabel', '==', normalizedQuery)
-        .limit(20);
-
-      const directReads = [];
-
-      if (lookup.exactRomeCode) {
-        directReads.push(
-          entriesRef.doc('occupation_' + lookup.exactRomeCode).get()
-        );
-      }
-
-      const rncpMatch = normalizedQuery.match(/^rncp(\d{2,8})$/);
-      if (rncpMatch) {
-        directReads.push(
-          entriesRef.doc('training_rncp_' + rncpMatch[1]).get()
-        );
-      }
-
-      const [prefixSnapshot, exactSnapshot, ...directSnapshots] =
-        await Promise.all([
-          prefixQuery.get(),
-          exactLabelQuery.get(),
-          ...directReads,
-        ]);
-
-      const candidates = new Map();
-
-      for (const snapshot of [prefixSnapshot, exactSnapshot]) {
-        for (const document of snapshot.docs) {
-          candidates.set(document.id, document.data());
-        }
-      }
-
-      for (const snapshot of directSnapshots) {
-        if (snapshot.exists) {
-          candidates.set(snapshot.id, snapshot.data());
-        }
-      }
-
-      const values = Array.from(candidates.values());
-      const occupations = values.filter(
-        (item) => item?.type === 'occupation'
-      );
-      const trainings = values.filter(
-        (item) => item?.type === 'training'
-      );
-
-      const results = mergeOccupationSearchResults({
-        normalizedQuery,
-        occupations,
-        trainings,
-        limit: 12,
-      });
-
-      response.set('Cache-Control', 'public, max-age=300, s-maxage=600');
-      response.json({
-        ok: true,
-        exists: true,
-        query: normalizedQuery,
-        asOfDate: meta.asOfDate || null,
-        results,
-      });
-    } catch (error) {
-      console.error('getPublicOccupationSearchHttp error', {
-        name: error?.name || 'Error',
-        message: String(error?.message || error).slice(0, 500),
-      });
-
-      response.status(500).json({
-        ok: false,
-        error: 'Unable to search occupations and training',
-      });
-    }
   }
 );

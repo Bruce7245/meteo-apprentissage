@@ -1,16 +1,54 @@
-# React + Vite
+# ApprentiFR
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+ApprentiFR est un observatoire public de la tension du marché de l’apprentissage en France.
 
-Currently, two official plugins are available:
+L’application présente une carte départementale inspirée des niveaux de vigilance :
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Vert : situation normale
+- Jaune : vigilance
+- Orange : tension importante
+- Rouge : tension critique
 
-## React Compiler
+## Fonctionnalités
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- carte interactive des départements ;
+- bulletins départementaux ;
+- analyses par secteur ;
+- données issues notamment de l’API La bonne alternance et de l’INSEE ;
+- espace d’administration pour calculer, vérifier et publier les vigilances ;
+- historique quotidien des offres et indicateurs de confiance.
 
-## Expanding the Oxlint configuration
+## Technologies
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+- React
+- Vite
+- Firebase
+- Firestore
+- Firebase Functions
+- GitHub Actions
+
+## Développement local
+
+```bash
+npm install
+npm run dev
+```
+
+Pour vérifier la compilation :
+
+```bash
+npm run build
+```
+
+Pour vérifier la syntaxe des Functions :
+
+```bash
+node --check functions/index.js
+```
+
+## Attribution cartographique
+
+Les tracés SVG des départements métropolitains proviennent du paquet
+`@svg-maps/france.departments`, distribué sous licence CC BY 4.0.
+
+Source : https://github.com/VictorCazanave/svg-maps

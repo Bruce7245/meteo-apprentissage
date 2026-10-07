@@ -7,7 +7,10 @@
   },
   "scripts": {
     "deploy": "firebase deploy --only functions",
-    "logs": "firebase functions:log"
+    "logs": "firebase functions:log",
+    "test:formation-need": "node --test test/formation-need-method.test.cjs",
+    "test:formation-import-batch": "node --test test/formation-import-batch.test.cjs",
+    "test:unit": "node --test test/*.test.cjs"
   },
   "dependencies": {
     "firebase-admin": "^13.0.0",

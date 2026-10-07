@@ -1,0 +1,210 @@
+name: Prepare ROME domain calibration
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/prepare-rome-domain-calibration.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-rome-domain-calibration
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Build Oct 5-6 domain contexts and calibration draft
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Validate syntax
+        run: |
+          node --check functions/occupation-domain-precompute.cjs
+          node --check functions/build-occupation-domain-context-stats.cjs
+          node --check functions/lib/occupation-domain-calibration.cjs
+          node --check functions/scripts/build-occupation-domain-calibration.cjs
+
+      - name: Run Functions unit suite
+        run: npm run test:unit --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Assert Oct 4 remains quarantined
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+          if (!admin.apps.length) admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          const db = admin.firestore();
+
+          (async () => {
+            const [run, contexts] = await Promise.all([
+              db.collection('occupationDomainContextStatsRuns').doc('2026-10-04').get(),
+              db.collection('occupationDomainContextStats')
+                .where('date', '==', '2026-10-04')
+                .limit(1)
+                .get(),
+            ]);
+
+            const result = {
+              ok: !run.exists && contexts.empty,
+              runExists: run.exists,
+              contextSampleCount: contexts.size,
+            };
+
+            console.log(JSON.stringify(result, null, 2));
+
+            if (!result.ok) {
+              throw new Error('Oct 4 domain contexts must remain quarantined');
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Build Oct 5 domain contexts
+        working-directory: functions
+        run: node build-occupation-domain-context-stats.cjs 2026-10-05
+
+      - name: Build Oct 6 domain contexts
+        working-directory: functions
+        run: node build-occupation-domain-context-stats.cjs 2026-10-06
+
+      - name: Verify context coverage
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+          if (!admin.apps.length) admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          const db = admin.firestore();
+
+          (async () => {
+            const [run5, run6, c4, c5, c6] = await Promise.all([
+              db.collection('occupationDomainContextStatsRuns').doc('2026-10-05').get(),
+              db.collection('occupationDomainContextStatsRuns').doc('2026-10-06').get(),
+              db.collection('occupationDomainContextStats').where('date', '==', '2026-10-04').limit(1).get(),
+              db.collection('occupationDomainContextStats').where('date', '==', '2026-10-05').get(),
+              db.collection('occupationDomainContextStats').where('date', '==', '2026-10-06').get(),
+            ]);
+
+            const d5 = run5.exists ? run5.data() || {} : {};
+            const d6 = run6.exists ? run6.data() || {} : {};
+
+            const result = {
+              ok:
+                c4.empty &&
+                run5.exists &&
+                d5.status === 'ready' &&
+                Number(d5.departmentsProcessed || 0) === 74 &&
+                Number(d5.domainsCount || 0) === 110 &&
+                c5.size === 74 * 110 &&
+                run6.exists &&
+                d6.status === 'ready' &&
+                Number(d6.departmentsProcessed || 0) === 101 &&
+                Number(d6.domainsCount || 0) === 110 &&
+                c6.size === 101 * 110,
+              oct4Contexts: c4.size,
+              oct5: {
+                departments: Number(d5.departmentsProcessed || 0),
+                domains: Number(d5.domainsCount || 0),
+                contexts: c5.size,
+              },
+              oct6: {
+                departments: Number(d6.departmentsProcessed || 0),
+                domains: Number(d6.domainsCount || 0),
+                contexts: c6.size,
+              },
+            };
+
+            console.log(JSON.stringify(result, null, 2));
+
+            if (!result.ok) {
+              throw new Error('Domain context coverage verification failed: ' + JSON.stringify(result));
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Build domain calibration draft only
+        working-directory: functions
+        run: node scripts/build-occupation-domain-calibration.cjs --exclude-dates=2026-10-04
+
+      - name: Inspect latest Oct 5-6 draft
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+          if (!admin.apps.length) admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          const db = admin.firestore();
+
+          (async () => {
+            const snapshot = await db.collection('occupationDomainVigilanceConfigs')
+              .where('status', '==', 'draft')
+              .get();
+
+            const drafts = snapshot.docs
+              .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
+              .filter((item) =>
+                item?.calibration?.windowStart === '2026-10-05' &&
+                item?.calibration?.windowEnd === '2026-10-06'
+              );
+
+            if (drafts.length === 0) {
+              throw new Error('No Oct 5-6 domain calibration draft found');
+            }
+
+            drafts.sort((a, b) => String(b.id).localeCompare(String(a.id)));
+            const latest = drafts[0];
+
+            const result = {
+              ok:
+                latest.status === 'draft' &&
+                latest.calculationVersion === 'occupationDomainVigilance.v1' &&
+                Array.isArray(latest.calibration?.excludedDates) &&
+                latest.calibration.excludedDates.includes('2026-10-04'),
+              version: latest.id,
+              status: latest.status,
+              domainCount: Object.keys(latest.baselines || {}).length,
+              windowStart: latest.calibration?.windowStart || null,
+              windowEnd: latest.calibration?.windowEnd || null,
+              inputSamplesCount: Number(latest.calibration?.inputSamplesCount || 0),
+              excludedDates: latest.calibration?.excludedDates || [],
+              thresholds: latest.thresholds || null,
+              minimumGreenActiveOffers: latest.minimumGreenActiveOffers || null,
+              explicitlyValidated: false,
+            };
+
+            console.log(JSON.stringify(result, null, 2));
+
+            if (!result.ok) {
+              throw new Error('Domain calibration draft verification failed: ' + JSON.stringify(result));
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE

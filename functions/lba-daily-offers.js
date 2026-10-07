@@ -1,7 +1,23 @@
 const { onRequest } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
+const {
+  getOfferBackfillWindow,
+  registerOfferBackfillFailure,
+} = require("./lib/offer-backfill-job.cjs");
+const {
+  normalizeDepartmentCode: normalizePublicDepartmentCode,
+  isValidDepartmentCode: isValidPublicDepartmentCode,
+} = require("./lib/public-formation-stats.cjs");
+const {
+  normalizePublicRomeCode,
+  buildPublicOffersPayload,
+  buildRecentDateCandidates,
+  buildPublicOffersHistory,
+  computePublicTrend,
+} = require("./lib/public-offers.cjs");
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -33,7 +49,7 @@ const DEPARTMENT_CODES = [
 function setCors(res) {
   res.set("Access-Control-Allow-Origin", "*");
   res.set("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Key");
 }
 
 function todayParis() {
@@ -598,6 +614,400 @@ async function importDepartment(date, departmentCode, runId) {
   };
 }
 
+
+const OFFER_BACKFILL_JOB_COLLECTION = "adminJobs";
+const OFFER_BACKFILL_JOB_ID = "offerActiveStockBackfillJob";
+const OFFER_BACKFILL_BATCH_SIZE = 10;
+const OFFER_BACKFILL_MAX_FAILURES = 3;
+
+function checkAdminHeaderOnly(req, res) {
+  const expected =
+    (typeof BACKFILL_ADMIN_KEY.value === "function" ? BACKFILL_ADMIN_KEY.value() : "") ||
+    process.env.BACKFILL_ADMIN_KEY ||
+    "";
+
+  const provided = cleanText(req.headers["x-admin-key"]);
+
+  if (!expected || provided !== expected) {
+    res.status(403).json({ ok: false, error: "FORBIDDEN" });
+    return false;
+  }
+
+  return true;
+}
+
+async function updateOfferBackfillJob(update) {
+  await db
+    .collection(OFFER_BACKFILL_JOB_COLLECTION)
+    .doc(OFFER_BACKFILL_JOB_ID)
+    .set(
+      {
+        ...update,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+}
+
+async function acquireOfferBackfillLease(source) {
+  const jobRef = db
+    .collection(OFFER_BACKFILL_JOB_COLLECTION)
+    .doc(OFFER_BACKFILL_JOB_ID);
+
+  const nowMs = Date.now();
+  const leaseOwner = `${source}-${nowMs}`;
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(jobRef);
+
+    if (!snapshot.exists) {
+      return {
+        acquired: false,
+        reason: "missing_job",
+      };
+    }
+
+    const job = snapshot.data() || {};
+
+    if (job.status !== "running") {
+      return {
+        acquired: false,
+        reason: `status_${job.status || "unknown"}`,
+        job,
+      };
+    }
+
+    const leaseUntilMs = Number(job.leaseUntilMs || 0);
+
+    if (leaseUntilMs > nowMs) {
+      return {
+        acquired: false,
+        reason: "locked",
+        leaseUntilMs,
+        job,
+      };
+    }
+
+    transaction.set(
+      jobRef,
+      {
+        leaseOwner,
+        leaseUntilMs: nowMs + 9 * 60 * 1000,
+        lastLeaseAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return {
+      acquired: true,
+      leaseOwner,
+      job: {
+        ...job,
+        leaseOwner,
+      },
+    };
+  });
+}
+
+async function runOfferBackfillOnce({ source = "scheduler" } = {}) {
+  const startedAtMs = Date.now();
+  const acquired = await acquireOfferBackfillLease(source);
+
+  if (!acquired.acquired) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: acquired.reason,
+      leaseUntilMs: acquired.leaseUntilMs || null,
+    };
+  }
+
+  const job = acquired.job || {};
+  const date = cleanText(job.date) || todayParis();
+  const runId = cleanText(job.runId) || `offer_backfill_${date}_${Date.now().toString(36)}`;
+  let currentIndex = Math.max(0, toInt(job.currentDepartmentIndex, 0));
+  let consecutiveFailures = Math.max(0, toInt(job.consecutiveFailures, 0));
+
+  const window = getOfferBackfillWindow(
+    DEPARTMENT_CODES,
+    currentIndex,
+    OFFER_BACKFILL_BATCH_SIZE
+  );
+
+  if (window.done) {
+    await updateOfferBackfillJob({
+      status: "done",
+      currentDepartmentIndex: DEPARTMENT_CODES.length,
+      currentBatchNumber: null,
+      consecutiveFailures: 0,
+      leaseUntilMs: 0,
+      leaseOwner: null,
+      finishedAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastRunSource: source,
+      lastRunDurationMs: Date.now() - startedAtMs,
+    });
+
+    return {
+      ok: true,
+      status: "done",
+      date,
+      runId,
+      completedDepartments: DEPARTMENT_CODES.length,
+    };
+  }
+
+  const results = [];
+
+  try {
+    await updateOfferBackfillJob({
+      status: "running",
+      date,
+      runId,
+      currentBatchNumber: window.batchNumber,
+      currentDepartmentIndex: currentIndex,
+      lastRunSource: source,
+      lastRunStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    for (const departmentCode of window.items) {
+      const result = await importDepartment(date, departmentCode, runId);
+      results.push(result);
+      currentIndex += 1;
+      consecutiveFailures = 0;
+
+      const nextWindow = getOfferBackfillWindow(
+        DEPARTMENT_CODES,
+        currentIndex,
+        OFFER_BACKFILL_BATCH_SIZE
+      );
+
+      await updateOfferBackfillJob({
+        status: "running",
+        currentDepartmentIndex: currentIndex,
+        currentBatchNumber: nextWindow.done ? null : nextWindow.batchNumber,
+        completedDepartmentsCount: currentIndex,
+        consecutiveFailures: 0,
+        errorMessage: null,
+        lastCompletedDepartmentCode: departmentCode,
+        lastDepartmentResult: result,
+        totalOffersImported: admin.firestore.FieldValue.increment(
+          Number(result.storedOffersCount || 0)
+        ),
+        totalOpeningsImported: admin.firestore.FieldValue.increment(
+          Number(result.totalOpenings || 0)
+        ),
+        lastHeartbeatAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+
+    const done = currentIndex >= DEPARTMENT_CODES.length;
+    const nextWindow = getOfferBackfillWindow(
+      DEPARTMENT_CODES,
+      currentIndex,
+      OFFER_BACKFILL_BATCH_SIZE
+    );
+
+    await updateOfferBackfillJob({
+      status: done ? "done" : "running",
+      currentDepartmentIndex: currentIndex,
+      currentBatchNumber: done ? null : nextWindow.batchNumber,
+      completedDepartmentsCount: currentIndex,
+      consecutiveFailures: 0,
+      leaseUntilMs: 0,
+      leaseOwner: null,
+      lastRunSource: source,
+      lastRunBatchNumber: window.batchNumber,
+      lastRunDepartments: results.map((item) => item.departmentCode),
+      lastRunDurationMs: Date.now() - startedAtMs,
+      lastRunFinishedAt: admin.firestore.FieldValue.serverTimestamp(),
+      finishedAt: done ? admin.firestore.FieldValue.serverTimestamp() : null,
+    });
+
+    return {
+      ok: true,
+      status: done ? "done" : "running",
+      date,
+      runId,
+      batchNumber: window.batchNumber,
+      departmentsProcessed: results.length,
+      currentDepartmentIndex: currentIndex,
+      completedDepartmentsCount: currentIndex,
+      results,
+      durationMs: Date.now() - startedAtMs,
+    };
+  } catch (error) {
+    const failure = registerOfferBackfillFailure(
+      consecutiveFailures,
+      OFFER_BACKFILL_MAX_FAILURES
+    );
+
+    const currentDepartmentCode = DEPARTMENT_CODES[currentIndex] || null;
+    const errorMessage = String(error.message || error);
+
+    await updateOfferBackfillJob({
+      status: failure.shouldPause ? "error" : "running",
+      currentDepartmentIndex: currentIndex,
+      currentBatchNumber: window.batchNumber,
+      consecutiveFailures: failure.consecutiveFailures,
+      currentDepartmentCode,
+      errorMessage,
+      errorAt: admin.firestore.FieldValue.serverTimestamp(),
+      leaseUntilMs: 0,
+      leaseOwner: null,
+      lastRunSource: source,
+      lastRunDurationMs: Date.now() - startedAtMs,
+      lastRunResults: results,
+    });
+
+    logger.error("Erreur job rattrapage offres", {
+      source,
+      date,
+      runId,
+      currentDepartmentCode,
+      consecutiveFailures: failure.consecutiveFailures,
+      message: errorMessage,
+    });
+
+    return {
+      ok: false,
+      status: failure.shouldPause ? "error" : "running",
+      date,
+      runId,
+      batchNumber: window.batchNumber,
+      currentDepartmentIndex: currentIndex,
+      currentDepartmentCode,
+      consecutiveFailures: failure.consecutiveFailures,
+      error: errorMessage,
+      results,
+    };
+  }
+}
+
+exports.startOfferBackfillJobHttp = onRequest(
+  {
+    region: REGION,
+    timeoutSeconds: 540,
+    memory: "1GiB",
+    secrets: [API_APPRENTISSAGE_TOKEN, BACKFILL_ADMIN_KEY],
+  },
+  async (req, res) => {
+    setCors(res);
+
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+
+    if (!checkAdminHeaderOnly(req, res)) return;
+
+    const date = cleanText(req.query.date) || todayParis();
+    const force = String(req.query.force || "0") === "1";
+    const jobRef = db
+      .collection(OFFER_BACKFILL_JOB_COLLECTION)
+      .doc(OFFER_BACKFILL_JOB_ID);
+
+    const existing = await jobRef.get();
+    const existingJob = existing.exists ? existing.data() || {} : {};
+
+    if (existingJob.status === "running" && !force) {
+      res.json({
+        ok: true,
+        alreadyRunning: true,
+        job: existingJob,
+      });
+      return;
+    }
+
+    const runId = `offer_backfill_${date}_${Date.now().toString(36)}`;
+
+    await jobRef.set(
+      {
+        status: "running",
+        date,
+        runId,
+        currentDepartmentIndex: 0,
+        currentBatchNumber: 1,
+        completedDepartmentsCount: 0,
+        totalDepartments: DEPARTMENT_CODES.length,
+        totalBatches: Math.ceil(DEPARTMENT_CODES.length / OFFER_BACKFILL_BATCH_SIZE),
+        batchSize: OFFER_BACKFILL_BATCH_SIZE,
+        consecutiveFailures: 0,
+        totalOffersImported: 0,
+        totalOpeningsImported: 0,
+        leaseUntilMs: 0,
+        leaseOwner: null,
+        errorMessage: null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        schemaVersion: "offerActiveStockBackfillJob.v1",
+      },
+      { merge: false }
+    );
+
+    const firstRun = await runOfferBackfillOnce({
+      source: "manual-start",
+    });
+
+    res.json({
+      ok: true,
+      started: true,
+      date,
+      runId,
+      automaticResumeSchedule: "*/5 * * * * Europe/Paris",
+      firstRun,
+    });
+  }
+);
+
+exports.getOfferBackfillJobStatusHttp = onRequest(
+  {
+    region: REGION,
+    timeoutSeconds: 60,
+    memory: "256MiB",
+    secrets: [BACKFILL_ADMIN_KEY],
+  },
+  async (req, res) => {
+    setCors(res);
+
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+
+    if (!checkAdminHeaderOnly(req, res)) return;
+
+    const snapshot = await db
+      .collection(OFFER_BACKFILL_JOB_COLLECTION)
+      .doc(OFFER_BACKFILL_JOB_ID)
+      .get();
+
+    res.json({
+      ok: true,
+      exists: snapshot.exists,
+      job: snapshot.exists ? snapshot.data() : null,
+    });
+  }
+);
+
+exports.resumeOfferBackfillJob = onSchedule(
+  {
+    schedule: "*/5 * * * *",
+    timeZone: "Europe/Paris",
+    region: REGION,
+    timeoutSeconds: 540,
+    memory: "1GiB",
+    secrets: [API_APPRENTISSAGE_TOKEN],
+  },
+  async () => {
+    return runOfferBackfillOnce({
+      source: "schedule-5min",
+    });
+  }
+);
+
 function checkAdmin(req, res) {
   const expected =
     (typeof BACKFILL_ADMIN_KEY.value === "function" ? BACKFILL_ADMIN_KEY.value() : "") ||
@@ -673,6 +1083,145 @@ exports.backfillDailyOffers = onRequest(
     });
   }
 );
+
+async function findRecentPublicOfferSnapshots(departmentCode) {
+  const dates = buildRecentDateCandidates(todayParis(), 14);
+
+  const snapshots = await Promise.all(
+    dates.map(async (date) => {
+      const ref = db
+        .collection("dailyOfferSnapshots")
+        .doc(date)
+        .collection("departments")
+        .doc(departmentCode);
+
+      const snapshot = await ref.get();
+
+      return {
+        date,
+        ref,
+        snapshot,
+      };
+    })
+  );
+
+  return snapshots.filter((item) => item.snapshot.exists);
+}
+
+exports.getPublicDepartmentOffersHttp = onRequest(
+  {
+    region: REGION,
+    timeoutSeconds: 60,
+    memory: "256MiB",
+    cors: true,
+  },
+  async (req, res) => {
+    try {
+      const departmentCode = normalizePublicDepartmentCode(
+        cleanText(req.query.department)
+      );
+
+      if (
+        !isValidPublicDepartmentCode(departmentCode) ||
+        !DEPARTMENT_CODES.includes(departmentCode)
+      ) {
+        res.status(400).json({
+          ok: false,
+          error: "INVALID_DEPARTMENT",
+        });
+        return;
+      }
+
+      const limit = Math.min(Math.max(toInt(req.query.limit, 20), 1), 20);
+      const rawRomeCode = cleanText(req.query.rome);
+      const romeCode = rawRomeCode
+        ? normalizePublicRomeCode(rawRomeCode)
+        : null;
+
+      if (rawRomeCode && !romeCode) {
+        res.status(400).json({
+          ok: false,
+          error: "INVALID_ROME",
+        });
+        return;
+      }
+
+      const recentSnapshots = await findRecentPublicOfferSnapshots(departmentCode);
+      const latest = recentSnapshots[0] || null;
+
+      if (!latest) {
+        res.status(404).json({
+          ok: false,
+          exists: false,
+          departmentCode,
+          data: null,
+        });
+        return;
+      }
+
+      const meta = latest.snapshot.data() || {};
+      const activeRunId = cleanText(meta.activeRunId);
+
+      if (!activeRunId) {
+        res.status(404).json({
+          ok: false,
+          exists: false,
+          departmentCode,
+          data: null,
+        });
+        return;
+      }
+
+      const offersSnapshot = await latest.ref
+        .collection("offers")
+        .where("runId", "==", activeRunId)
+        .limit(1000)
+        .get();
+
+      const payload = buildPublicOffersPayload({
+        date: latest.date,
+        departmentCode,
+        strictSummary: meta.strictSummary || {},
+        offers: offersSnapshot.docs.map((document) => document.data()),
+        limit,
+        romeCode,
+      });
+
+      const history = buildPublicOffersHistory(
+        recentSnapshots.map((item) => ({
+          date: item.date,
+          strictSummary: item.snapshot.data()?.strictSummary || null,
+        })),
+        romeCode
+      );
+
+      payload.history = history;
+      payload.trends = {
+        offers: computePublicTrend(history.map((item) => item.totalOffers)),
+        openings: computePublicTrend(history.map((item) => item.totalOpenings)),
+      };
+
+      res.set("Cache-Control", "public, max-age=300, s-maxage=600");
+      res.json({
+        ok: true,
+        exists: true,
+        departmentCode,
+        ...(romeCode ? { romeCode } : {}),
+        data: payload,
+      });
+    } catch (error) {
+      logger.error("getPublicDepartmentOffersHttp error", {
+        message: error?.message || String(error),
+      });
+
+      res.status(500).json({
+        ok: false,
+        error: "PUBLIC_OFFERS_UNAVAILABLE",
+      });
+    }
+  }
+);
+
 
 exports.adminDailyOffers = onRequest(
   {

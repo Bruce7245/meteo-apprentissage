@@ -1,0 +1,141 @@
+name: Diagnose offer identifiers
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/diagnose-offer-identifiers.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Diagnose Sarthe offer identifiers
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Load API token
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud secrets versions access latest \
+            --secret=API_APPRENTISSAGE_TOKEN \
+            --project=meteo-apprentissage)"
+          test -n "$TOKEN"
+          echo "::add-mask::$TOKEN"
+          printf 'API_APPRENTISSAGE_TOKEN=%s\n' "$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Diagnose identifiers from API
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            --retry 2 \
+            -H "Accept: application/json" \
+            -H "Authorization: Bearer $API_APPRENTISSAGE_TOKEN" \
+            "https://api.apprentissage.beta.gouv.fr/api/job/v1/search?departements=72" \
+            -o /tmp/jobs.json
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const payload = JSON.parse(fs.readFileSync('/tmp/jobs.json', 'utf8'));
+          const jobs = (Array.isArray(payload.jobs) ? payload.jobs : [])
+            .filter((job) => String(job?.identifier?.partner_label || '').trim() !== 'recruteurs_lba');
+
+          const legacyKey = (job) => {
+            const id = job?.identifier || {};
+            return id.id || `${id.partner_label || 'unknown'}:${id.partner_job_id || 'unknown'}`;
+          };
+
+          const partnerKey = (job) => {
+            const id = job?.identifier || {};
+            return `${id.partner_label || 'unknown'}:${id.partner_job_id || id.id || 'unknown'}`;
+          };
+
+          function stats(keyFn) {
+            const counts = new Map();
+            for (const job of jobs) {
+              const key = String(keyFn(job));
+              counts.set(key, (counts.get(key) || 0) + 1);
+            }
+            const duplicates = Array.from(counts.entries())
+              .filter(([, count]) => count > 1)
+              .sort((a, b) => b[1] - a[1]);
+            return {
+              total: jobs.length,
+              unique: counts.size,
+              duplicateRows: jobs.length - counts.size,
+              duplicateGroups: duplicates.length,
+              largestDuplicateCounts: duplicates.slice(0, 20).map(([, count]) => count),
+            };
+          }
+
+          const legacy = stats(legacyKey);
+          const partner = stats(partnerKey);
+
+          const idToPartners = new Map();
+          for (const job of jobs) {
+            const id = String(job?.identifier?.id || '');
+            if (!id) continue;
+            if (!idToPartners.has(id)) idToPartners.set(id, new Set());
+            idToPartners.get(id).add(String(job?.identifier?.partner_label || 'unknown'));
+          }
+
+          const crossPartnerIds = Array.from(idToPartners.values())
+            .filter((partners) => partners.size > 1);
+
+          const locations = jobs.map((job) => job?.workplace?.location || {});
+          const locationStats = {
+            withZipcode: locations.filter((location) => location?.zipcode).length,
+            withPostalCode: locations.filter((location) => location?.postal_code || location?.postcode).length,
+            withDepartment: locations.filter((location) => location?.department).length,
+            addressString: locations.filter((location) => typeof location?.address === 'string').length,
+            addressObject: locations.filter(
+              (location) =>
+                location?.address &&
+                typeof location.address === 'object' &&
+                !Array.isArray(location.address)
+            ).length,
+            withCity: locations.filter((location) => location?.city).length,
+            departmentSamples: Array.from(
+              new Set(
+                locations
+                  .map((location) => location?.department)
+                  .filter(Boolean)
+                  .map(String)
+              )
+            ).slice(0, 10),
+            addressSamples: locations
+              .map((location) => location?.address)
+              .filter(Boolean)
+              .slice(0, 5),
+          };
+
+          const result = {
+            jobs: jobs.length,
+            legacyIdKey: legacy,
+            partnerScopedKey: partner,
+            identifierIdsUsedAcrossMultiplePartners: crossPartnerIds.length,
+            missingPartnerJobId: jobs.filter((job) => !job?.identifier?.partner_job_id).length,
+            missingIdentifierId: jobs.filter((job) => !job?.identifier?.id).length,
+            locationStats,
+          };
+
+          console.log(JSON.stringify(result, null, 2));
+
+          if (legacy.unique === jobs.length) {
+            throw new Error('Legacy identifier.id is already unique; duplicate hypothesis rejected');
+          }
+          NODE

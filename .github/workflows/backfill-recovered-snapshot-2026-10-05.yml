@@ -1,0 +1,290 @@
+name: Backfill recovered snapshot 2026-10-05
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/backfill-recovered-snapshot-2026-10-05.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backfill-recovered-snapshot-2026-10-05
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    name: Recover Oct 5 snapshot and calibration draft
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Validate scripts
+        run: |
+          node --check functions/scripts/backfill-recovered-historical-snapshot.cjs
+          node --check functions/build-occupation-context-stats.cjs
+          node --check functions/scripts/build-occupation-calibration.cjs
+
+      - name: Run Functions unit tests
+        run: npm run test:unit --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Dry-run Oct 5 recovered snapshot
+        working-directory: functions
+        run: |
+          node scripts/backfill-recovered-historical-snapshot.cjs \
+            --date=2026-10-05 \
+            --recover-from-date=2026-10-06 \
+            --min-recovery=0.95
+
+      - name: Write Oct 5 recovered snapshot
+        working-directory: functions
+        run: |
+          node scripts/backfill-recovered-historical-snapshot.cjs \
+            --date=2026-10-05 \
+            --recover-from-date=2026-10-06 \
+            --min-recovery=0.95 \
+            --write
+
+      - name: Build occupation contexts for Oct 5
+        working-directory: functions
+        run: node build-occupation-context-stats.cjs 2026-10-05
+
+      - name: Verify Oct 5 context coverage
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+
+          (async () => {
+            const [importDoc, contextRun, contexts] = await Promise.all([
+              db.collection('apiImports')
+                .doc('historical_recovery_2026-10-05')
+                .get(),
+              db.collection('occupationContextStatsRuns')
+                .doc('2026-10-05')
+                .get(),
+              db.collection('occupationContextStats')
+                .where('date', '==', '2026-10-05')
+                .get(),
+            ]);
+
+            if (!importDoc.exists || !contextRun.exists) {
+              throw new Error(
+                'Missing Oct 5 import metadata or context run'
+              );
+            }
+
+            const imported = importDoc.data() || {};
+            const run = contextRun.data() || {};
+            const expectedDepartments =
+              Number(imported.eligibleDepartments || 0);
+
+            const result = {
+              ok:
+                expectedDepartments > 0 &&
+                run.status === 'ready' &&
+                Number(run.departmentsProcessed || 0) ===
+                  expectedDepartments &&
+                contexts.size > 0,
+              expectedDepartments,
+              ineligibleDepartments:
+                Number(imported.ineligibleDepartments || 0),
+              departmentsProcessed:
+                Number(run.departmentsProcessed || 0),
+              occupationContexts: contexts.size,
+            };
+
+            console.log(JSON.stringify(result, null, 2));
+
+            if (!result.ok) {
+              throw new Error(
+                'Oct 5 context verification failed: ' +
+                  JSON.stringify(result)
+              );
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Hide Oct 5 recovered snapshots from public history
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+
+          (async () => {
+            const departmentsRef = db
+              .collection('dailyOfferSnapshots')
+              .doc('2026-10-05')
+              .collection('departments');
+
+            const departments = await departmentsRef.get();
+
+            let batch = db.batch();
+            let operations = 0;
+
+            for (const doc of departments.docs) {
+              batch.set(
+                doc.ref,
+                {
+                  activeRunId:
+                    admin.firestore.FieldValue.delete(),
+                  strictSummary:
+                    admin.firestore.FieldValue.delete(),
+                  qualityStatus:
+                    'calibration_only_quarantined',
+                  hiddenFromPublicHistoryAt:
+                    admin.firestore.FieldValue.serverTimestamp(),
+                },
+                { merge: true }
+              );
+
+              operations += 1;
+
+              if (operations >= 400) {
+                await batch.commit();
+                batch = db.batch();
+                operations = 0;
+              }
+            }
+
+            if (operations > 0) {
+              await batch.commit();
+            }
+
+            const verify = await departmentsRef.get();
+            let activePointers = 0;
+            let strictSummaries = 0;
+
+            for (const doc of verify.docs) {
+              const data = doc.data() || {};
+              if (data.activeRunId) activePointers += 1;
+              if (data.strictSummary) strictSummaries += 1;
+            }
+
+            const result = {
+              ok:
+                activePointers === 0 &&
+                strictSummaries === 0,
+              departments: verify.size,
+              activePointers,
+              strictSummaries,
+              contextsPreserved: true,
+            };
+
+            console.log(JSON.stringify(result, null, 2));
+
+            if (!result.ok) {
+              throw new Error(
+                'Oct 5 public-history quarantine failed: ' +
+                  JSON.stringify(result)
+              );
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+      - name: Build updated calibration draft
+        working-directory: functions
+        run: node scripts/build-occupation-calibration.cjs
+
+      - name: Verify calibration uses Oct 5 and Oct 6 only
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+
+          if (!admin.apps.length) {
+            admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = admin.firestore();
+
+          (async () => {
+            const configs = await db
+              .collection('occupationVigilanceConfigs')
+              .get();
+
+            const drafts = configs.docs
+              .map((doc) => ({
+                id: doc.id,
+                ...(doc.data() || {}),
+              }))
+              .filter(
+                (item) =>
+                  item.status === 'draft' &&
+                  item?.calibration?.windowStart ===
+                    '2026-10-05' &&
+                  item?.calibration?.windowEnd ===
+                    '2026-10-06'
+              );
+
+            if (drafts.length === 0) {
+              throw new Error(
+                'No Oct 5-6 calibration draft found'
+              );
+            }
+
+            drafts.sort((a, b) =>
+              String(b.id).localeCompare(String(a.id))
+            );
+
+            const latest = drafts[0];
+
+            console.log(JSON.stringify({
+              ok: true,
+              version: latest.id,
+              status: latest.status,
+              romeCount: Object.keys(
+                latest.baselines || {}
+              ).length,
+              calibrationWindow: {
+                start:
+                  latest.calibration.windowStart,
+                end:
+                  latest.calibration.windowEnd,
+              },
+              explicitlyValidated: false,
+            }, null, 2));
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE

@@ -1,0 +1,146 @@
+name: Validate daily offer snapshot bridge
+
+on:
+  push:
+    branches:
+      - feat/occupation-search-37
+    paths:
+      - .github/workflows/validate-daily-offer-snapshot-bridge.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Import and verify department 72
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Load admin key from Secret Manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          BACKFILL_ADMIN_KEY="$(gcloud secrets versions access latest \
+            --secret=BACKFILL_ADMIN_KEY \
+            --project=meteo-apprentissage)"
+          test -n "$BACKFILL_ADMIN_KEY"
+          echo "::add-mask::$BACKFILL_ADMIN_KEY"
+          printf 'BACKFILL_ADMIN_KEY=%s\n' "$BACKFILL_ADMIN_KEY" >> "$GITHUB_ENV"
+
+      - name: Import department 72 into shared daily snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            --retry 2 \
+            --max-time 540 \
+            -H "x-admin-key: $BACKFILL_ADMIN_KEY" \
+            "https://importdailyoffershttp-n3mitilivq-ew.a.run.app?date=2026-10-06&department=72&write=1&publish=0&delayMs=0" \
+            -o /tmp/import-response.json
+          node -e "const r=require('/tmp/import-response.json'); console.log(JSON.stringify({ok:r.ok,targetDate:r.targetDate,departmentsCount:r.departmentsCount,successCount:r.successCount,errorCount:r.errorCount,rows:r.rows},null,2)); if(!r.ok||r.errorCount!==0||r.successCount!==1) process.exit(1)"
+
+      - name: Verify Firestore occupation snapshot
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const { initializeApp, getApps } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
+
+          if (getApps().length === 0) {
+            initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = getFirestore();
+
+          (async () => {
+            const ref = db
+              .collection('dailyOfferSnapshots')
+              .doc('2026-10-06')
+              .collection('departments')
+              .doc('72');
+
+            const snapshot = await ref.get();
+            if (!snapshot.exists) {
+              throw new Error('dailyOfferSnapshots/2026-10-06/departments/72 missing');
+            }
+
+            const meta = snapshot.data() || {};
+            if (!meta.activeRunId) throw new Error('activeRunId missing');
+            if (!meta.strictSummary || typeof meta.strictSummary !== 'object') {
+              throw new Error('strictSummary missing');
+            }
+
+            const offersSnapshot = await ref
+              .collection('offers')
+              .where('runId', '==', meta.activeRunId)
+              .get();
+
+            const offers = offersSnapshot.docs.map((doc) => doc.data() || {});
+            const withRome = offers.filter(
+              (offer) => Array.isArray(offer.romeCodes) && offer.romeCodes.length > 0
+            );
+            const inDepartment = offers.filter(
+              (offer) => offer.locationQuality === 'in_department'
+            );
+
+            if (offers.length !== Number(meta.storedOffersCount || 0)) {
+              throw new Error(
+                `storedOffersCount mismatch: meta=${meta.storedOffersCount}, docs=${offers.length}`
+              );
+            }
+
+            if (offers.length > 0 && withRome.length === 0) {
+              throw new Error('No active offer contains a ROME code');
+            }
+
+            const strictOffers = Number(meta.strictSummary.totalOffers || 0);
+            if (offers.length > 0 && strictOffers === 0) {
+              throw new Error('All active offers are outside/unknown for requested department');
+            }
+            if (strictOffers !== inDepartment.length) {
+              throw new Error(
+                `strictSummary mismatch: meta=${strictOffers}, inDepartment=${inDepartment.length}`
+              );
+            }
+
+            console.log(JSON.stringify({
+              ok: true,
+              date: meta.date,
+              departmentCode: meta.departmentCode,
+              activeRunId: meta.activeRunId,
+              storedOffersCount: meta.storedOffersCount,
+              strictOffers,
+              strictOpenings: meta.strictSummary.totalOpenings,
+              inDepartmentOffers: inDepartment.length,
+              offersWithRome: withRome.length,
+              sampleRomeCodes: withRome.slice(0, 5).map((offer) => offer.romeCodes),
+              schemaVersion: meta.schemaVersion,
+            }, null, 2));
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
