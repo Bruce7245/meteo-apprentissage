@@ -1,10 +1,12 @@
 import {
+  addDoc,
   collection,
   getDocs,
   query,
+  serverTimestamp,
   where,
 } from 'firebase/firestore';
-import { db } from '../firebase.js';
+import { auth, db } from '../firebase.js';
 import { normalizeRomeCode } from '../utils/occupationUtils.js';
 
 function timestampMillis(value) {
@@ -174,4 +176,118 @@ export async function getOccupationAnalysisForRome(romeCode) {
         levels.orange + levels.red,
     },
   };
+}
+
+
+const ACTIVATE_OCCUPATION_VIGILANCE_CONFIG_ENDPOINT =
+  'https://europe-west1-meteo-apprentissage.cloudfunctions.net/activateOccupationVigilanceConfigHttp';
+
+function cleanConfigForDraft(config) {
+  if (!config || typeof config !== 'object') {
+    throw new Error('Configuration candidate manquante.');
+  }
+
+  const {
+    id,
+    createdAt,
+    validatedAt,
+    validatedBy,
+    sourceDraftId,
+    baseConfigVersion,
+    schemaVersion,
+    ...rest
+  } = config;
+
+  void id;
+  void createdAt;
+  void validatedAt;
+  void validatedBy;
+  void sourceDraftId;
+  void baseConfigVersion;
+  void schemaVersion;
+
+  return {
+    ...rest,
+    status: 'draft',
+  };
+}
+
+export async function saveOccupationVigilanceConfigDraft(
+  candidateConfig,
+  baseConfigVersion
+) {
+  const user = auth.currentUser;
+
+  if (!user) {
+    throw new Error('Session administrateur absente.');
+  }
+
+  const cleanBaseVersion = String(baseConfigVersion || '').trim();
+
+  if (!cleanBaseVersion) {
+    throw new Error('Version de base manquante.');
+  }
+
+  const reference = await addDoc(
+    collection(db, 'occupationVigilanceConfigDrafts'),
+    {
+      status: 'draft',
+      baseConfigVersion: cleanBaseVersion,
+      candidateConfig: cleanConfigForDraft(candidateConfig),
+      createdByUid: user.uid,
+      createdByEmail: user.email || null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      schemaVersion: 'occupationVigilanceConfigDraft.v1',
+    }
+  );
+
+  return {
+    id: reference.id,
+    baseConfigVersion: cleanBaseVersion,
+  };
+}
+
+export async function activateOccupationVigilanceConfigDraft(draftId) {
+  const user = auth.currentUser;
+
+  if (!user) {
+    throw new Error('Session administrateur absente.');
+  }
+
+  const token = await user.getIdToken();
+  const response = await fetch(
+    ACTIVATE_OCCUPATION_VIGILANCE_CONFIG_ENDPOINT,
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: 'Bearer ' + token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        draftId: String(draftId || '').trim(),
+      }),
+    }
+  );
+
+  let payload = null;
+
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const error = new Error(
+      payload?.error ||
+        'Impossible d’activer la configuration métier.'
+    );
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  return payload || {};
 }
