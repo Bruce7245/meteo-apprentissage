@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  FiArrowDown,
-  FiArrowUp,
   FiBarChart2,
   FiClock,
   FiCopy,
