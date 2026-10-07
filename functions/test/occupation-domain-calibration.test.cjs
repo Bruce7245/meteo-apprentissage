@@ -103,11 +103,59 @@ test('buildDomainCalibration excludes a non-positive domain baseline', () => {
   });
 });
 
+test('buildDomainCalibration derives the baseline from positive normalized observations', () => {
+  const result = calibration.buildDomainCalibration(
+    historyFor('G12', [0, 0, 0, 0, 2, 4, 8, 16]),
+    {
+      minimumSamplesPerDomain: 8,
+      minimumPositiveSamplesPerDomain: 4,
+      minimumTotalSamples: 8,
+    }
+  );
+
+  assert.equal(result.eligibleForValidation, true);
+  assert.equal(
+    result.config.baselines.G12
+      .expectedOffersAtReferencePopulation,
+    6
+  );
+  assert.equal(
+    result.config.calibration.minimumPositiveSamplesPerDomain,
+    4
+  );
+});
+
+test('buildDomainCalibration excludes domains with too few positive observations', () => {
+  const history = [
+    ...historyFor('G12', [0, 0, 0, 0, 2, 4, 8, 16]),
+    ...historyFor('D11', [0, 0, 0, 0, 0, 0, 2, 4]),
+  ];
+
+  const result = calibration.buildDomainCalibration(history, {
+    minimumSamplesPerDomain: 8,
+    minimumPositiveSamplesPerDomain: 4,
+    minimumTotalSamples: 8,
+  });
+
+  assert.equal(result.eligibleForValidation, true);
+  assert.ok(result.config.baselines.G12);
+  assert.equal(result.config.baselines.D11, undefined);
+  assert.deepEqual(
+    result.diagnostics.excludedDomainCodes.D11,
+    {
+      reason: 'INSUFFICIENT_POSITIVE_SAMPLES',
+      samplesCount: 8,
+      positiveSamplesCount: 2,
+    }
+  );
+});
+
 test('buildDomainCalibration keeps zero-offer samples out of ratio quantiles', () => {
   const result = calibration.buildDomainCalibration(
     historyFor('G12', [0, 0, 0, 0, 2, 4, 8, 16]),
     {
       minimumSamplesPerDomain: 8,
+      minimumPositiveSamplesPerDomain: 4,
       minimumTotalSamples: 8,
     }
   );

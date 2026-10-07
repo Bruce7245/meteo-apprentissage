@@ -3,9 +3,12 @@ name: Prepare ROME domain calibration
 on:
   push:
     branches:
-      - feat/occupation-search-37
+      - feat/rome-domain-vigilance-51
     paths:
       - .github/workflows/prepare-rome-domain-calibration.yml
+      - functions/lib/occupation-domain-calibration.cjs
+      - functions/config/occupation-domain-vigilance.v1.schema.json
+      - functions/test/occupation-domain-calibration.test.cjs
 
 permissions:
   contents: read
@@ -177,7 +180,15 @@ jobs:
               throw new Error('No Oct 5-6 domain calibration draft found');
             }
 
-            drafts.sort((a, b) => String(b.id).localeCompare(String(a.id)));
+            const createdAtMillis = (value) =>
+              typeof value?.toMillis === 'function' ? value.toMillis() : 0;
+
+            drafts.sort(
+              (a, b) =>
+                createdAtMillis(b.createdAt) -
+                  createdAtMillis(a.createdAt) ||
+                String(b.id).localeCompare(String(a.id))
+            );
             const latest = drafts[0];
 
             const result = {
@@ -202,6 +213,110 @@ jobs:
 
             if (!result.ok) {
               throw new Error('Domain calibration draft verification failed: ' + JSON.stringify(result));
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+
+      - name: Simulate latest draft on Oct 6
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const admin = require('firebase-admin');
+          const { computeOccupationDomainVigilance } = require('./lib/occupation-domain-vigilance.cjs');
+
+          if (!admin.apps.length) admin.initializeApp({ projectId: 'meteo-apprentissage' });
+          const db = admin.firestore();
+
+          const millis = (value) =>
+            typeof value?.toMillis === 'function' ? value.toMillis() : 0;
+
+          (async () => {
+            const [configsSnapshot, contextsSnapshot] = await Promise.all([
+              db.collection('occupationDomainVigilanceConfigs')
+                .where('status', '==', 'draft')
+                .get(),
+              db.collection('occupationDomainContextStats')
+                .where('date', '==', '2026-10-06')
+                .get(),
+            ]);
+
+            const drafts = configsSnapshot.docs
+              .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
+              .filter((item) =>
+                item?.calibration?.windowStart === '2026-10-05' &&
+                item?.calibration?.windowEnd === '2026-10-06'
+              )
+              .sort(
+                (a, b) =>
+                  millis(b.createdAt) - millis(a.createdAt) ||
+                  String(b.id).localeCompare(String(a.id))
+              );
+
+            if (!drafts.length) throw new Error('No Oct 5-6 draft');
+
+            const draft = drafts[0];
+            const config = { ...draft, version: draft.id, status: 'validated' };
+            const levels = {
+              green: 0,
+              yellow: 0,
+              orange: 0,
+              red: 0,
+              insufficient_data: 0,
+            };
+            const confidence = { high: 0, medium: 0, low: 0 };
+            const reasons = new Map();
+            let failedPairs = 0;
+
+            for (const doc of contextsSnapshot.docs) {
+              const context = doc.data() || {};
+              try {
+                const result = computeOccupationDomainVigilance(
+                  {
+                    ...context,
+                    domainKnown: true,
+                    recentTrend: { status: 'unknown' },
+                    seasonality: { status: 'unavailable', factor: 1 },
+                  },
+                  config
+                );
+
+                levels[result.publishedLevel] += 1;
+                confidence[result.confidenceLevel] += 1;
+
+                for (const reason of result.reasonCodes || []) {
+                  reasons.set(reason, (reasons.get(reason) || 0) + 1);
+                }
+              } catch {
+                failedPairs += 1;
+              }
+            }
+
+            const result = {
+              ok: failedPairs === 0 && contextsSnapshot.size === 11110,
+              configVersion: draft.id,
+              calibratedDomains: Object.keys(draft.baselines || {}).length,
+              totalOfficialDomains: 110,
+              totalPairs: contextsSnapshot.size,
+              levels,
+              confidence,
+              failedPairs,
+              topReasons: [...reasons.entries()]
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 12)
+                .map(([code, count]) => ({ code, count })),
+              writesPerformed: 0,
+              explicitlyValidated: false,
+              published: false,
+            };
+
+            console.log(JSON.stringify(result, null, 2));
+
+            if (!result.ok) {
+              throw new Error('Domain draft simulation failed: ' + JSON.stringify(result));
             }
           })().catch((error) => {
             console.error(error);
