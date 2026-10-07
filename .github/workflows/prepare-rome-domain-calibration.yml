@@ -3,9 +3,12 @@ name: Prepare ROME domain calibration
 on:
   push:
     branches:
-      - feat/occupation-search-37
+      - feat/rome-domain-vigilance-51
     paths:
       - .github/workflows/prepare-rome-domain-calibration.yml
+      - functions/lib/occupation-domain-calibration.cjs
+      - functions/config/occupation-domain-vigilance.v1.schema.json
+      - functions/test/occupation-domain-calibration.test.cjs
 
 permissions:
   contents: read
