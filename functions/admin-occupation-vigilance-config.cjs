@@ -3,6 +3,10 @@ const {
   computeOccupationVigilance,
   validateOccupationVigilanceConfig,
 } = require('./lib/occupation-vigilance.cjs');
+const {
+  bearerToken,
+  authenticateAdminRequest,
+} = require('./lib/admin-auth.cjs');
 
 function text(value) {
   if (value === null || value === undefined) return '';
@@ -83,13 +87,6 @@ function timestampMillis(value) {
 
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
-}
-
-function bearerToken(request) {
-  const header = text(request?.get?.('authorization'));
-
-  if (!header.toLowerCase().startsWith('bearer ')) return '';
-  return header.slice(7).trim();
 }
 
 function stableManualVersion(config) {
@@ -692,50 +689,6 @@ async function previewOccupationVigilanceConfig({
           : [],
     };
   }
-}
-
-async function authenticateAdminRequest({
-  request,
-  response,
-  auth,
-  db,
-} = {}) {
-  const token = bearerToken(request);
-
-  if (!token) {
-    response.status(401).json({
-      ok: false,
-      error: 'Authentification requise',
-    });
-    return null;
-  }
-
-  let decoded;
-
-  try {
-    decoded = await auth.verifyIdToken(token);
-  } catch {
-    response.status(401).json({
-      ok: false,
-      error: 'Jeton Firebase invalide',
-    });
-    return null;
-  }
-
-  const userSnap = await db
-    .collection('users')
-    .doc(decoded.uid)
-    .get();
-
-  if (!userSnap.exists || userSnap.data()?.role !== 'admin') {
-    response.status(403).json({
-      ok: false,
-      error: 'Droits administrateur requis',
-    });
-    return null;
-  }
-
-  return decoded;
 }
 
 async function handleOccupationVigilanceConfigPreview({
