@@ -246,7 +246,8 @@ export default function AdminVigilanceConfigEditor({
 
       setMessage(
         'Configuration activée : ' +
-          (result.version || 'nouvelle version')
+          (result.version || 'nouvelle version') +
+          '. Elle sera appliquée au prochain calcul ; la carte publiée actuelle reste inchangée.'
       );
       setDraftId('');
       onActivated?.(result);
@@ -281,7 +282,8 @@ export default function AdminVigilanceConfigEditor({
       <p className="date-line">
         Les valeurs sont enregistrées en brouillon. L’activation est une action
         séparée et crée une nouvelle configuration validée ; aucune couleur
-        n’est modifiée manuellement.
+        n’est modifiée manuellement et la carte actuelle n’est pas recalculée
+        immédiatement.
       </p>
 
       <div className="admin-config-field-grid">
