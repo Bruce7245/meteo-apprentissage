@@ -22,18 +22,20 @@ function buildForm(config) {
     minimumGreenActiveOffers: numberValue(
       config?.minimumGreenActiveOffers
     ),
-    historicalWeight: percentValue(config?.historicalTrend?.weight),
+    historicalWeight: percentValue(
+      config?.historicalTrend?.weight ?? 0.5
+    ),
     historicalStableBand: percentValue(
-      config?.historicalTrend?.stableBand
+      config?.historicalTrend?.stableBand ?? 0.05
     ),
     historicalMinimumYears: numberValue(
-      config?.historicalTrend?.minimumYears
+      config?.historicalTrend?.minimumYears ?? 3
     ),
     historicalMinFactor: numberValue(
-      config?.historicalTrend?.minFactor
+      config?.historicalTrend?.minFactor ?? 0.9
     ),
     historicalMaxFactor: numberValue(
-      config?.historicalTrend?.maxFactor
+      config?.historicalTrend?.maxFactor ?? 1.1
     ),
     trainingPressurePerFormation: numberValue(
       config?.coefficients?.trainingPressurePerFormation
@@ -136,6 +138,10 @@ function candidateFromForm(config, form) {
   return {
     ...config,
     status: 'draft',
+    calculationVersion:
+      config?.historicalTrend
+        ? config.calculationVersion
+        : 'occupationVigilance.v1.2',
     thresholds: {
       ...config.thresholds,
       greenMinRatio: Number(form.greenRatio) / 100,
