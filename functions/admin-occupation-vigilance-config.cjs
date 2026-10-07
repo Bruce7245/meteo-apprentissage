@@ -47,6 +47,34 @@ function stableManualVersion(config) {
   return `occupationVigilance.manual.${hash}`;
 }
 
+function manualCandidateFromDraft(activeConfig, draftConfig) {
+  const active = activeConfig || {};
+  const draft = draftConfig || {};
+
+  return {
+    ...active,
+    version: active.version,
+    status: 'draft',
+    calculationVersion:
+      draft.historicalTrend
+        ? 'occupationVigilance.v1.2'
+        : active.calculationVersion,
+    minimumGreenActiveOffers:
+      draft.minimumGreenActiveOffers ??
+      active.minimumGreenActiveOffers,
+    thresholds: {
+      ...(active.thresholds || {}),
+      ...(draft.thresholds || {}),
+    },
+    historicalTrend:
+      draft.historicalTrend || active.historicalTrend,
+    coefficients: {
+      ...(active.coefficients || {}),
+      ...(draft.coefficients || {}),
+    },
+  };
+}
+
 async function latestValidatedConfig(db) {
   const snapshot = await db
     .collection('occupationVigilanceConfigs')
@@ -127,8 +155,20 @@ async function activateOccupationVigilanceDraft({
     };
   }
 
+  if (!activeConfig) {
+    return {
+      ok: false,
+      status: 409,
+      errorCode: 'ACTIVE_CONFIG_MISSING',
+      error: 'Aucune configuration active ne peut servir de base.',
+    };
+  }
+
   const candidate = {
-    ...(draft.candidateConfig || {}),
+    ...manualCandidateFromDraft(
+      activeConfig,
+      draft.candidateConfig || {}
+    ),
     status: 'validated',
   };
 
@@ -295,6 +335,7 @@ async function handleOccupationVigilanceConfigActivation({
 module.exports = {
   bearerToken,
   stableManualVersion,
+  manualCandidateFromDraft,
   activateOccupationVigilanceDraft,
   handleOccupationVigilanceConfigActivation,
 };
