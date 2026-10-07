@@ -1884,3 +1884,79 @@ h2 {
     grid-template-columns: 1fr;
   }
 }
+
+
+.admin-version-history {
+  margin-top: 32px;
+  padding-top: 26px;
+  border-top: 1px solid rgba(29, 53, 87, 0.1);
+}
+
+.admin-active-version-pill {
+  margin-left: 8px;
+}
+
+.admin-version-compare-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 20px 0;
+}
+
+.admin-version-compare-controls label {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-version-compare-controls label > span {
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.admin-version-compare-controls select {
+  min-height: 44px;
+  border: 1px solid #cad3df;
+  border-radius: 10px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: #172033;
+  font: inherit;
+  font-weight: 750;
+}
+
+.admin-version-compare-controls select:focus {
+  border-color: #55708f;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(85, 112, 143, 0.12);
+}
+
+.admin-version-diff-table tbody tr.is-changed {
+  background: #fffdf5;
+}
+
+.admin-version-diff-table tbody tr.is-changed td:first-child {
+  font-weight: 900;
+  color: #6b4f11;
+}
+
+.admin-version-impact {
+  margin-top: 22px;
+  padding: 20px;
+  border: 1px solid rgba(69, 123, 157, 0.22);
+  border-radius: 18px;
+  background: #fbfdff;
+}
+
+.admin-version-impact-table td,
+.admin-version-impact-table th,
+.admin-version-list-table td,
+.admin-version-list-table th {
+  vertical-align: middle;
+}
+
+@media (max-width: 720px) {
+  .admin-version-compare-controls {
+    grid-template-columns: 1fr;
+  }
+}
