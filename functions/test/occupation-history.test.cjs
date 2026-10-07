@@ -170,3 +170,49 @@ test('computeSeasonalityProfile rejects invalid negative monthly values', () => 
     /Invalid monthly offer count/
   );
 });
+
+
+test('computeInterannualTrendProfile detects a persistent same-period decline across previous years', () => {
+  assert.equal(typeof history.computeInterannualTrendProfile, 'function');
+
+  const result = history.computeInterannualTrendProfile([
+    { month: '2023-10', offersCount: 100 },
+    { month: '2024-10', offersCount: 80 },
+    { month: '2025-10', offersCount: 60 },
+    { month: '2024-09', offersCount: 500 },
+    { month: '2025-09', offersCount: 500 },
+  ], {
+    asOfMonth: '2026-10',
+    minYears: 3,
+    stableBand: 0.05,
+    weight: 0.5,
+    minFactor: 0.9,
+    maxFactor: 1.1,
+  });
+
+  assert.equal(result.status, 'active');
+  assert.equal(result.direction, 'degrading');
+  assert.equal(result.sampleYears, 3);
+  assert.equal(result.latestHistoricalYear, 2025);
+  assert.equal(result.latestHistoricalOffers, 60);
+  assert.equal(result.previousHistoricalOffers, 80);
+  assert.equal(result.lastYearChangeRatio, -0.25);
+  assert.equal(result.factor, 1.1);
+  assert.equal(result.normalMedian, 80);
+});
+
+test('computeInterannualTrendProfile stays descriptive until enough comparable years exist', () => {
+  const result = history.computeInterannualTrendProfile([
+    { month: '2024-10', offersCount: 40 },
+    { month: '2025-10', offersCount: 44 },
+  ], {
+    asOfMonth: '2026-10',
+    minYears: 3,
+  });
+
+  assert.equal(result.status, 'descriptive');
+  assert.equal(result.direction, 'improving');
+  assert.equal(result.sampleYears, 2);
+  assert.equal(result.factor, 1);
+  assert.equal(result.lastYearChangeRatio, 0.1);
+});
