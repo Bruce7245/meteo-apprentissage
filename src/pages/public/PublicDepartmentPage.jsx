@@ -14,7 +14,9 @@ import { getPublicFormationDepartmentStats } from '../../services/formationPubli
 import { getPublicDepartmentOffers } from '../../services/publicOffersService.js';
 import { getPublicOccupationDepartment } from '../../services/occupationPublicService.js';
 import {
+  buildOccupationDomainMapUrl,
   buildOccupationMapUrl,
+  getOccupationNavigationState,
 } from '../../utils/occupationUtils.js';
 import {
   getOccupationReasonLabel,
@@ -196,8 +198,10 @@ function PublicOfferCards({
 export default function PublicDepartmentPage({ departmentCode }) {
   const code = normalizeDepartmentCode(departmentCode);
   const modeState = resolveDepartmentPublicMode(window.location.search);
+  const navigation = getOccupationNavigationState(window.location.search);
   const publicMode = modeState.mode;
   const romeCode = modeState.romeCode;
+  const domainCode = navigation.domainCode;
   const occupationMode = publicMode === 'occupation';
   const invalidOccupationMode = publicMode === 'invalid_occupation';
 
@@ -390,7 +394,7 @@ export default function PublicDepartmentPage({ departmentCode }) {
     return (
       <PublicLayout>
         <nav className="breadcrumb" aria-label="Fil d’Ariane">
-          <a href="/metiers">Métiers & formations</a>
+          <a href="/metiers">Métiers</a>
           <span aria-hidden="true">/</span>
           <span>Sélection invalide</span>
         </nav>
@@ -415,12 +419,12 @@ export default function PublicDepartmentPage({ departmentCode }) {
         <a
           href={
             occupationMode
-              ? buildOccupationMapUrl(romeCode)
+              ? buildOccupationMapUrl(romeCode, domainCode)
               : '/'
           }
         >
           {occupationMode
-            ? 'Métiers & formations'
+            ? 'Métiers'
             : 'France'}
         </a>
         <span aria-hidden="true">/</span>
@@ -504,9 +508,13 @@ export default function PublicDepartmentPage({ departmentCode }) {
           </p>
           <a
             className="text-link"
-            href={buildOccupationMapUrl(romeCode)}
+            href={
+              domainCode
+                ? buildOccupationDomainMapUrl(domainCode)
+                : buildOccupationMapUrl(romeCode, domainCode)
+            }
           >
-            Revenir à la carte métier
+            Revenir aux métiers du secteur
           </a>
         </section>
       ) : null}
@@ -729,7 +737,7 @@ export default function PublicDepartmentPage({ departmentCode }) {
                       className="text-link"
                       href={
                         occupationMode
-                          ? buildOccupationMapUrl(romeCode)
+                          ? buildOccupationMapUrl(romeCode, domainCode)
                           : '/'
                       }
                     >

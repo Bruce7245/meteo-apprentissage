@@ -20,10 +20,12 @@ function repositoryFixture(overrides = {}) {
       {
         romeCode: 'G1204',
         label: 'Educateur sportif / Educatrice sportive',
+        dataStatus: 'available',
       },
       {
         romeCode: 'G1205',
         label: "Opérateur / Opératrice d'attraction",
+        dataStatus: 'insufficient_data',
       },
     ],
     indexRunId: 'index-run',
@@ -69,6 +71,15 @@ function repositoryFixture(overrides = {}) {
     },
     async loadDomain(runId, domainCode) {
       return domainCode === 'G12' ? domain : null;
+    },
+    async loadOccupationAvailability() {
+      return {
+        date: '2026-10-06',
+        byRomeCode: {
+          G1204: true,
+          G1205: false,
+        },
+      };
     },
     ...overrides,
   };
@@ -146,6 +157,7 @@ test('getPublicOccupationDomainOccupations returns only approved occupation fiel
     ok: true,
     exists: true,
     asOfDate: '2026-10-06',
+    occupationDataDate: '2026-10-06',
     domainCode: 'G12',
     domainLabel: "Animation d'activités de loisirs",
     majorDomainCode: 'G',
@@ -155,15 +167,42 @@ test('getPublicOccupationDomainOccupations returns only approved occupation fiel
       {
         romeCode: 'G1204',
         label: 'Educateur sportif / Educatrice sportive',
+        dataStatus: 'available',
       },
       {
         romeCode: 'G1205',
         label: "Opérateur / Opératrice d'attraction",
+        dataStatus: 'insufficient_data',
       },
     ],
   });
   assert.equal(JSON.stringify(result.body).includes('generatedAt'), false);
   assert.equal(JSON.stringify(result.body).includes('schemaVersion'), false);
+});
+
+test('getPublicOccupationDomainOccupations keeps unavailable occupations visible but disabled by status', async () => {
+  const result =
+    await publicDomains.getPublicOccupationDomainOccupations(
+      repositoryFixture({
+        async loadOccupationAvailability() {
+          return {
+            date: '2026-10-06',
+            byRomeCode: {
+              G1204: false,
+              G1205: false,
+            },
+          };
+        },
+      }),
+      'G12'
+    );
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.occupations.length, 2);
+  assert.deepEqual(
+    result.body.occupations.map((item) => item.dataStatus),
+    ['insufficient_data', 'insufficient_data']
+  );
 });
 
 test('getPublicOccupationDomainOccupations rejects invalid syntax before lookup', async () => {

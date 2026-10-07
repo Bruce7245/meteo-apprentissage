@@ -7730,6 +7730,71 @@ const publicOccupationDomainRepository = {
       ? snapshot.data() || {}
       : null;
   },
+
+  async loadOccupationAvailability(romeCodes) {
+    const published =
+      await loadCurrentPublishedOccupationRun();
+
+    if (!published.ok) {
+      return {
+        date: null,
+        byRomeCode: {},
+      };
+    }
+
+    const codes = Array.from(
+      new Set(
+        (Array.isArray(romeCodes) ? romeCodes : [])
+          .map((value) =>
+            String(value || '').trim().toUpperCase()
+          )
+          .filter((value) =>
+            /^[A-Z][0-9]{4}$/.test(value)
+          )
+      )
+    );
+
+    const byRomeCode = Object.fromEntries(
+      codes.map((romeCode) => [romeCode, false])
+    );
+
+    for (let index = 0; index < codes.length; index += 30) {
+      const chunk = codes.slice(index, index + 30);
+
+      if (chunk.length === 0) continue;
+
+      const snapshot = await db
+        .collection('publicOccupationVigilanceMaps')
+        .doc(published.runId)
+        .collection('entries')
+        .where('romeCode', 'in', chunk)
+        .get();
+
+      for (const document of snapshot.docs) {
+        const data = document.data() || {};
+        const romeCode = String(
+          data.romeCode || ''
+        )
+          .trim()
+          .toUpperCase();
+
+        if (
+          romeCode in byRomeCode &&
+          (
+            data.dataAvailable === true ||
+            data.publishedLevel !== 'insufficient_data'
+          )
+        ) {
+          byRomeCode[romeCode] = true;
+        }
+      }
+    }
+
+    return {
+      date: published.date || null,
+      byRomeCode,
+    };
+  },
 };
 
 function publicOccupationRequesterKey(request) {
