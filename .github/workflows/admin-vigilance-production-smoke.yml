@@ -1,0 +1,392 @@
+name: Production smoke admin vigilance
+
+on:
+  push:
+    branches:
+      - chore/admin-vigilance-prod-smoke-64
+    paths:
+      - .github/workflows/admin-vigilance-production-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Read-only production smoke
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Run read-only business smoke against production
+        working-directory: functions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const { initializeApp, getApps } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
+          const adminVigilance = require('./admin-occupation-vigilance-config.cjs');
+
+          if (getApps().length === 0) {
+            initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = getFirestore();
+
+          function millis(value) {
+            if (!value) return 0;
+            if (typeof value.toMillis === 'function') return value.toMillis();
+
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+          }
+
+          async function count(name) {
+            const snap = await db.collection(name).count().get();
+            return snap.data().count;
+          }
+
+          async function latestRun() {
+            const snap = await db.collection('occupationVigilanceRuns').get();
+
+            return snap.docs
+              .map((doc) => ({ id: doc.id, ...doc.data() }))
+              .filter((run) =>
+                ['ready', 'published'].includes(String(run.status || ''))
+              )
+              .sort((a, b) => {
+                const dateCompare = String(b.date || '').localeCompare(
+                  String(a.date || '')
+                );
+
+                if (dateCompare !== 0) return dateCompare;
+
+                return (
+                  Math.max(
+                    millis(b.publishedAt),
+                    millis(b.updatedAt),
+                    millis(b.startedAt)
+                  ) -
+                  Math.max(
+                    millis(a.publishedAt),
+                    millis(a.updatedAt),
+                    millis(a.startedAt)
+                  )
+                );
+              })[0] || null;
+          }
+
+          function hasFiniteSourceValue(value) {
+            if (value === null || value === undefined || value === '') {
+              return false;
+            }
+
+            return Number.isFinite(Number(value));
+          }
+
+          (async () => {
+            const draftsBefore = await count('occupationVigilanceConfigDrafts');
+
+            const activeConfig =
+              await adminVigilance.getActiveOccupationVigilanceConfigForAdmin(db);
+
+            if (!activeConfig?.version) {
+              throw new Error('Active vigilance config is missing');
+            }
+
+            const run = await latestRun();
+
+            if (!run) {
+              throw new Error('No ready/published occupation vigilance run');
+            }
+
+            const sampleSnap = await db
+              .collection('occupationVigilanceSnapshots')
+              .doc(run.id)
+              .collection('entries')
+              .limit(500)
+              .get();
+
+            if (sampleSnap.empty) {
+              throw new Error('Latest vigilance run has no entries');
+            }
+
+            const entries = sampleSnap.docs.map((doc) => doc.data() || {});
+            const missingExpectedEntry = entries.find(
+              (row) =>
+                /^[A-Z][0-9]{4}$/.test(String(row.romeCode || '')) &&
+                !hasFiniteSourceValue(row.expectedOffers)
+            );
+            const availableExpectedEntry = entries.find(
+              (row) =>
+                /^[A-Z][0-9]{4}$/.test(String(row.romeCode || '')) &&
+                hasFiniteSourceValue(row.expectedOffers)
+            );
+
+            if (!missingExpectedEntry) {
+              throw new Error(
+                'No sample with unavailable expectedOffers found in first 500 entries'
+              );
+            }
+
+            if (!availableExpectedEntry) {
+              throw new Error(
+                'No sample with available expectedOffers found in first 500 entries'
+              );
+            }
+
+            const missingRome = String(missingExpectedEntry.romeCode);
+            const availableRome = String(availableExpectedEntry.romeCode);
+
+            const missingAnalysis =
+              await adminVigilance.getOccupationAnalysisForAdmin({
+                db,
+                romeCode: missingRome,
+              });
+
+            const availableAnalysis =
+              await adminVigilance.getOccupationAnalysisForAdmin({
+                db,
+                romeCode: availableRome,
+              });
+
+            for (const [label, analysis] of [
+              ['missing expected', missingAnalysis],
+              ['available expected', availableAnalysis],
+            ]) {
+              if (
+                !analysis?.ok ||
+                !analysis?.summary ||
+                analysis.summary.departmentsCount < 1
+              ) {
+                throw new Error(label + ' occupation analysis is not usable');
+              }
+            }
+
+            const missingSummary = missingAnalysis.summary;
+            const availableSummary = availableAnalysis.summary;
+
+            if (
+              missingSummary.expectedOffersAvailableCount === 0 &&
+              missingSummary.totalExpectedOffers !== null
+            ) {
+              throw new Error(
+                'Unavailable expected values must produce totalExpectedOffers=null'
+              );
+            }
+
+            if (
+              missingSummary.expectedOffersAvailableCount > 0 &&
+              !Number.isFinite(Number(missingSummary.totalExpectedOffers))
+            ) {
+              throw new Error(
+                'Partially available expected values must produce a numeric total'
+              );
+            }
+
+            if (
+              availableSummary.expectedOffersAvailableCount < 1 ||
+              !Number.isFinite(Number(availableSummary.totalExpectedOffers))
+            ) {
+              throw new Error(
+                'Available expected values are not aggregated correctly'
+              );
+            }
+
+            const history =
+              await adminVigilance.listOccupationVigilanceConfigHistory(db);
+
+            if (
+              !Array.isArray(history?.versions) ||
+              history.versions.length < 1
+            ) {
+              throw new Error('Vigilance config history is empty');
+            }
+
+            let comparison = null;
+
+            if (history.versions.length >= 2) {
+              comparison =
+                await adminVigilance.compareOccupationVigilanceVersions({
+                  leftVersion: history.versions[1].version,
+                  rightVersion: history.versions[0].version,
+                  romeCode: availableRome,
+                  db,
+                });
+
+              if (!comparison?.ok || !comparison?.summary) {
+                throw new Error('Version comparison failed');
+              }
+            }
+
+            const preview =
+              await adminVigilance.previewOccupationVigilanceConfig({
+                candidateConfig: {},
+                romeCode: availableRome,
+                baseConfigVersion: activeConfig.version,
+                db,
+              });
+
+            if (!preview?.ok || !preview?.summary) {
+              throw new Error('Neutral preview failed');
+            }
+
+            const draftsAfter = await count('occupationVigilanceConfigDrafts');
+
+            if (draftsAfter !== draftsBefore) {
+              throw new Error(
+                'Read-only smoke unexpectedly changed draft count: ' +
+                  draftsBefore +
+                  ' -> ' +
+                  draftsAfter
+              );
+            }
+
+            console.log(JSON.stringify({
+              activeConfigVersion: activeConfig.version,
+              activeCalculationVersion:
+                activeConfig.calculationVersion || null,
+              latestRunId: run.id,
+              latestRunDate: run.date || null,
+              unavailableCase: {
+                romeCode: missingRome,
+                romeLabel: missingAnalysis.romeLabel || null,
+                departmentsAnalyzed: missingSummary.departmentsCount,
+                expectedOffersAvailableCount:
+                  missingSummary.expectedOffersAvailableCount,
+                missingExpectedOffersCount:
+                  missingSummary.missingExpectedOffersCount,
+                totalExpectedOffers:
+                  missingSummary.totalExpectedOffers,
+                expectedCoverageRatio:
+                  missingSummary.expectedCoverageRatio,
+              },
+              availableCase: {
+                romeCode: availableRome,
+                romeLabel: availableAnalysis.romeLabel || null,
+                departmentsAnalyzed: availableSummary.departmentsCount,
+                expectedOffersAvailableCount:
+                  availableSummary.expectedOffersAvailableCount,
+                missingExpectedOffersCount:
+                  availableSummary.missingExpectedOffersCount,
+                totalExpectedOffers:
+                  availableSummary.totalExpectedOffers,
+                expectedCoverageRatio:
+                  availableSummary.expectedCoverageRatio,
+              },
+              configVersions: history.versions.length,
+              comparisonExecuted: Boolean(comparison),
+              neutralPreviewChangedDepartments:
+                preview.summary.changedCount,
+              draftsBefore,
+              draftsAfter,
+            }, null, 2));
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Verify public ROME search in production
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          body_file="$(mktemp)"
+          status="$(curl --silent --show-error             --output "$body_file"             --write-out "%{http_code}"             --max-time 30             --get             --data-urlencode "q=D1108"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getPublicOccupationSearchHttp")"
+
+          echo "Public occupation search -> HTTP $status"
+
+          if [ "$status" != "200" ]; then
+            cat "$body_file"
+            exit 1
+          fi
+
+          node - "$body_file" <<'NODE'
+          const fs = require('node:fs');
+          const payload = JSON.parse(
+            fs.readFileSync(process.argv[2], 'utf8')
+          );
+
+          if (!payload?.ok || !Array.isArray(payload?.results)) {
+            throw new Error('Invalid occupation search payload');
+          }
+
+          const exact = payload.results.find(
+            (item) => item?.romeCode === 'D1108'
+          );
+
+          console.log(JSON.stringify({
+            query: payload.query,
+            asOfDate: payload.asOfDate || null,
+            resultsCount: payload.results.length,
+            exactRomeFound: Boolean(exact),
+            exactRomeLabel: exact?.label || null,
+          }, null, 2));
+
+          if (!exact) {
+            throw new Error('D1108 is missing from search results');
+          }
+          NODE
+
+      - name: Verify Hosting production routes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for url in             "https://meteo-apprentissage.web.app/"             "https://meteo-apprentissage.web.app/admin/secteurs"
+          do
+            status="$(curl --silent --show-error               --location               --output /dev/null               --write-out "%{http_code}"               --max-time 30               "$url")"
+
+            echo "$url -> HTTP $status"
+
+            if [ "$status" != "200" ]; then
+              exit 1
+            fi
+          done
+
+      - name: Smoke summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Production smoke — admin vigilance"
+            echo
+            echo "- Read-only production validation."
+            echo "- Missing expected values checked against null semantics."
+            echo "- Available expected values checked against numeric aggregation."
+            echo "- Active config loaded."
+            echo "- Version history loaded."
+            echo "- Neutral simulation executed."
+            echo "- Public ROME search tested."
+            echo "- Hosting routes tested."
+            echo "- Draft count checked before/after."
+            echo
+            echo "### Explicitly excluded"
+            echo "- No draft creation."
+            echo "- No config activation."
+            echo "- No scheduler."
+            echo "- No vigilance run."
+            echo "- No map publication."
+          } >> "$GITHUB_STEP_SUMMARY"
