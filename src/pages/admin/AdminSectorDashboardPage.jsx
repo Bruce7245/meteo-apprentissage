@@ -242,14 +242,27 @@ export default function AdminSectorDashboardPage() {
 
   return (
     <AdminLayout>
-      <section className="admin-page-heading">
-        <p className="kicker">Analyse métier</p>
-        <h1>Moteur de vigilance métiers</h1>
-        <p>
-          La carte nationale reste automatique. Ici, chaque couleur peut être
-          reliée aux offres observées, au niveau attendu, aux seuils locaux et
-          aux facteurs historiques du département.
-        </p>
+      <section className="admin-console-page-head">
+        <div>
+          <p className="admin-console-eyebrow">Analyse métier</p>
+          <h1>Moteur de vigilance métiers</h1>
+          <p>
+            Reliez chaque couleur aux offres observées, au niveau attendu,
+            aux seuils locaux et aux facteurs historiques du département.
+          </p>
+        </div>
+
+        <div className="admin-console-page-status">
+          <span className="admin-console-live-dot" />
+          <span>
+            <strong>
+              {configLoading
+                ? 'Configuration…'
+                : config?.version || config?.id || 'Version indisponible'}
+            </strong>
+            <small>Configuration active du moteur</small>
+          </span>
+        </div>
       </section>
 
       <section className="panel admin-occupation-search-panel">
