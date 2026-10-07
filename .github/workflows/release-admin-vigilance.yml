@@ -1,0 +1,181 @@
+name: Release admin vigilance métier
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_release:
+        description: "Type RELEASE to confirm production release"
+        required: true
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release admin vigilance
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - name: Enforce main and explicit confirmation
+        shell: bash
+        env:
+          CONFIRM_RELEASE: ${{ inputs.confirm_release }}
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Release refused from branch: $GITHUB_REF_NAME" >&2
+            echo "Expected: main" >&2
+            exit 1
+          fi
+
+          if [ "$CONFIRM_RELEASE" != "RELEASE" ]; then
+            echo "Production release requires confirm_release=RELEASE" >&2
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Validate frontend
+        run: npm run build
+
+      - name: Validate backend syntax
+        run: |
+          set -euo pipefail
+          node --check functions/index.js
+          node --check functions/admin-occupation-vigilance-config.cjs
+          node --check functions/lib/occupation-search.cjs
+          node --check functions/lib/occupation-vigilance.cjs
+
+      - name: Run targeted backend tests
+        working-directory: functions
+        run: |
+          set -euo pipefail
+          node --test             test/admin-occupation-vigilance-config.test.cjs             test/occupation-vigilance.test.cjs
+
+      - name: Validate Firestore rule scope
+        run: |
+          set -euo pipefail
+          test -s firestore.rules
+          grep -q "occupationVigilanceConfigs" firestore.rules
+          grep -q "occupationVigilanceConfigDrafts" firestore.rules
+          grep -q "occupationVigilanceConfigAudit" firestore.rules
+          grep -q "occupationHistoryStats" firestore.rules
+          grep -q "occupationContextStats" firestore.rules
+          grep -q "occupationVigilanceRuns" firestore.rules
+          grep -q "occupationVigilanceSnapshots" firestore.rules
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Deploy admin vigilance Functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy             --project meteo-apprentissage             --only "functions:previewOccupationVigilanceConfigHttp,functions:getOccupationVigilanceConfigHistoryHttp,functions:compareOccupationVigilanceConfigsHttp,functions:activateOccupationVigilanceConfigHttp"             --non-interactive
+
+      - name: Verify Functions are reachable and protected
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_401() {
+            name="$1"
+            url="$2"
+            body_file="$(mktemp)"
+            status="$(curl --silent --show-error               --output "$body_file"               --write-out "%{http_code}"               --max-time 30               --request POST               --header "Content-Type: application/json"               --data '{}'               "$url")"
+
+            echo "$name -> HTTP $status"
+            cat "$body_file"
+            echo
+
+            if [ "$status" != "401" ]; then
+              echo "Unexpected status for $name: expected 401 without auth." >&2
+              exit 1
+            fi
+          }
+
+          check_401             "previewOccupationVigilanceConfigHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/previewOccupationVigilanceConfigHttp"
+
+          check_401             "getOccupationVigilanceConfigHistoryHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getOccupationVigilanceConfigHistoryHttp"
+
+          check_401             "compareOccupationVigilanceConfigsHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/compareOccupationVigilanceConfigsHttp"
+
+          check_401             "activateOccupationVigilanceConfigHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/activateOccupationVigilanceConfigHttp"
+
+      - name: Deploy Firestore rules
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy             --project meteo-apprentissage             --only firestore:rules             --non-interactive
+
+      - name: Deploy Hosting
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy             --project meteo-apprentissage             --only hosting             --non-interactive
+
+      - name: Verify Hosting
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for url in             "https://meteo-apprentissage.web.app/"             "https://meteo-apprentissage.web.app/admin/secteurs"
+          do
+            body_file="$(mktemp)"
+            status="$(curl --silent --show-error               --location               --output "$body_file"               --write-out "%{http_code}"               --max-time 30               "$url")"
+
+            echo "$url -> HTTP $status"
+
+            if [ "$status" != "200" ]; then
+              echo "Unexpected Hosting status for $url" >&2
+              exit 1
+            fi
+
+            test -s "$body_file"
+          done
+
+      - name: Release summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Admin vigilance release"
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Branch: \`$GITHUB_REF_NAME\`"
+            echo
+            echo "### Intended scope"
+            echo "- 4 admin vigilance Functions"
+            echo "- Firestore rules"
+            echo "- Firebase Hosting"
+            echo
+            echo "### Explicitly excluded"
+            echo "- No runOccupationVigilanceHttp call"
+            echo "- No scheduler modification"
+            echo "- No configuration activation"
+            echo "- No vigilance recalculation"
+            echo "- No map republication"
+          } >> "$GITHUB_STEP_SUMMARY"
