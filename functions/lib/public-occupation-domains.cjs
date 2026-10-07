@@ -274,13 +274,45 @@ async function getPublicOccupationDomainOccupations(
     };
   }
 
+  let occupationAvailability = null;
+
+  if (
+    typeof repository.loadOccupationAvailability === 'function'
+  ) {
+    occupationAvailability =
+      await repository.loadOccupationAvailability(
+        domain.occupations.map(
+          (occupation) => occupation.romeCode
+        )
+      );
+  }
+
+  const availabilityByRome =
+    occupationAvailability?.byRomeCode &&
+    typeof occupationAvailability.byRomeCode === 'object'
+      ? occupationAvailability.byRomeCode
+      : {};
+
+  const occupations = domain.occupations.map(
+    (occupation) => ({
+      ...occupation,
+      dataStatus:
+        availabilityByRome[occupation.romeCode] === true
+          ? 'available'
+          : 'insufficient_data',
+    })
+  );
+
   return {
     status: 200,
     body: {
       ok: true,
       exists: true,
       asOfDate: published.asOfDate,
+      occupationDataDate:
+        cleanText(occupationAvailability?.date) || null,
       ...domain,
+      occupations,
     },
   };
 }
