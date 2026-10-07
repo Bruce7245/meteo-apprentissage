@@ -715,6 +715,20 @@ function isoTimestamp(value) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+function baselineFingerprint(baselines) {
+  const entries = Object.entries(
+    baselines && typeof baselines === 'object'
+      ? baselines
+      : {}
+  ).sort(([left], [right]) => left.localeCompare(right));
+
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(entries))
+    .digest('hex')
+    .slice(0, 12);
+}
+
 function occupationConfigSummary(config = {}) {
   return {
     version: text(config.version || config.id),
@@ -726,10 +740,24 @@ function occupationConfigSummary(config = {}) {
     },
     baseConfigVersion: text(config.baseConfigVersion) || null,
     sourceDraftId: text(config.sourceDraftId) || null,
+    referencePopulation15To29:
+      Number.isFinite(Number(config.referencePopulation15To29))
+        ? Number(config.referencePopulation15To29)
+        : null,
+    expectedOffersFloor:
+      Number.isFinite(Number(config.expectedOffersFloor))
+        ? Number(config.expectedOffersFloor)
+        : null,
     minimumGreenActiveOffers:
       Number.isFinite(Number(config.minimumGreenActiveOffers))
         ? Number(config.minimumGreenActiveOffers)
         : null,
+    baselineCount: Object.keys(config.baselines || {}).length,
+    baselineFingerprint: baselineFingerprint(config.baselines),
+    factorBounds:
+      config.factorBounds && typeof config.factorBounds === 'object'
+        ? { ...config.factorBounds }
+        : {},
     thresholds:
       config.thresholds && typeof config.thresholds === 'object'
         ? { ...config.thresholds }
@@ -1125,6 +1153,7 @@ module.exports = {
   snapshotToVigilanceInput,
   simulateOccupationRows,
   previewOccupationVigilanceConfig,
+  baselineFingerprint,
   occupationConfigSummary,
   listOccupationVigilanceConfigHistory,
   compareOccupationConfigRows,
