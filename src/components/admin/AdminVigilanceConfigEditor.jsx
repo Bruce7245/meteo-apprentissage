@@ -1,8 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import {
   activateOccupationVigilanceConfigDraft,
+  previewOccupationVigilanceConfig,
   saveOccupationVigilanceConfigDraft,
 } from '../../services/adminVigilanceModelService.js';
+import {
+  getLevelCss,
+  getLevelLabel,
+} from '../../utils/levelUtils.js';
 
 function percentValue(value) {
   const number = Number(value);
@@ -12,6 +17,36 @@ function percentValue(value) {
 function numberValue(value) {
   const number = Number(value);
   return Number.isFinite(number) ? String(number) : '';
+}
+
+function formatNumber(value, maximumFractionDigits = 1) {
+  if (value === null || value === undefined || value === '') return '—';
+
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+
+  return new Intl.NumberFormat('fr-FR', {
+    maximumFractionDigits,
+  }).format(number);
+}
+
+function formatPercent(value) {
+  if (value === null || value === undefined || value === '') return '—';
+
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+
+  return new Intl.NumberFormat('fr-FR', {
+    style: 'percent',
+    maximumFractionDigits: 1,
+  }).format(number);
+}
+
+function directionLabel(direction) {
+  if (direction === 'worsened') return 'Vigilance renforcée';
+  if (direction === 'improved') return 'Vigilance allégée';
+  if (direction === 'changed') return 'État modifié';
+  return 'Inchangé';
 }
 
 function buildForm(config) {
@@ -171,21 +206,30 @@ function candidateFromForm(config, form) {
 
 export default function AdminVigilanceConfigEditor({
   config,
+  romeCode = '',
   onActivated,
 }) {
   const [form, setForm] = useState(() => buildForm(config));
   const [draftId, setDraftId] = useState('');
   const [saving, setSaving] = useState(false);
   const [activating, setActivating] = useState(false);
+  const [simulating, setSimulating] = useState(false);
+  const [simulation, setSimulation] = useState(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
   useEffect(() => {
     setForm(buildForm(config));
     setDraftId('');
+    setSimulation(null);
     setError('');
     setMessage('');
   }, [config?.version]);
+
+  useEffect(() => {
+    setSimulation(null);
+    setError('');
+  }, [romeCode]);
 
   function update(key, value) {
     setForm((current) => ({
@@ -193,7 +237,60 @@ export default function AdminVigilanceConfigEditor({
       [key]: value,
     }));
     setDraftId('');
+    setSimulation(null);
     setMessage('');
+  }
+
+  async function simulate() {
+    const errors = validateForm(form);
+
+    if (errors.length > 0) {
+      setError(errors.join(' '));
+      setMessage('');
+      setSimulation(null);
+      return;
+    }
+
+    if (!romeCode) {
+      setError(
+        'Choisissez d’abord un métier ROME dans l’analyse pour simuler l’impact.'
+      );
+      setMessage('');
+      setSimulation(null);
+      return;
+    }
+
+    try {
+      setSimulating(true);
+      setError('');
+      setMessage('');
+
+      const candidate = candidateFromForm(config, form);
+      const result = await previewOccupationVigilanceConfig(
+        candidate,
+        romeCode
+      );
+
+      setSimulation(result);
+      setMessage(
+        result.summary?.changedCount > 0
+          ? String(result.summary.changedCount) +
+              ' département(s) changeraient de niveau avec ces réglages.'
+          : 'Aucun département ne changerait de niveau avec ces réglages.'
+      );
+    } catch (currentError) {
+      const details = currentError?.payload?.validationErrors;
+
+      setSimulation(null);
+      setError(
+        Array.isArray(details) && details.length > 0
+          ? details.join(' ')
+          : currentError?.message ||
+              'Impossible de simuler cette configuration.'
+      );
+    } finally {
+      setSimulating(false);
+    }
   }
 
   async function saveDraft() {
@@ -506,11 +603,200 @@ export default function AdminVigilanceConfigEditor({
         </div>
       ) : null}
 
+      {simulation?.summary ? (
+        <section className="admin-config-simulation">
+          <div className="section-heading">
+            <div>
+              <p className="kicker">Simulation sans publication</p>
+              <h3>
+                Impact sur {simulation.romeLabel || simulation.romeCode}
+              </h3>
+            </div>
+            <span className="soft-pill">
+              Run du {simulation.run?.date || '—'}
+            </span>
+          </div>
+
+          <div className="admin-simulation-summary-grid">
+            <div>
+              <span>Départements</span>
+              <strong>
+                {formatNumber(
+                  simulation.summary.departmentsCount,
+                  0
+                )}
+              </strong>
+            </div>
+            <div>
+              <span>Changements</span>
+              <strong>
+                {formatNumber(simulation.summary.changedCount, 0)}
+              </strong>
+            </div>
+            <div>
+              <span>Vigilance renforcée</span>
+              <strong>
+                {formatNumber(simulation.summary.worsenedCount, 0)}
+              </strong>
+            </div>
+            <div>
+              <span>Vigilance allégée</span>
+              <strong>
+                {formatNumber(simulation.summary.improvedCount, 0)}
+              </strong>
+            </div>
+          </div>
+
+          <div className="table-wrapper">
+            <table className="simple-table admin-simulation-level-table">
+              <thead>
+                <tr>
+                  <th>Niveau</th>
+                  <th>Actuel</th>
+                  <th>Proposé</th>
+                  <th>Écart</th>
+                </tr>
+              </thead>
+              <tbody>
+                {['green', 'yellow', 'orange', 'red', 'insufficient_data'].map(
+                  (level) => {
+                    const current =
+                      Number(
+                        simulation.summary.currentLevels?.[level]
+                      ) || 0;
+                    const proposed =
+                      Number(
+                        simulation.summary.proposedLevels?.[level]
+                      ) || 0;
+
+                    return (
+                      <tr key={level}>
+                        <td>
+                          <span
+                            className={
+                              'vigilance-badge vigilance-' +
+                              getLevelCss(level)
+                            }
+                          >
+                            {getLevelLabel(level)}
+                          </span>
+                        </td>
+                        <td>{formatNumber(current, 0)}</td>
+                        <td>{formatNumber(proposed, 0)}</td>
+                        <td>
+                          {proposed - current > 0 ? '+' : ''}
+                          {formatNumber(proposed - current, 0)}
+                        </td>
+                      </tr>
+                    );
+                  }
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {simulation.summary.changedCount > 0 ? (
+            <div className="table-wrapper">
+              <table className="simple-table admin-simulation-change-table">
+                <thead>
+                  <tr>
+                    <th>Département</th>
+                    <th>Actuel</th>
+                    <th>Proposé</th>
+                    <th>Attendu actuel</th>
+                    <th>Attendu proposé</th>
+                    <th>Ratio proposé</th>
+                    <th>Effet</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {simulation.rows
+                    .filter((row) => row.changed)
+                    .map((row) => (
+                      <tr key={row.departmentCode}>
+                        <td>
+                          <strong>
+                            {row.departmentName || row.departmentCode}
+                          </strong>
+                          <div className="date-line">
+                            {row.departmentCode}
+                          </div>
+                        </td>
+                        <td>
+                          <span
+                            className={
+                              'vigilance-badge vigilance-' +
+                              getLevelCss(row.currentLevel)
+                            }
+                          >
+                            {getLevelLabel(row.currentLevel)}
+                          </span>
+                        </td>
+                        <td>
+                          <span
+                            className={
+                              'vigilance-badge vigilance-' +
+                              getLevelCss(row.proposedLevel)
+                            }
+                          >
+                            {getLevelLabel(row.proposedLevel)}
+                          </span>
+                        </td>
+                        <td>
+                          {formatNumber(
+                            row.currentExpectedOffers,
+                            1
+                          )}
+                        </td>
+                        <td>
+                          {formatNumber(
+                            row.proposedExpectedOffers,
+                            1
+                          )}
+                        </td>
+                        <td>
+                          {formatPercent(
+                            row.proposedObservedVsExpectedRatio
+                          )}
+                        </td>
+                        <td>{directionLabel(row.direction)}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="date-line">
+              Les couleurs resteraient identiques dans tous les départements
+              pour le métier sélectionné.
+            </p>
+          )}
+
+          <p className="date-line">
+            Simulation uniquement : aucune configuration, aucun snapshot et
+            aucune carte publique ne sont modifiés.
+          </p>
+        </section>
+      ) : null}
+
       <div className="admin-config-actions">
         <button
           type="button"
+          className="admin-detail-button"
+          disabled={simulating || saving || activating || !romeCode}
+          onClick={simulate}
+        >
+          {simulating
+            ? 'Simulation…'
+            : romeCode
+              ? 'Simuler sur ' + romeCode
+              : 'Choisir un métier pour simuler'}
+        </button>
+
+        <button
+          type="button"
           className="primary-button"
-          disabled={saving || activating}
+          disabled={saving || activating || simulating}
           onClick={saveDraft}
         >
           {saving ? 'Enregistrement…' : 'Enregistrer comme brouillon'}
@@ -519,7 +805,7 @@ export default function AdminVigilanceConfigEditor({
         <button
           type="button"
           className="admin-detail-button"
-          disabled={!draftId || saving || activating}
+          disabled={!draftId || saving || activating || simulating}
           onClick={activateDraft}
         >
           {activating
