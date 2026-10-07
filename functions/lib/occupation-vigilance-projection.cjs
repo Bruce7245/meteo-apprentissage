@@ -20,6 +20,8 @@ const PRIVATE_KEYS = new Set([
   'secretCredential',
   'factors',
   'confidenceScore',
+  'effectiveThresholds',
+  'interannualTrend',
 ]);
 
 function text(value) {
