@@ -9,6 +9,74 @@ function text(value) {
   return String(value).trim();
 }
 
+function optionalFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function summarizeOccupationAnalysisRows(rows = []) {
+  const levels = {
+    green: 0,
+    yellow: 0,
+    orange: 0,
+    red: 0,
+    insufficient_data: 0,
+  };
+
+  let highConfidenceCount = 0;
+  let totalObservedOffers = 0;
+  let observedOffersAvailableCount = 0;
+  let totalExpectedOffers = 0;
+  let expectedOffersAvailableCount = 0;
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const level = text(row?.publishedLevel || 'insufficient_data');
+
+    if (level in levels) levels[level] += 1;
+    if (row?.confidenceLevel === 'high') highConfidenceCount += 1;
+
+    const observed = optionalFiniteNumber(row?.activeOffersCount);
+    const expected = optionalFiniteNumber(row?.expectedOffers);
+
+    if (observed !== null) {
+      totalObservedOffers += observed;
+      observedOffersAvailableCount += 1;
+    }
+
+    if (expected !== null) {
+      totalExpectedOffers += expected;
+      expectedOffersAvailableCount += 1;
+    }
+  }
+
+  const departmentsCount = Array.isArray(rows) ? rows.length : 0;
+
+  return {
+    departmentsCount,
+    totalObservedOffers:
+      observedOffersAvailableCount > 0 ? totalObservedOffers : null,
+    observedOffersAvailableCount,
+    missingObservedOffersCount:
+      departmentsCount - observedOffersAvailableCount,
+    totalExpectedOffers:
+      expectedOffersAvailableCount > 0 ? totalExpectedOffers : null,
+    expectedOffersAvailableCount,
+    missingExpectedOffersCount:
+      departmentsCount - expectedOffersAvailableCount,
+    expectedCoverageRatio:
+      departmentsCount > 0
+        ? expectedOffersAvailableCount / departmentsCount
+        : null,
+    highConfidenceCount,
+    levels,
+    elevatedDepartments: levels.orange + levels.red,
+  };
+}
+
 function timestampMillis(value) {
   if (!value) return 0;
   if (typeof value.toMillis === 'function') return value.toMillis();
@@ -1045,6 +1113,274 @@ async function compareOccupationVigilanceVersions({
   }
 }
 
+async function getActiveOccupationVigilanceConfigForAdmin(db) {
+  const config = await latestValidatedConfig(db);
+
+  return config ? occupationConfigSummary(config) : null;
+}
+
+async function getOccupationAnalysisForAdmin({
+  db,
+  romeCode,
+} = {}) {
+  const rome = normalizeRomeCode(romeCode);
+
+  if (!rome) {
+    return {
+      ok: false,
+      status: 400,
+      errorCode: 'ROME_REQUIRED',
+      error: 'Un métier ROME valide est requis.',
+    };
+  }
+
+  const run = await latestReadyOccupationRun(db);
+
+  if (!run) {
+    return {
+      ok: true,
+      status: 200,
+      run: null,
+      romeCode: rome,
+      rows: [],
+      summary: null,
+    };
+  }
+
+  const snapshot = await db
+    .collection('occupationVigilanceSnapshots')
+    .doc(run.id)
+    .collection('entries')
+    .where('romeCode', '==', rome)
+    .get();
+
+  const levelRankForAdmin = {
+    red: 0,
+    orange: 1,
+    yellow: 2,
+    green: 3,
+    insufficient_data: 4,
+  };
+
+  const rows = snapshot.docs
+    .map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }))
+    .sort((a, b) => {
+      const levelCompare =
+        (levelRankForAdmin[a.publishedLevel] ?? 99) -
+        (levelRankForAdmin[b.publishedLevel] ?? 99);
+
+      if (levelCompare !== 0) return levelCompare;
+
+      const ratioA = optionalFiniteNumber(a.observedVsExpectedRatio);
+      const ratioB = optionalFiniteNumber(b.observedVsExpectedRatio);
+
+      if (ratioA !== null && ratioB !== null && ratioA !== ratioB) {
+        return ratioA - ratioB;
+      }
+
+      if (ratioA === null && ratioB !== null) return 1;
+      if (ratioA !== null && ratioB === null) return -1;
+
+      return text(a.departmentName || a.departmentCode)
+        .localeCompare(
+          text(b.departmentName || b.departmentCode),
+          'fr'
+        );
+    });
+
+  const summary = summarizeOccupationAnalysisRows(rows);
+
+  return {
+    ok: true,
+    status: 200,
+    run: {
+      id: run.id,
+      date: run.date || null,
+      status: run.status || null,
+      configVersion: run.configVersion || null,
+      calculationVersion: run.calculationVersion || null,
+    },
+    romeCode: rome,
+    romeLabel: rows[0]?.romeLabel || rome,
+    rows,
+    summary,
+  };
+}
+
+async function saveOccupationVigilanceDraft({
+  candidateConfig,
+  baseConfigVersion,
+  uid,
+  email,
+  db,
+  FieldValue,
+} = {}) {
+  const cleanBaseVersion = text(baseConfigVersion);
+
+  if (!cleanBaseVersion) {
+    return {
+      ok: false,
+      status: 400,
+      errorCode: 'BASE_CONFIG_REQUIRED',
+      error: 'Version de base manquante.',
+    };
+  }
+
+  const activeConfig = await latestValidatedConfig(db);
+
+  if (!activeConfig) {
+    return {
+      ok: false,
+      status: 409,
+      errorCode: 'ACTIVE_CONFIG_MISSING',
+      error: 'Aucune configuration active ne peut servir de base.',
+    };
+  }
+
+  if (activeConfig.version !== cleanBaseVersion) {
+    return {
+      ok: false,
+      status: 409,
+      errorCode: 'STALE_DRAFT_BASE',
+      error:
+        'La configuration active a changé. Rechargez les paramètres avant d’enregistrer le brouillon.',
+      activeConfigVersion: activeConfig.version,
+      baseConfigVersion: cleanBaseVersion,
+    };
+  }
+
+  const draftRef = db
+    .collection('occupationVigilanceConfigDrafts')
+    .doc();
+
+  const serverTimestamp = () =>
+    FieldValue?.serverTimestamp
+      ? FieldValue.serverTimestamp()
+      : new Date();
+
+  await draftRef.set({
+    status: 'draft',
+    baseConfigVersion: cleanBaseVersion,
+    candidateConfig: {
+      ...(candidateConfig || {}),
+      status: 'draft',
+    },
+    createdByUid: text(uid) || null,
+    createdByEmail: text(email) || null,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    schemaVersion: 'occupationVigilanceConfigDraft.v1',
+  });
+
+  return {
+    ok: true,
+    status: 200,
+    id: draftRef.id,
+    baseConfigVersion: cleanBaseVersion,
+  };
+}
+
+async function handleOccupationVigilanceActiveConfig({
+  request,
+  response,
+  auth,
+  db,
+} = {}) {
+  if (request?.method !== 'POST') {
+    response.status(405).json({
+      ok: false,
+      error: 'Méthode non autorisée',
+    });
+    return;
+  }
+
+  const decoded = await authenticateAdminRequest({
+    request,
+    response,
+    auth,
+    db,
+  });
+
+  if (!decoded) return;
+
+  const config = await getActiveOccupationVigilanceConfigForAdmin(db);
+
+  response.status(200).json({
+    ok: true,
+    config,
+  });
+}
+
+async function handleOccupationVigilanceAnalysis({
+  request,
+  response,
+  auth,
+  db,
+} = {}) {
+  if (request?.method !== 'POST') {
+    response.status(405).json({
+      ok: false,
+      error: 'Méthode non autorisée',
+    });
+    return;
+  }
+
+  const decoded = await authenticateAdminRequest({
+    request,
+    response,
+    auth,
+    db,
+  });
+
+  if (!decoded) return;
+
+  const result = await getOccupationAnalysisForAdmin({
+    db,
+    romeCode: request?.body?.romeCode,
+  });
+
+  response.status(result.status).json(result);
+}
+
+async function handleOccupationVigilanceDraftSave({
+  request,
+  response,
+  auth,
+  db,
+  FieldValue,
+} = {}) {
+  if (request?.method !== 'POST') {
+    response.status(405).json({
+      ok: false,
+      error: 'Méthode non autorisée',
+    });
+    return;
+  }
+
+  const decoded = await authenticateAdminRequest({
+    request,
+    response,
+    auth,
+    db,
+  });
+
+  if (!decoded) return;
+
+  const result = await saveOccupationVigilanceDraft({
+    candidateConfig: request?.body?.candidateConfig,
+    baseConfigVersion: request?.body?.baseConfigVersion,
+    uid: decoded.uid,
+    email: decoded.email || null,
+    db,
+    FieldValue,
+  });
+
+  response.status(result.status).json(result);
+}
+
 async function handleOccupationVigilanceConfigHistory({
   request,
   response,
@@ -1156,8 +1492,16 @@ module.exports = {
   listOccupationVigilanceConfigHistory,
   compareOccupationConfigRows,
   compareOccupationVigilanceVersions,
+  optionalFiniteNumber,
+  summarizeOccupationAnalysisRows,
+  getActiveOccupationVigilanceConfigForAdmin,
+  getOccupationAnalysisForAdmin,
+  saveOccupationVigilanceDraft,
   authenticateAdminRequest,
   handleOccupationVigilanceConfigPreview,
+  handleOccupationVigilanceActiveConfig,
+  handleOccupationVigilanceAnalysis,
+  handleOccupationVigilanceDraftSave,
   handleOccupationVigilanceConfigHistory,
   handleOccupationVigilanceConfigComparison,
   activateOccupationVigilanceDraft,

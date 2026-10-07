@@ -1,4 +1,4 @@
-name: Deploy offer backfill functions
+name: Deploy formations batch importer
 
 on:
   workflow_dispatch:
@@ -7,12 +7,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-offer-backfill-functions
+  group: deploy-formations-batch-importer
   cancel-in-progress: false
 
 jobs:
   deploy:
-    name: Deploy offer backfill functions
+    name: Deploy importLbaFormationsBatchHttp
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 20
@@ -44,10 +44,9 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
 
-      - name: Deploy targeted Functions
+      - name: Deploy importLbaFormationsBatchHttp only
         run: >-
           npx --yes firebase-tools@latest deploy
           --project meteo-apprentissage
-          --only
-          "functions:startOfferBackfillJobHttp,functions:resumeOfferBackfillJob,functions:getOfferBackfillJobStatusHttp"
+          --only "functions:importLbaFormationsBatchHttp"
           --non-interactive

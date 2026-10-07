@@ -1,0 +1,93 @@
+name: Enable formation national automation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/enable-formation-national-automation.yml"
+  workflow_run:
+    workflows:
+      - Import formation batch 1
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: enable-formation-national-automation
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy formation national automation
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout deployment source branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/apprentifr-next
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Validate Functions syntax
+        run: node --check functions/index.js
+
+      - name: Run Functions unit tests
+        run: npm run test:unit --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Deploy national formation scheduler and status endpoint
+        run: >-
+          npx --yes firebase-tools@latest deploy
+          --project meteo-apprentissage
+          --only "functions:resumeFormationNationalBackgroundJob,functions:getFormationNationalBackgroundJobStatusHttp"
+          --non-interactive
+
+      - name: Publish activation in Issues
+        if: success()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          cat > /tmp/formation-national-activation.md <<EOF
+          ## Automatisation nationale activée
+
+          ✅ **resumeFormationNationalBackgroundJob** et **getFormationNationalBackgroundJobStatusHttp** ont été déployés.
+
+          Fonctionnement :
+          - exécution Firebase toutes les 5 minutes ;
+          - sélection automatique du premier lot incomplet ;
+          - reprise du checkpoint département/page ;
+          - passage automatique au lot suivant ;
+          - arrêt global lorsque les 11 lots sont terminés ;
+          - verrou anti-chevauchement ;
+          - arrêt sur erreur persistante après le seuil prévu.
+
+          **Run Actions :** $RUN_URL
+          EOF
+
+          gh issue comment 9             --repo "${GITHUB_REPOSITORY}"             --body-file /tmp/formation-national-activation.md
+
+          gh issue comment 7             --repo "${GITHUB_REPOSITORY}"             --body-file /tmp/formation-national-activation.md

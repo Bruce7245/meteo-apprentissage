@@ -1,0 +1,238 @@
+name: Dry-run formation batch 1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: dry-run-formation-batch-1
+  cancel-in-progress: false
+
+jobs:
+  dry-run:
+    name: Dry-run departments 01 to 10
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: meteo-apprentissage
+
+      - name: Run complete batch 1 without writes
+        id: dryrun
+        shell: bash
+        run: |
+          set -u
+
+          SUMMARY="/tmp/formation-batch-1-dry-run.md"
+          CHECKED_AT="$(TZ=Europe/Paris date '+%Y-%m-%d %H:%M:%S %Z')"
+          RESPONSE_DIR="/tmp/formation-batch-1-segments"
+          mkdir -p "$RESPONSE_DIR"
+
+          KEY="$(gcloud secrets versions access latest             --secret=BACKFILL_ADMIN_KEY             --project=meteo-apprentissage)"
+          echo "::add-mask::$KEY"
+
+          DEPARTMENT_INDEX=0
+          PAGE_INDEX=0
+          MAX_SEGMENTS=20
+          SEGMENT=1
+          FINAL_STATUS=""
+          FAILED=0
+
+          while [ "$SEGMENT" -le "$MAX_SEGMENTS" ]; do
+            RESPONSE="$RESPONSE_DIR/segment-$SEGMENT.json"
+
+            echo "Segment $SEGMENT: departmentIndex=$DEPARTMENT_INDEX pageIndex=$PAGE_INDEX"
+
+            CURL_EXIT=0
+            HTTP_CODE="$(curl --silent --show-error               --max-time 500               --output "$RESPONSE"               --write-out "%{http_code}"               -H "x-admin-key: $KEY"               "https://europe-west1-meteo-apprentissage.cloudfunctions.net/importLbaFormationsBatchHttp?batch=1&write=0&pageSize=100&maxPages=60&maxRunSeconds=420&delayMs=300&retryCount=2&startDepartmentIndex=$DEPARTMENT_INDEX&startPageIndex=$PAGE_INDEX")" || CURL_EXIT=$?
+
+            if [ "$CURL_EXIT" -ne 0 ] || [[ ! "$HTTP_CODE" =~ ^2 ]]; then
+              echo "Segment $SEGMENT failed: curl=$CURL_EXIT HTTP=$HTTP_CODE"
+              FAILED=1
+              break
+            fi
+
+            if ! python - "$RESPONSE" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], "r", encoding="utf-8") as handle:
+              payload = json.load(handle)
+
+          if payload.get("ok") is False:
+              raise SystemExit("API returned ok=false")
+          PY
+            then
+              FAILED=1
+              break
+            fi
+
+            FINAL_STATUS="$(python - "$RESPONSE" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              print((json.load(handle).get("status") or "unknown"))
+          PY
+          )"
+
+            if [ "$FINAL_STATUS" = "completed" ]; then
+              break
+            fi
+
+            NEXT_DEPARTMENT_INDEX="$(python - "$RESPONSE" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              payload = json.load(handle)
+          cursor = payload.get("nextCursor") or {}
+          value = cursor.get("departmentIndex")
+          print("" if value is None else value)
+          PY
+          )"
+
+            NEXT_PAGE_INDEX="$(python - "$RESPONSE" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              payload = json.load(handle)
+          cursor = payload.get("nextCursor") or {}
+          value = cursor.get("pageIndex")
+          print("" if value is None else value)
+          PY
+          )"
+
+            if [ -z "$NEXT_DEPARTMENT_INDEX" ] || [ -z "$NEXT_PAGE_INDEX" ]; then
+              echo "Missing nextCursor while status=$FINAL_STATUS"
+              FAILED=1
+              break
+            fi
+
+            if [ "$NEXT_DEPARTMENT_INDEX" = "$DEPARTMENT_INDEX" ] && [ "$NEXT_PAGE_INDEX" = "$PAGE_INDEX" ]; then
+              echo "Dry-run cursor made no progress."
+              FAILED=1
+              break
+            fi
+
+            DEPARTMENT_INDEX="$NEXT_DEPARTMENT_INDEX"
+            PAGE_INDEX="$NEXT_PAGE_INDEX"
+            SEGMENT=$((SEGMENT + 1))
+          done
+
+          unset KEY
+
+          if [ "$FINAL_STATUS" != "completed" ]; then
+            FAILED=1
+          fi
+
+          python - "$RESPONSE_DIR" "$SUMMARY" "$CHECKED_AT" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}" "$FINAL_STATUS" "$FAILED" <<'PY'
+          import glob
+          import json
+          import os
+          import sys
+
+          response_dir, summary_path, checked_at, repository, run_id, final_status, failed = sys.argv[1:]
+          files = sorted(
+              glob.glob(os.path.join(response_dir, "segment-*.json")),
+              key=lambda p: int(os.path.basename(p).split("-")[1].split(".")[0]),
+          )
+
+          total_pages = 0
+          total_received = 0
+          total_eligible = 0
+          total_no_id = 0
+          total_outside = 0
+          completed_departments = set()
+          failed_departments = set()
+          batch_codes = []
+          final_cursor = None
+
+          for path in files:
+              try:
+                  with open(path, "r", encoding="utf-8") as handle:
+                      payload = json.load(handle)
+              except Exception:
+                  continue
+
+              batch = payload.get("batch") or {}
+              if not batch_codes:
+                  batch_codes = [
+                      str(item.get("code"))
+                      for item in (batch.get("items") or [])
+                      if item.get("code")
+                  ]
+
+              totals = payload.get("totals") or {}
+              total_pages += int(payload.get("pagesThisRun") or 0)
+              total_received += int(totals.get("receivedCount") or 0)
+              total_eligible += int(totals.get("writtenCount") or 0)
+              total_no_id += int(totals.get("skippedNoId") or 0)
+              total_outside += int(totals.get("skippedOutsideDepartment") or 0)
+              final_cursor = payload.get("nextCursor")
+
+              for code, state in (payload.get("departmentStates") or {}).items():
+                  if not isinstance(state, dict):
+                      continue
+                  if state.get("status") == "completed":
+                      completed_departments.add(code)
+                  elif state.get("status") == "failed":
+                      failed_departments.add(code)
+
+          icon = "✅" if final_status == "completed" and failed == "0" else "❌"
+
+          with open(summary_path, "w", encoding="utf-8") as out:
+              out.write("### Dry-run formations — lot 1 complet\n\n")
+              out.write(f"**Vérification :** {checked_at}\n\n")
+              out.write(f"{icon} **Statut final :** `{final_status or 'unknown'}`\n\n")
+              out.write("- Écriture Firestore métier : **non** (`write=0`)\n")
+              out.write(f"- Segments exécutés : **{len(files)} / 20 max**\n")
+              out.write(f"- Départements du lot : **{', '.join(batch_codes) or 'non renseignés'}**\n")
+              out.write(f"- Départements terminés observés : **{len(completed_departments)}**\n")
+              out.write(f"- Pages lues : **{total_pages}**\n")
+              out.write(f"- Résultats API reçus : **{total_received}**\n")
+              out.write(f"- Formations éligibles (auraient été écrites) : **{total_eligible}**\n")
+              out.write(f"- Ignorés sans identifiant : **{total_no_id}**\n")
+              out.write(f"- Ignorés hors département : **{total_outside}**\n")
+              out.write(f"- Curseur final : **{final_cursor if final_cursor is not None else 'fin du lot'}**\n\n")
+
+              if failed_departments:
+                  out.write(f"❌ Départements en échec : **{', '.join(sorted(failed_departments))}**\n\n")
+              else:
+                  out.write("✅ Aucun département marqué en échec.\n\n")
+
+              out.write(f"**Run Actions :** https://github.com/{repository}/actions/runs/{run_id}\n")
+          PY
+
+          cat "$SUMMARY"
+          cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish result in Issue 7
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f /tmp/formation-batch-1-dry-run.md ]; then
+            echo "No dry-run summary was generated."
+            exit 1
+          fi
+
+          gh issue comment 7             --repo "${GITHUB_REPOSITORY}"             --body-file /tmp/formation-batch-1-dry-run.md
+
+      - name: Fail workflow when dry-run failed
+        if: steps.dryrun.outputs.failed == 'true'
+        run: exit 1

@@ -1,0 +1,167 @@
+name: Check offer backfill status
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    name: Check national offer backfill status
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 5
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: meteo-apprentissage
+
+      - name: Fetch and format backfill status
+        id: status
+        shell: bash
+        run: |
+          set -u
+
+          SUMMARY_FILE="/tmp/offer-backfill-status-summary.md"
+          STATUS_FILE="/tmp/offer-backfill-status.json"
+          CHECKED_AT="$(TZ=Europe/Paris date '+%Y-%m-%d %H:%M:%S %Z')"
+
+          if ! KEY="$(gcloud secrets versions access latest             --secret=BACKFILL_ADMIN_KEY             --project=meteo-apprentissage)"; then
+            cat > "$SUMMARY_FILE" <<EOF
+          ### État du rattrapage des offres
+
+          **Vérification :** $CHECKED_AT
+
+          ❌ Impossible de récupérer `BACKFILL_ADMIN_KEY` depuis Secret Manager.
+
+          **Run Actions :** https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+            cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::add-mask::$KEY"
+
+          CURL_EXIT=0
+          HTTP_CODE="$(curl --silent --show-error             --output "$STATUS_FILE"             --write-out "%{http_code}"             -H "x-admin-key: $KEY"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getOfferBackfillJobStatusHttp")" || CURL_EXIT=$?
+
+          unset KEY
+
+          if [ "$CURL_EXIT" -ne 0 ] || [[ ! "$HTTP_CODE" =~ ^2 ]]; then
+            cat > "$SUMMARY_FILE" <<EOF
+          ### État du rattrapage des offres
+
+          **Vérification :** $CHECKED_AT
+
+          ❌ Échec de la lecture du statut.
+
+          - Code curl : `$CURL_EXIT`
+          - HTTP : `$HTTP_CODE`
+
+          **Run Actions :** https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+            cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! python - "$STATUS_FILE" "$SUMMARY_FILE" "$CHECKED_AT" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}" <<'PY'
+          import json
+          import sys
+
+          status_path, summary_path, checked_at, repository, run_id = sys.argv[1:]
+
+          with open(status_path, "r", encoding="utf-8") as handle:
+              payload = json.load(handle)
+
+          exists = bool(payload.get("exists"))
+          job = payload.get("job") or {}
+
+          with open(summary_path, "w", encoding="utf-8") as out:
+              out.write("### État du rattrapage des offres\n\n")
+              out.write(f"**Vérification :** {checked_at}\n\n")
+
+              if not exists:
+                  out.write("⚠️ Aucun job de rattrapage n'existe actuellement.\n\n")
+              else:
+                  status = job.get("status", "unknown")
+                  completed = job.get("completedDepartmentsCount", 0)
+                  total = job.get("totalDepartments", 101)
+                  batch = job.get("currentBatchNumber", "—")
+                  total_batches = job.get("totalBatches", 11)
+                  offers = job.get("totalOffersImported", 0)
+                  openings = job.get("totalOpeningsImported", 0)
+                  last_department = job.get("lastCompletedDepartmentCode") or "—"
+                  failures = job.get("consecutiveFailures", 0)
+                  error = job.get("errorMessage") or "—"
+                  run = job.get("runId") or "—"
+
+                  if status == "completed":
+                      icon = "✅"
+                  elif status == "error":
+                      icon = "❌"
+                  elif status == "running":
+                      icon = "🔄"
+                  else:
+                      icon = "ℹ️"
+
+                  out.write(f"{icon} **Statut :** `{status}`\n\n")
+                  out.write("| Indicateur | Valeur |\n")
+                  out.write("|---|---:|\n")
+                  out.write(f"| Départements traités | **{completed} / {total}** |\n")
+                  out.write(f"| Lot courant | **{batch} / {total_batches}** |\n")
+                  out.write(f"| Offres importées | **{offers}** |\n")
+                  out.write(f"| Postes importés | **{openings}** |\n")
+                  out.write(f"| Dernier département terminé | **{last_department}** |\n")
+                  out.write(f"| Échecs consécutifs | **{failures}** |\n")
+                  out.write(f"| Run ID | `{run}` |\n")
+                  out.write(f"| Erreur | {error} |\n\n")
+
+              out.write(
+                  f"**Run Actions :** https://github.com/{repository}/actions/runs/{run_id}\n"
+              )
+          PY
+          then
+            cat > "$SUMMARY_FILE" <<EOF
+          ### État du rattrapage des offres
+
+          **Vérification :** $CHECKED_AT
+
+          ❌ La réponse du service de statut n'a pas pu être interprétée.
+
+          **Run Actions :** https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          cat "$SUMMARY_FILE"
+          cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish status in Issue 12
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f /tmp/offer-backfill-status-summary.md ]; then
+            echo "No status summary was generated."
+            exit 1
+          fi
+
+          gh issue comment 12             --repo "${GITHUB_REPOSITORY}"             --body-file /tmp/offer-backfill-status-summary.md
+
+      - name: Fail workflow when status check failed
+        if: steps.status.outputs.failed == 'true'
+        run: exit 1
