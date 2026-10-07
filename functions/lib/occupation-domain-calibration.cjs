@@ -112,9 +112,12 @@ function normalizeSample(sample) {
 function stableVersion(samples, options) {
   const payload = {
     calculationVersion: CALCULATION_VERSION,
+    baselineMethod: 'positive-normalized-offers.v1',
     options: {
       minimumSamplesPerDomain:
         options.minimumSamplesPerDomain,
+      minimumPositiveSamplesPerDomain:
+        options.minimumPositiveSamplesPerDomain,
       minimumTotalSamples:
         options.minimumTotalSamples,
       excludedDates: [
@@ -152,6 +155,11 @@ function buildDomainCalibration(
     Number.isInteger(options.minimumSamplesPerDomain)
       ? options.minimumSamplesPerDomain
       : 24;
+
+  const minimumPositiveSamplesPerDomain =
+    Number.isInteger(options.minimumPositiveSamplesPerDomain)
+      ? options.minimumPositiveSamplesPerDomain
+      : 4;
 
   const minimumTotalSamples =
     Number.isInteger(options.minimumTotalSamples)
@@ -255,19 +263,21 @@ function buildDomainCalibration(
       const domainSamples =
         byDomain.get(domainCode);
 
-      const normalizedOffers =
-        domainSamples.map((sample) =>
-          sample.activeOffersCount *
-          (
-            referencePopulation15To29 /
-            sample.population15To29
+      const normalizedPositiveOffers =
+        domainSamples
+          .filter(
+            (sample) =>
+              sample.activeOffersCount > 0
           )
-        );
+          .map((sample) =>
+            sample.activeOffersCount *
+            (
+              referencePopulation15To29 /
+              sample.population15To29
+            )
+          );
 
-      const expected =
-        median(normalizedOffers);
-
-      if (!(expected > 0)) {
+      if (normalizedPositiveOffers.length === 0) {
         excludedDomainCodes[domainCode] = {
           reason: 'NON_POSITIVE_BASELINE',
           samplesCount: domainSamples.length,
@@ -275,8 +285,24 @@ function buildDomainCalibration(
         continue;
       }
 
+      if (
+        normalizedPositiveOffers.length <
+        minimumPositiveSamplesPerDomain
+      ) {
+        excludedDomainCodes[domainCode] = {
+          reason: 'INSUFFICIENT_POSITIVE_SAMPLES',
+          samplesCount: domainSamples.length,
+          positiveSamplesCount:
+            normalizedPositiveOffers.length,
+        };
+        continue;
+      }
+
+      const expected =
+        median(normalizedPositiveOffers);
+
       normalizedOfferValues.push(
-        ...normalizedOffers
+        ...normalizedPositiveOffers
       );
 
       baselines[domainCode] = {
@@ -450,6 +476,7 @@ function buildDomainCalibration(
     samples,
     {
       minimumSamplesPerDomain,
+      minimumPositiveSamplesPerDomain,
       minimumTotalSamples,
       excludedDates,
     }
@@ -522,6 +549,7 @@ function buildDomainCalibration(
       domainCount:
         Object.keys(baselines).length,
       minimumSamplesPerDomain,
+      minimumPositiveSamplesPerDomain,
       minimumTotalSamples,
       ratioQuantiles: {
         q25: round(orangeMinRatio),
