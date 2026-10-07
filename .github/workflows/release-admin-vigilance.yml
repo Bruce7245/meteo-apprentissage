@@ -73,18 +73,6 @@ jobs:
           set -euo pipefail
           node --test             test/admin-occupation-vigilance-config.test.cjs             test/occupation-vigilance.test.cjs
 
-      - name: Validate Firestore rule scope
-        run: |
-          set -euo pipefail
-          test -s firestore.rules
-          grep -q "occupationVigilanceConfigs" firestore.rules
-          grep -q "occupationVigilanceConfigDrafts" firestore.rules
-          grep -q "occupationVigilanceConfigAudit" firestore.rules
-          grep -q "occupationHistoryStats" firestore.rules
-          grep -q "occupationContextStats" firestore.rules
-          grep -q "occupationVigilanceRuns" firestore.rules
-          grep -q "occupationVigilanceSnapshots" firestore.rules
-
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -94,7 +82,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes firebase-tools@latest deploy             --project meteo-apprentissage             --only "functions:previewOccupationVigilanceConfigHttp,functions:getOccupationVigilanceConfigHistoryHttp,functions:compareOccupationVigilanceConfigsHttp,functions:activateOccupationVigilanceConfigHttp"             --non-interactive
+          npx --yes firebase-tools@latest deploy             --project meteo-apprentissage             --only "functions:getActiveOccupationVigilanceConfigHttp,functions:getOccupationVigilanceAnalysisHttp,functions:saveOccupationVigilanceConfigDraftHttp,functions:previewOccupationVigilanceConfigHttp,functions:getOccupationVigilanceConfigHistoryHttp,functions:compareOccupationVigilanceConfigsHttp,functions:activateOccupationVigilanceConfigHttp"             --non-interactive
 
       - name: Verify Functions are reachable and protected
         shell: bash
@@ -117,6 +105,12 @@ jobs:
             fi
           }
 
+          check_401             "getActiveOccupationVigilanceConfigHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getActiveOccupationVigilanceConfigHttp"
+
+          check_401             "getOccupationVigilanceAnalysisHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getOccupationVigilanceAnalysisHttp"
+
+          check_401             "saveOccupationVigilanceConfigDraftHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/saveOccupationVigilanceConfigDraftHttp"
+
           check_401             "previewOccupationVigilanceConfigHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/previewOccupationVigilanceConfigHttp"
 
           check_401             "getOccupationVigilanceConfigHistoryHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getOccupationVigilanceConfigHistoryHttp"
@@ -124,12 +118,6 @@ jobs:
           check_401             "compareOccupationVigilanceConfigsHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/compareOccupationVigilanceConfigsHttp"
 
           check_401             "activateOccupationVigilanceConfigHttp"             "https://europe-west1-meteo-apprentissage.cloudfunctions.net/activateOccupationVigilanceConfigHttp"
-
-      - name: Deploy Firestore rules
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx --yes firebase-tools@latest deploy             --project meteo-apprentissage             --only firestore:rules             --non-interactive
 
       - name: Deploy Hosting
         shell: bash
@@ -168,8 +156,7 @@ jobs:
             echo "- Branch: \`$GITHUB_REF_NAME\`"
             echo
             echo "### Intended scope"
-            echo "- 4 admin vigilance Functions"
-            echo "- Firestore rules"
+            echo "- 7 admin vigilance Functions"
             echo "- Firebase Hosting"
             echo
             echo "### Explicitly excluded"
