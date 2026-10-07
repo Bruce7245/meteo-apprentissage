@@ -832,6 +832,7 @@ export default function AdminSectorDashboardPage() {
 
             <AdminVigilanceConfigEditor
               config={config}
+              romeCode={romeCode}
               onActivated={() => window.location.reload()}
             />
           </>
