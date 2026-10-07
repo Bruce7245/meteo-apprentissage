@@ -11,6 +11,7 @@ import {
   FiMapPin,
   FiMenu,
   FiMonitor,
+  FiTrendingUp,
 } from 'react-icons/fi';
 import AdminAuthGate from '../components/auth/AdminAuthGate.jsx';
 
@@ -19,6 +20,7 @@ const adminGroups = [
     label: 'Pilotage',
     links: [
       { href: '/admin', label: 'Vue d’ensemble', icon: FiHome },
+      { href: '/admin/stats', label: 'Stats & publications', icon: FiTrendingUp },
       { href: '/admin/bulletins', label: 'Bulletins', icon: FiFileText },
     ],
   },
