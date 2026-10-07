@@ -12914,6 +12914,58 @@ exports.adminNationalDailyOffers = lbaDailyOffers.adminNationalDailyOffers;
 
 const occupationVigilanceAdminConfig = require('./admin-occupation-vigilance-config.cjs');
 
+exports.getActiveOccupationVigilanceConfigHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceActiveConfig({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
+exports.getOccupationVigilanceAnalysisHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceAnalysis({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
+exports.saveOccupationVigilanceConfigDraftHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await occupationVigilanceAdminConfig.handleOccupationVigilanceDraftSave({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+      FieldValue: admin.firestore.FieldValue,
+    });
+  }
+);
+
 exports.previewOccupationVigilanceConfigHttp = onRequest(
   {
     region: 'europe-west1',
