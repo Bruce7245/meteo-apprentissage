@@ -3,7 +3,6 @@ import {
   FiActivity,
   FiArrowRight,
   FiCheckCircle,
-  FiEdit3,
   FiFileText,
   FiMap,
   FiTrendingUp,
@@ -31,10 +30,10 @@ const quickActions = [
     icon: FiActivity,
   },
   {
-    href: '/admin/bulletins',
-    title: 'Préparer un bulletin',
-    description: 'Accéder à la file éditoriale et aux futures validations.',
-    icon: FiEdit3,
+    href: '/admin/stats',
+    title: 'Préparer une publication',
+    description: 'Ouvrir les classements, variations et historiques publiés.',
+    icon: FiTrendingUp,
   },
 ];
 
