@@ -356,7 +356,7 @@ function runSortValue(run) {
   };
 }
 
-async function latestReadyOccupationRun(db) {
+async function listReadyOccupationRuns(db) {
   const snapshot = await db
     .collection('occupationVigilanceRuns')
     .get();
@@ -376,7 +376,128 @@ async function latestReadyOccupationRun(db) {
 
       if (dateCompare !== 0) return dateCompare;
       return bSort.timestamp - aSort.timestamp;
-    })[0] || null;
+    });
+}
+
+async function latestReadyOccupationRun(db) {
+  const runs = await listReadyOccupationRuns(db);
+  return runs[0] || null;
+}
+
+function transitionDirection(previousLevel, currentLevel) {
+  const previous = text(previousLevel);
+  const current = text(currentLevel);
+
+  if (!previous) return 'new';
+  if (previous === current) return 'unchanged';
+
+  const previousRank = levelRank(previous);
+  const currentRank = levelRank(current);
+
+  if (previousRank < 0 || currentRank < 0) {
+    return 'changed';
+  }
+
+  return currentRank > previousRank
+    ? 'worsened'
+    : 'improved';
+}
+
+function enrichOccupationRowsWithPrevious(rows = [], previousRows = []) {
+  const previousByDepartment = new Map(
+    (Array.isArray(previousRows) ? previousRows : [])
+      .map((row) => [
+        text(row?.departmentCode),
+        row,
+      ])
+      .filter(([departmentCode]) => departmentCode)
+  );
+
+  const transitions = {
+    comparableCount: 0,
+    changedCount: 0,
+    worsenedCount: 0,
+    improvedCount: 0,
+    unchangedCount: 0,
+    newCount: 0,
+    changedDataStatusCount: 0,
+    matrix: {},
+  };
+
+  const enrichedRows = (Array.isArray(rows) ? rows : []).map((row) => {
+    const previous = previousByDepartment.get(
+      text(row?.departmentCode)
+    ) || null;
+    const previousPublishedLevel = previous
+      ? text(previous.publishedLevel || 'insufficient_data')
+      : null;
+    const currentPublishedLevel = text(
+      row?.publishedLevel || 'insufficient_data'
+    );
+    const direction = transitionDirection(
+      previousPublishedLevel,
+      currentPublishedLevel
+    );
+
+    if (!previous) {
+      transitions.newCount += 1;
+    } else {
+      transitions.comparableCount += 1;
+
+      if (direction === 'unchanged') {
+        transitions.unchangedCount += 1;
+      } else {
+        transitions.changedCount += 1;
+
+        if (direction === 'worsened') {
+          transitions.worsenedCount += 1;
+        } else if (direction === 'improved') {
+          transitions.improvedCount += 1;
+        } else {
+          transitions.changedDataStatusCount += 1;
+        }
+      }
+
+      const matrixKey =
+        previousPublishedLevel + '->' + currentPublishedLevel;
+      transitions.matrix[matrixKey] =
+        Number(transitions.matrix[matrixKey] || 0) + 1;
+    }
+
+    const previousOffers = optionalFiniteNumber(
+      previous?.activeOffersCount
+    );
+    const currentOffers = optionalFiniteNumber(
+      row?.activeOffersCount
+    );
+
+    return {
+      ...row,
+      previousPublishedLevel,
+      transitionDirection: direction,
+      levelChanged:
+        !!previous &&
+        previousPublishedLevel !== currentPublishedLevel,
+      previousActiveOffersCount: previousOffers,
+      activeOffersDelta:
+        previousOffers !== null && currentOffers !== null
+          ? currentOffers - previousOffers
+          : null,
+      previousExpectedOffers: optionalFiniteNumber(
+        previous?.expectedOffers
+      ),
+      previousObservedVsExpectedRatio: optionalFiniteNumber(
+        previous?.observedVsExpectedRatio
+      ),
+      previousConfidenceLevel:
+        previous?.confidenceLevel || null,
+    };
+  });
+
+  return {
+    rows: enrichedRows,
+    transitions,
+  };
 }
 
 function snapshotToVigilanceInput(snapshot = {}) {
@@ -1087,25 +1208,44 @@ async function getOccupationAnalysisForAdmin({
     };
   }
 
-  const run = await latestReadyOccupationRun(db);
+  const runs = await listReadyOccupationRuns(db);
+  const run = runs[0] || null;
 
   if (!run) {
     return {
       ok: true,
       status: 200,
       run: null,
+      previousRun: null,
       romeCode: rome,
       rows: [],
       summary: null,
     };
   }
 
-  const snapshot = await db
-    .collection('occupationVigilanceSnapshots')
-    .doc(run.id)
-    .collection('entries')
-    .where('romeCode', '==', rome)
-    .get();
+  const previousRun =
+    runs.find((candidate) =>
+      text(candidate?.date) &&
+      text(run?.date) &&
+      text(candidate.date) < text(run.date)
+    ) || null;
+
+  const [snapshot, previousSnapshot] = await Promise.all([
+    db
+      .collection('occupationVigilanceSnapshots')
+      .doc(run.id)
+      .collection('entries')
+      .where('romeCode', '==', rome)
+      .get(),
+    previousRun
+      ? db
+          .collection('occupationVigilanceSnapshots')
+          .doc(previousRun.id)
+          .collection('entries')
+          .where('romeCode', '==', rome)
+          .get()
+      : Promise.resolve({ docs: [] }),
+  ]);
 
   const levelRankForAdmin = {
     red: 0,
@@ -1115,36 +1255,48 @@ async function getOccupationAnalysisForAdmin({
     insufficient_data: 4,
   };
 
-  const rows = snapshot.docs
-    .map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }))
-    .sort((a, b) => {
-      const levelCompare =
-        (levelRankForAdmin[a.publishedLevel] ?? 99) -
-        (levelRankForAdmin[b.publishedLevel] ?? 99);
+  const currentRows = snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+  const previousRows = previousSnapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
 
-      if (levelCompare !== 0) return levelCompare;
+  const comparison = enrichOccupationRowsWithPrevious(
+    currentRows,
+    previousRows
+  );
 
-      const ratioA = optionalFiniteNumber(a.observedVsExpectedRatio);
-      const ratioB = optionalFiniteNumber(b.observedVsExpectedRatio);
+  const rows = comparison.rows.sort((a, b) => {
+    const levelCompare =
+      (levelRankForAdmin[a.publishedLevel] ?? 99) -
+      (levelRankForAdmin[b.publishedLevel] ?? 99);
 
-      if (ratioA !== null && ratioB !== null && ratioA !== ratioB) {
-        return ratioA - ratioB;
-      }
+    if (levelCompare !== 0) return levelCompare;
 
-      if (ratioA === null && ratioB !== null) return 1;
-      if (ratioA !== null && ratioB === null) return -1;
+    const ratioA = optionalFiniteNumber(a.observedVsExpectedRatio);
+    const ratioB = optionalFiniteNumber(b.observedVsExpectedRatio);
 
-      return text(a.departmentName || a.departmentCode)
-        .localeCompare(
-          text(b.departmentName || b.departmentCode),
-          'fr'
-        );
-    });
+    if (ratioA !== null && ratioB !== null && ratioA !== ratioB) {
+      return ratioA - ratioB;
+    }
 
-  const summary = summarizeOccupationAnalysisRows(rows);
+    if (ratioA === null && ratioB !== null) return 1;
+    if (ratioA !== null && ratioB === null) return -1;
+
+    return text(a.departmentName || a.departmentCode)
+      .localeCompare(
+        text(b.departmentName || b.departmentCode),
+        'fr'
+      );
+  });
+
+  const summary = {
+    ...summarizeOccupationAnalysisRows(rows),
+    transitions: comparison.transitions,
+  };
 
   return {
     ok: true,
@@ -1156,6 +1308,16 @@ async function getOccupationAnalysisForAdmin({
       configVersion: run.configVersion || null,
       calculationVersion: run.calculationVersion || null,
     },
+    previousRun: previousRun
+      ? {
+          id: previousRun.id,
+          date: previousRun.date || null,
+          status: previousRun.status || null,
+          configVersion: previousRun.configVersion || null,
+          calculationVersion:
+            previousRun.calculationVersion || null,
+        }
+      : null,
     romeCode: rome,
     romeLabel: rows[0]?.romeLabel || rome,
     rows,
@@ -1447,6 +1609,8 @@ module.exports = {
   compareOccupationVigilanceVersions,
   optionalFiniteNumber,
   summarizeOccupationAnalysisRows,
+  transitionDirection,
+  enrichOccupationRowsWithPrevious,
   getActiveOccupationVigilanceConfigForAdmin,
   getOccupationAnalysisForAdmin,
   saveOccupationVigilanceDraft,
