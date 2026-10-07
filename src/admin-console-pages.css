@@ -343,3 +343,75 @@
     grid-column: 1;
   }
 }
+
+
+.admin-console-companies-table {
+  min-width: 1040px !important;
+}
+
+.admin-console-data-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  border-radius: 999px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  font-size: 0.68rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.admin-console-data-status svg {
+  width: 13px;
+  height: 13px;
+}
+
+.admin-console-data-status.is-ready {
+  border-color: #cae8d8;
+  background: #f0faf5;
+  color: #286c4e;
+}
+
+.admin-console-data-status.is-partial {
+  border-color: #eadfbf;
+  background: #fffaf0;
+  color: #82651f;
+}
+
+.admin-console-data-status.is-missing {
+  border-color: #dfe5eb;
+  background: #f6f8fa;
+  color: #748396;
+}
+
+.admin-console-data-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid #dfe7ee;
+  border-radius: 14px;
+  padding: 15px 17px;
+  background: #f8fafc;
+}
+
+.admin-console-data-note > svg {
+  flex: 0 0 auto;
+  width: 19px;
+  height: 19px;
+  margin-top: 1px;
+  color: #3c7398;
+}
+
+.admin-console-data-note strong {
+  display: block;
+  color: #334c63;
+  font-size: 0.79rem;
+}
+
+.admin-console-data-note p {
+  margin: 4px 0 0;
+  color: #7e8d9e;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
