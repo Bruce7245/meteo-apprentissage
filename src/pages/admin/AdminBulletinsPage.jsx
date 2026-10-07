@@ -22,16 +22,17 @@ function formatNumber(value, maximumFractionDigits = 0) {
   }).format(number);
 }
 
-function formatPercent(value) {
+function formatConfidence(value) {
   if (value === null || value === undefined || value === '') return '—';
 
   const number = Number(value);
   if (!Number.isFinite(number)) return '—';
 
-  return new Intl.NumberFormat('fr-FR', {
-    style: 'percent',
-    maximumFractionDigits: 0,
-  }).format(number);
+  return (
+    new Intl.NumberFormat('fr-FR', {
+      maximumFractionDigits: 0,
+    }).format(number) + ' %'
+  );
 }
 
 function levelRank(level) {
@@ -193,7 +194,7 @@ export default function AdminBulletinsPage() {
             />
             <MetricCard
               label="Confiance moyenne"
-              value={formatPercent(summary.averageConfidence)}
+              value={formatConfidence(summary.averageConfidence)}
               detail="Moyenne des scores renseignés"
             />
             <MetricCard
@@ -303,7 +304,7 @@ export default function AdminBulletinsPage() {
                           )}
                         </td>
                         <td>
-                          {formatPercent(bulletin.confidenceScore)}
+                          {formatConfidence(bulletin.confidenceScore)}
                         </td>
                         <td>
                           <a
