@@ -9,6 +9,74 @@ function text(value) {
   return String(value).trim();
 }
 
+function optionalFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function summarizeOccupationAnalysisRows(rows = []) {
+  const levels = {
+    green: 0,
+    yellow: 0,
+    orange: 0,
+    red: 0,
+    insufficient_data: 0,
+  };
+
+  let highConfidenceCount = 0;
+  let totalObservedOffers = 0;
+  let observedOffersAvailableCount = 0;
+  let totalExpectedOffers = 0;
+  let expectedOffersAvailableCount = 0;
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const level = text(row?.publishedLevel || 'insufficient_data');
+
+    if (level in levels) levels[level] += 1;
+    if (row?.confidenceLevel === 'high') highConfidenceCount += 1;
+
+    const observed = optionalFiniteNumber(row?.activeOffersCount);
+    const expected = optionalFiniteNumber(row?.expectedOffers);
+
+    if (observed !== null) {
+      totalObservedOffers += observed;
+      observedOffersAvailableCount += 1;
+    }
+
+    if (expected !== null) {
+      totalExpectedOffers += expected;
+      expectedOffersAvailableCount += 1;
+    }
+  }
+
+  const departmentsCount = Array.isArray(rows) ? rows.length : 0;
+
+  return {
+    departmentsCount,
+    totalObservedOffers:
+      observedOffersAvailableCount > 0 ? totalObservedOffers : null,
+    observedOffersAvailableCount,
+    missingObservedOffersCount:
+      departmentsCount - observedOffersAvailableCount,
+    totalExpectedOffers:
+      expectedOffersAvailableCount > 0 ? totalExpectedOffers : null,
+    expectedOffersAvailableCount,
+    missingExpectedOffersCount:
+      departmentsCount - expectedOffersAvailableCount,
+    expectedCoverageRatio:
+      departmentsCount > 0
+        ? expectedOffersAvailableCount / departmentsCount
+        : null,
+    highConfidenceCount,
+    levels,
+    elevatedDepartments: levels.orange + levels.red,
+  };
+}
+
 function timestampMillis(value) {
   if (!value) return 0;
   if (typeof value.toMillis === 'function') return value.toMillis();
@@ -1106,12 +1174,15 @@ async function getOccupationAnalysisForAdmin({
 
       if (levelCompare !== 0) return levelCompare;
 
-      const ratioA = Number(a.observedVsExpectedRatio);
-      const ratioB = Number(b.observedVsExpectedRatio);
+      const ratioA = optionalFiniteNumber(a.observedVsExpectedRatio);
+      const ratioB = optionalFiniteNumber(b.observedVsExpectedRatio);
 
-      if (Number.isFinite(ratioA) && Number.isFinite(ratioB) && ratioA !== ratioB) {
+      if (ratioA !== null && ratioB !== null && ratioA !== ratioB) {
         return ratioA - ratioB;
       }
+
+      if (ratioA === null && ratioB !== null) return 1;
+      if (ratioA !== null && ratioB === null) return -1;
 
       return text(a.departmentName || a.departmentCode)
         .localeCompare(
@@ -1120,30 +1191,7 @@ async function getOccupationAnalysisForAdmin({
         );
     });
 
-  const levels = {
-    green: 0,
-    yellow: 0,
-    orange: 0,
-    red: 0,
-    insufficient_data: 0,
-  };
-
-  let highConfidenceCount = 0;
-  let totalObservedOffers = 0;
-  let totalExpectedOffers = 0;
-
-  for (const row of rows) {
-    const level = text(row.publishedLevel || 'insufficient_data');
-
-    if (level in levels) levels[level] += 1;
-    if (row.confidenceLevel === 'high') highConfidenceCount += 1;
-
-    const observed = Number(row.activeOffersCount);
-    const expected = Number(row.expectedOffers);
-
-    if (Number.isFinite(observed)) totalObservedOffers += observed;
-    if (Number.isFinite(expected)) totalExpectedOffers += expected;
-  }
+  const summary = summarizeOccupationAnalysisRows(rows);
 
   return {
     ok: true,
@@ -1158,14 +1206,7 @@ async function getOccupationAnalysisForAdmin({
     romeCode: rome,
     romeLabel: rows[0]?.romeLabel || rome,
     rows,
-    summary: {
-      departmentsCount: rows.length,
-      totalObservedOffers,
-      totalExpectedOffers,
-      highConfidenceCount,
-      levels,
-      elevatedDepartments: levels.orange + levels.red,
-    },
+    summary,
   };
 }
 
@@ -1451,6 +1492,8 @@ module.exports = {
   listOccupationVigilanceConfigHistory,
   compareOccupationConfigRows,
   compareOccupationVigilanceVersions,
+  optionalFiniteNumber,
+  summarizeOccupationAnalysisRows,
   getActiveOccupationVigilanceConfigForAdmin,
   getOccupationAnalysisForAdmin,
   saveOccupationVigilanceDraft,
