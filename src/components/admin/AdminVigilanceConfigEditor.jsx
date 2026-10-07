@@ -171,21 +171,18 @@ function validateForm(form) {
 
 function candidateFromForm(config, form) {
   return {
-    ...config,
     status: 'draft',
     calculationVersion:
       config?.historicalTrend
         ? config.calculationVersion
         : 'occupationVigilance.v1.2',
     thresholds: {
-      ...config.thresholds,
       greenMinRatio: Number(form.greenRatio) / 100,
       yellowMinRatio: Number(form.yellowRatio) / 100,
       orangeMinRatio: Number(form.orangeRatio) / 100,
     },
     minimumGreenActiveOffers: Number(form.minimumGreenActiveOffers),
     historicalTrend: {
-      ...config.historicalTrend,
       weight: Number(form.historicalWeight) / 100,
       stableBand: Number(form.historicalStableBand) / 100,
       minimumYears: Number(form.historicalMinimumYears),
@@ -193,7 +190,6 @@ function candidateFromForm(config, form) {
       maxFactor: Number(form.historicalMaxFactor),
     },
     coefficients: {
-      ...config.coefficients,
       trainingPressurePerFormation: Number(
         form.trainingPressurePerFormation
       ),
