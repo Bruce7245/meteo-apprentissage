@@ -44,6 +44,63 @@ function formatPercent(value) {
   }).format(number);
 }
 
+function percentChange(currentValue, previousValue) {
+  const current = optionalFiniteNumber(currentValue);
+  const previous = optionalFiniteNumber(previousValue);
+
+  if (current === null || previous === null || previous === 0) {
+    return null;
+  }
+
+  return (current - previous) / Math.abs(previous);
+}
+
+function formatSignedNumber(value, maximumFractionDigits = 1) {
+  const number = optionalFiniteNumber(value);
+  if (number === null) return '—';
+
+  const formatted = formatNumber(
+    Math.abs(number),
+    maximumFractionDigits
+  );
+
+  if (number > 0) return '+' + formatted;
+  if (number < 0) return '-' + formatted;
+  return formatted;
+}
+
+function formatSignedPercent(value) {
+  const number = optionalFiniteNumber(value);
+  if (number === null) return '—';
+
+  const formatted = new Intl.NumberFormat('fr-FR', {
+    style: 'percent',
+    maximumFractionDigits: 1,
+  }).format(Math.abs(number));
+
+  if (number > 0) return '+' + formatted;
+  if (number < 0) return '-' + formatted;
+  return formatted;
+}
+
+function formatPercentagePointDelta(currentValue, previousValue) {
+  const current = optionalFiniteNumber(currentValue);
+  const previous = optionalFiniteNumber(previousValue);
+
+  if (current === null || previous === null) return '—';
+
+  const points = (current - previous) * 100;
+  return formatSignedNumber(points, 1) + ' pts';
+}
+
+function transitionLabel(direction) {
+  if (direction === 'worsened') return 'Dégradation';
+  if (direction === 'improved') return 'Amélioration';
+  if (direction === 'unchanged') return 'Stable';
+  if (direction === 'new') return 'Nouveau';
+  return 'Changement de données';
+}
+
 function initialRomeFromLocation() {
   const params = new URLSearchParams(window.location.search);
   return normalizeRomeCode(params.get('rome'));
@@ -86,6 +143,7 @@ export default function AdminSectorDashboardPage() {
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const [selectedDepartmentCode, setSelectedDepartmentCode] = useState('');
+  const [transitionScope, setTransitionScope] = useState('changed');
 
   useEffect(() => {
     let alive = true;
@@ -166,6 +224,40 @@ export default function AdminSectorDashboardPage() {
     [analysis, selectedDepartmentCode]
   );
 
+  const transitionRows = useMemo(() => {
+    const rows = Array.isArray(analysis?.rows) ? analysis.rows : [];
+
+    const rank = {
+      worsened: 0,
+      improved: 1,
+      changed: 2,
+      new: 3,
+      unchanged: 4,
+    };
+
+    return rows
+      .filter((row) =>
+        transitionScope === 'all'
+          ? true
+          : row.transitionDirection !== 'unchanged'
+      )
+      .sort((left, right) => {
+        const directionDiff =
+          (rank[left.transitionDirection] ?? 9) -
+          (rank[right.transitionDirection] ?? 9);
+
+        if (directionDiff !== 0) return directionDiff;
+
+        return String(
+          left.departmentName || left.departmentCode
+        ).localeCompare(
+          String(right.departmentName || right.departmentCode),
+          'fr',
+          { numeric: true }
+        );
+      });
+  }, [analysis?.rows, transitionScope]);
+
   const publicationSignals = useMemo(() => {
     const rows = Array.isArray(analysis?.rows) ? analysis.rows : [];
 
@@ -239,6 +331,7 @@ export default function AdminSectorDashboardPage() {
   const thresholds = config?.thresholds || {};
   const history = config?.historicalTrend || {};
   const summary = analysis?.summary || null;
+  const transitions = summary?.transitions || null;
 
   return (
     <AdminLayout>
@@ -360,6 +453,276 @@ export default function AdminSectorDashboardPage() {
               detail="Diagnostics disposant du meilleur niveau de confiance"
             />
           </section>
+
+          {analysis?.previousRun ? (
+            <section className="panel admin-transition-panel">
+              <div className="section-heading">
+                <div>
+                  <p className="kicker">Évolution quotidienne</p>
+                  <h2>Changements de niveau par département</h2>
+                  <p className="date-line">
+                    Comparaison du run {analysis.previousRun.date || 'précédent'}
+                    {' → '}
+                    {analysis.run?.date || 'actuel'}.
+                    Les calculs de seuils, ratios, tendance, saisonnalité et
+                    confiance restent inchangés et sont conservés plus bas.
+                  </p>
+                </div>
+
+                <div className="admin-transition-switch">
+                  <button
+                    type="button"
+                    className={transitionScope === 'changed' ? 'active' : ''}
+                    onClick={() => setTransitionScope('changed')}
+                  >
+                    Changements
+                  </button>
+                  <button
+                    type="button"
+                    className={transitionScope === 'all' ? 'active' : ''}
+                    onClick={() => setTransitionScope('all')}
+                  >
+                    Tous
+                  </button>
+                </div>
+              </div>
+
+              <div className="metrics-grid admin-transition-summary">
+                <MetricCard
+                  label="Changements"
+                  value={formatNumber(transitions?.changedCount, 0)}
+                  detail={
+                    formatNumber(transitions?.comparableCount, 0) +
+                    ' départements comparables'
+                  }
+                />
+                <MetricCard
+                  label="Dégradations"
+                  value={formatNumber(transitions?.worsenedCount, 0)}
+                  detail="Niveau de vigilance en hausse"
+                />
+                <MetricCard
+                  label="Améliorations"
+                  value={formatNumber(transitions?.improvedCount, 0)}
+                  detail="Niveau de vigilance en baisse"
+                />
+                <MetricCard
+                  label="Stables"
+                  value={formatNumber(transitions?.unchangedCount, 0)}
+                  detail={
+                    formatNumber(transitions?.newCount, 0) +
+                    ' nouvelle(s) observation(s)'
+                  }
+                />
+              </div>
+
+              {transitionRows.length === 0 ? (
+                <div className="admin-console-empty-state admin-transition-empty">
+                  <strong>Aucun changement de niveau</strong>
+                  <p>
+                    Les départements comparables sont restés au même niveau
+                    entre les deux derniers runs.
+                  </p>
+                </div>
+              ) : (
+                <div className="table-wrapper">
+                  <table className="simple-table admin-transition-table">
+                    <thead>
+                      <tr>
+                        <th>Département</th>
+                        <th>Niveau avant</th>
+                        <th>Niveau actuel</th>
+                        <th>Évolution</th>
+                        <th>Offres</th>
+                        <th>Δ offres</th>
+                        <th>Variation</th>
+                        <th>Attendu</th>
+                        <th>Variation attendu</th>
+                        <th>Ratio obs./att.</th>
+                        <th>Δ ratio</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transitionRows.map((row) => {
+                        const offersVariation = percentChange(
+                          row.activeOffersCount,
+                          row.previousActiveOffersCount
+                        );
+                        const expectedDelta =
+                          optionalFiniteNumber(row.expectedOffers) !== null &&
+                          optionalFiniteNumber(row.previousExpectedOffers) !== null
+                            ? Number(row.expectedOffers) -
+                              Number(row.previousExpectedOffers)
+                            : null;
+                        const expectedVariation = percentChange(
+                          row.expectedOffers,
+                          row.previousExpectedOffers
+                        );
+
+                        return (
+                          <tr
+                            key={'transition_' + (row.id || row.departmentCode)}
+                            className={
+                              'admin-transition-row is-' +
+                              (row.transitionDirection || 'changed')
+                            }
+                          >
+                            <td>
+                              <strong>
+                                {row.departmentName || row.departmentCode}
+                              </strong>
+                              <div className="date-line">
+                                {row.departmentCode}
+                              </div>
+                            </td>
+                            <td>
+                              {row.previousPublishedLevel ? (
+                                <span
+                                  className={
+                                    'vigilance-badge vigilance-' +
+                                    getLevelCss(row.previousPublishedLevel)
+                                  }
+                                >
+                                  {getLevelLabel(row.previousPublishedLevel)}
+                                </span>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                            <td>
+                              <span
+                                className={
+                                  'vigilance-badge vigilance-' +
+                                  getLevelCss(row.publishedLevel)
+                                }
+                              >
+                                {getLevelLabel(row.publishedLevel)}
+                              </span>
+                            </td>
+                            <td>
+                              <span
+                                className={
+                                  'admin-transition-direction is-' +
+                                  (row.transitionDirection || 'changed')
+                                }
+                              >
+                                {transitionLabel(row.transitionDirection)}
+                              </span>
+                            </td>
+                            <td>
+                              <strong>
+                                {formatNumber(
+                                  row.previousActiveOffersCount,
+                                  0
+                                )}
+                                {' → '}
+                                {formatNumber(row.activeOffersCount, 0)}
+                              </strong>
+                            </td>
+                            <td>
+                              <span
+                                className={
+                                  'admin-delta ' +
+                                  (Number(row.activeOffersDelta) > 0
+                                    ? 'is-positive'
+                                    : Number(row.activeOffersDelta) < 0
+                                      ? 'is-negative'
+                                      : 'is-neutral')
+                                }
+                              >
+                                {formatSignedNumber(
+                                  row.activeOffersDelta,
+                                  0
+                                )}
+                              </span>
+                            </td>
+                            <td>
+                              <span
+                                className={
+                                  'admin-delta ' +
+                                  (Number(offersVariation) > 0
+                                    ? 'is-positive'
+                                    : Number(offersVariation) < 0
+                                      ? 'is-negative'
+                                      : 'is-neutral')
+                                }
+                              >
+                                {formatSignedPercent(offersVariation)}
+                              </span>
+                            </td>
+                            <td>
+                              <strong>
+                                {formatNumber(
+                                  row.previousExpectedOffers,
+                                  1
+                                )}
+                                {' → '}
+                                {formatNumber(row.expectedOffers, 1)}
+                              </strong>
+                            </td>
+                            <td>
+                              <div className="admin-transition-calculation">
+                                <span>
+                                  {formatSignedNumber(expectedDelta, 1)}
+                                </span>
+                                <small>
+                                  {formatSignedPercent(expectedVariation)}
+                                </small>
+                              </div>
+                            </td>
+                            <td>
+                              <strong>
+                                {formatPercent(
+                                  row.previousObservedVsExpectedRatio
+                                )}
+                                {' → '}
+                                {formatPercent(
+                                  row.observedVsExpectedRatio
+                                )}
+                              </strong>
+                            </td>
+                            <td>
+                              <span
+                                className={
+                                  'admin-delta ' +
+                                  (optionalFiniteNumber(
+                                    row.observedVsExpectedRatio
+                                  ) >
+                                  optionalFiniteNumber(
+                                    row.previousObservedVsExpectedRatio
+                                  )
+                                    ? 'is-positive'
+                                    : optionalFiniteNumber(
+                                          row.observedVsExpectedRatio
+                                        ) <
+                                        optionalFiniteNumber(
+                                          row.previousObservedVsExpectedRatio
+                                        )
+                                      ? 'is-negative'
+                                      : 'is-neutral')
+                                }
+                              >
+                                {formatPercentagePointDelta(
+                                  row.observedVsExpectedRatio,
+                                  row.previousObservedVsExpectedRatio
+                                )}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          ) : analysis?.run ? (
+            <section className="panel state-box">
+              Aucun run antérieur comparable n’est encore disponible pour
+              calculer les transitions de niveau et les variations en
+              pourcentage.
+            </section>
+          ) : null}
 
           {publicationSignals.length > 0 ? (
             <section className="panel">
