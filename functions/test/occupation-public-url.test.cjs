@@ -38,7 +38,7 @@ test('occupation URLs preserve a valid ROME and remove invalid ROME state', asyn
 
   assert.equal(
     occupation.buildOccupationDepartmentUrl('2A', 'd1108'),
-    '/departement/2A?rome=D1108'
+    '/departement/2A?domain=D11&rome=D1108'
   );
   assert.equal(
     occupation.buildOccupationDepartmentUrl('72', ''),
@@ -46,10 +46,52 @@ test('occupation URLs preserve a valid ROME and remove invalid ROME state', asyn
   );
   assert.equal(
     occupation.buildOccupationMapUrl('m1607'),
-    '/metiers?rome=M1607'
+    '/metiers?domain=M16&rome=M1607'
   );
   assert.equal(
     occupation.buildOccupationMapUrl('bad'),
     '/metiers'
+  );
+});
+
+
+test('occupation navigation is sector-first and keeps legacy ROME URLs compatible', async () => {
+  const occupation = await utils();
+
+  assert.deepEqual(
+    occupation.getOccupationNavigationState('?domain=G12'),
+    {
+      domainPresent: true,
+      romePresent: false,
+      valid: true,
+      domainValid: true,
+      romeValid: true,
+      domainCode: 'G12',
+      romeCode: '',
+      inferredDomainCode: '',
+      requestedDomainCode: 'G12',
+      needsCanonicalization: false,
+    }
+  );
+
+  const legacy = occupation.getOccupationNavigationState(
+    '?rome=G1204'
+  );
+
+  assert.equal(legacy.valid, true);
+  assert.equal(legacy.domainCode, 'G12');
+  assert.equal(legacy.romeCode, 'G1204');
+  assert.equal(legacy.domainPresent, false);
+
+  const mismatch = occupation.getOccupationNavigationState(
+    '?domain=D11&rome=G1204'
+  );
+
+  assert.equal(mismatch.domainCode, 'G12');
+  assert.equal(mismatch.needsCanonicalization, true);
+
+  assert.equal(
+    occupation.buildOccupationDomainMapUrl('g12'),
+    '/metiers?domain=G12'
   );
 });
