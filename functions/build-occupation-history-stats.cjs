@@ -2,6 +2,7 @@ const admin = require('firebase-admin');
 const {
   computeRecentOfferTrend,
   computeSeasonalityProfile,
+  computeInterannualTrendProfile,
 } = require('./lib/occupation-history.cjs');
 
 if (!admin.apps.length) {
@@ -157,6 +158,17 @@ async function main() {
         maxFactor: 2,
       }
     );
+    const interannualTrend = computeInterannualTrendProfile(
+      monthlyByKey.get(key) || [],
+      {
+        asOfMonth,
+        minYears: 3,
+        stableBand: 0.05,
+        weight: 0.5,
+        minFactor: 0.9,
+        maxFactor: 1.1,
+      }
+    );
 
     writes.push({
       ref: db.collection('occupationHistoryStats').doc(key),
@@ -167,12 +179,13 @@ async function main() {
         recentWindowStartDate: recentStartDate,
         recentTrend,
         seasonality,
+        interannualTrend,
         sources: {
           recent: 'occupationContextStats',
           monthly: 'lbaOfferStatsByMonthDepartmentRome',
         },
         generatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        schemaVersion: 'occupationHistoryStats.v1',
+        schemaVersion: 'occupationHistoryStats.v2',
       },
     });
   }
@@ -187,7 +200,7 @@ async function main() {
     minActiveSeasonalityMonths: 24,
     completenessThreshold: 0.9,
     generatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    schemaVersion: 'occupationHistoryStatsRun.v1',
+    schemaVersion: 'occupationHistoryStatsRun.v2',
   });
 
   console.log(JSON.stringify({
