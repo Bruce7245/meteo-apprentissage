@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import AdminLayout from '../../layouts/AdminLayout.jsx';
 import MetricCard from '../../components/dashboard/MetricCard.jsx';
 import OccupationSearch from '../../components/occupation/OccupationSearch.jsx';
+import AdminVigilanceConfigEditor from '../../components/admin/AdminVigilanceConfigEditor.jsx';
 import {
   getActiveOccupationVigilanceConfig,
   getOccupationAnalysisForRome,
@@ -828,6 +829,11 @@ export default function AdminSectorDashboardPage() {
               passera à une référence hebdomadaire quand l’historique sera
               suffisamment long et fiable.
             </p>
+
+            <AdminVigilanceConfigEditor
+              config={config}
+              onActivated={() => window.location.reload()}
+            />
           </>
         ) : null}
       </section>
