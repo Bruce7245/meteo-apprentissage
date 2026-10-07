@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import PublicLayout from '../../layouts/PublicLayout.jsx';
 import OccupationDomainBrowser from '../../components/occupation/OccupationDomainBrowser.jsx';
+import JobsFormationsSwitcher from '../../components/JobsFormationsSwitcher.jsx';
 import VigilanceMap from '../../components/maps/VigilanceMap.jsx';
 import VigilanceLegend from '../../components/vigilance/VigilanceLegend.jsx';
 import { getLatestPublicVigilanceIndex } from '../../services/vigilanceService.js';
@@ -328,7 +329,9 @@ export default function PublicOccupationMapPage() {
 
   return (
     <PublicLayout>
-      <section className="public-hero occupation-sector-hero">
+      <JobsFormationsSwitcher active="metiers" />
+
+      <section className="public-hero occupation-sector-hero jobs-formations-hero">
         <div className="public-hero-copy">
           <p className="eyebrow">Métiers</p>
           <h1>
