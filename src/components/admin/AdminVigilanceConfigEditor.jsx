@@ -264,7 +264,8 @@ export default function AdminVigilanceConfigEditor({
       const candidate = candidateFromForm(config, form);
       const result = await previewOccupationVigilanceConfig(
         candidate,
-        romeCode
+        romeCode,
+        config.version
       );
 
       setSimulation(result);
