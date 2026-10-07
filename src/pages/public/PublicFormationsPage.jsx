@@ -120,8 +120,8 @@ export default function PublicFormationsPage() {
     <PublicLayout>
       <JobsFormationsSwitcher active="formations" />
 
-      <section className="public-hero occupation-sector-hero jobs-formations-hero">
-        <div className="public-hero-copy">
+      <section className="jobs-formations-workspace">
+        <div className="jobs-formations-summary-card">
           <p className="eyebrow">Formations</p>
           <h1>
             {selectedDepartmentCode
@@ -136,7 +136,7 @@ export default function PublicFormationsPage() {
           </p>
         </div>
 
-        <div className="occupation-search-card occupation-sector-card jobs-formations-selector-card">
+        <aside className="occupation-search-card occupation-sector-card jobs-formations-selector-card">
           <p className="eyebrow">Exploration territoriale</p>
           <h2>Choisir un département</h2>
           <p>
@@ -193,7 +193,7 @@ export default function PublicFormationsPage() {
               sur ce même parcours sans changer son niveau dans l’interface.
             </p>
           ) : null}
-        </div>
+        </aside>
       </section>
 
       {selectedDepartmentCode ? (
