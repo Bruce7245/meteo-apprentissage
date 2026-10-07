@@ -4,7 +4,9 @@ const assert = require('node:assert/strict');
 const {
   activateOccupationVigilanceDraft,
   bearerToken,
+  compareOccupationConfigRows,
   manualCandidateFromDraft,
+  occupationConfigSummary,
   simulateOccupationRows,
   stableManualVersion,
 } = require('../admin-occupation-vigilance-config.cjs');
@@ -431,4 +433,146 @@ test('simulateOccupationRows ignores snapshots from other ROME codes', () => {
 
   assert.equal(result.summary.departmentsCount, 1);
   assert.equal(result.rows[0].departmentCode, '72');
+});
+
+
+test('occupationConfigSummary exposes comparable metadata without full baselines', () => {
+  const config = validCandidate();
+  config.status = 'validated';
+  config.validatedAt = new Date('2026-10-07T10:00:00Z');
+  config.validatedBy = {
+    uid: 'admin-1',
+    email: 'admin@example.test',
+  };
+
+  const summary = occupationConfigSummary(config);
+
+  assert.equal(summary.version, 'base-config');
+  assert.equal(summary.baselineCount, 1);
+  assert.match(summary.baselineFingerprint, /^[a-f0-9]{12}$/);
+  assert.equal(summary.baselines, undefined);
+  assert.equal(summary.validatedBy.email, 'admin@example.test');
+  assert.equal(summary.validatedAt, '2026-10-07T10:00:00.000Z');
+});
+
+test('compareOccupationConfigRows replays two validated versions on the same snapshots', () => {
+  const leftConfig = validCandidate();
+  leftConfig.status = 'validated';
+  leftConfig.version = 'v-left';
+
+  const rightConfig = validCandidate();
+  rightConfig.status = 'validated';
+  rightConfig.version = 'v-right';
+  rightConfig.thresholds = {
+    greenMinRatio: 0.95,
+    yellowMinRatio: 0.7,
+    orangeMinRatio: 0.45,
+  };
+
+  const result = compareOccupationConfigRows({
+    leftConfig,
+    rightConfig,
+    romeCode: 'D1108',
+    snapshots: [
+      {
+        departmentCode: '72',
+        departmentName: 'Sarthe',
+        romeCode: 'D1108',
+        romeLabel: 'Vente en alimentation',
+        activeOffersCount: 18,
+        population15To29: 100000,
+        formationsCount: 0,
+        employerConcentration: 0.2,
+        recentTrend: { status: 'stable', changeRatio: 0 },
+        seasonality: { status: 'active', factor: 1 },
+        interannualTrend: {
+          status: 'active',
+          direction: 'stable',
+          annualTrendRatio: 0,
+        },
+      },
+      {
+        departmentCode: '44',
+        departmentName: 'Loire-Atlantique',
+        romeCode: 'D1108',
+        romeLabel: 'Vente en alimentation',
+        activeOffersCount: 25,
+        population15To29: 100000,
+        formationsCount: 0,
+        employerConcentration: 0.2,
+        recentTrend: { status: 'stable', changeRatio: 0 },
+        seasonality: { status: 'active', factor: 1 },
+        interannualTrend: {
+          status: 'active',
+          direction: 'stable',
+          annualTrendRatio: 0,
+        },
+      },
+    ],
+  });
+
+  assert.equal(result.summary.departmentsCount, 2);
+  assert.equal(result.summary.changedCount, 1);
+  assert.equal(result.summary.stricterCount, 1);
+  assert.equal(result.summary.softerCount, 0);
+  assert.equal(result.summary.leftLevels.green, 2);
+  assert.equal(result.summary.rightLevels.green, 1);
+  assert.equal(result.summary.rightLevels.yellow, 1);
+
+  const sarthe = result.rows.find(
+    (row) => row.departmentCode === '72'
+  );
+
+  assert.equal(sarthe.leftLevel, 'green');
+  assert.equal(sarthe.rightLevel, 'yellow');
+  assert.equal(sarthe.direction, 'stricter');
+  assert.equal(sarthe.leftExpectedOffers, 20);
+  assert.equal(sarthe.rightExpectedOffers, 20);
+  assert.equal(sarthe.leftEffectiveThresholds.greenMinOffers, 18);
+  assert.equal(sarthe.rightEffectiveThresholds.greenMinOffers, 19);
+});
+
+test('compareOccupationConfigRows can reveal a calibration change independently of threshold changes', () => {
+  const leftConfig = validCandidate();
+  leftConfig.status = 'validated';
+  leftConfig.version = 'v-left';
+
+  const rightConfig = validCandidate();
+  rightConfig.status = 'validated';
+  rightConfig.version = 'v-right';
+  rightConfig.baselines = {
+    D1108: {
+      expectedOffersAtReferencePopulation: 30,
+    },
+  };
+
+  const result = compareOccupationConfigRows({
+    leftConfig,
+    rightConfig,
+    romeCode: 'D1108',
+    snapshots: [
+      {
+        departmentCode: '72',
+        departmentName: 'Sarthe',
+        romeCode: 'D1108',
+        activeOffersCount: 18,
+        population15To29: 100000,
+        formationsCount: 0,
+        employerConcentration: 0.2,
+        recentTrend: { status: 'stable', changeRatio: 0 },
+        seasonality: { status: 'active', factor: 1 },
+        interannualTrend: {
+          status: 'active',
+          direction: 'stable',
+          annualTrendRatio: 0,
+        },
+      },
+    ],
+  });
+
+  assert.equal(result.rows[0].leftExpectedOffers, 20);
+  assert.equal(result.rows[0].rightExpectedOffers, 30);
+  assert.equal(result.rows[0].leftLevel, 'green');
+  assert.equal(result.rows[0].rightLevel, 'orange');
+  assert.equal(result.rows[0].direction, 'stricter');
 });
