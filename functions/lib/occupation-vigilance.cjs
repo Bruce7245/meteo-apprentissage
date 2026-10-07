@@ -372,6 +372,10 @@ function computeExpectedOffers(input, config) {
     );
   }
 
+  const historicalTrendEnabled =
+    !!config.historicalTrend &&
+    typeof config.historicalTrend === 'object' &&
+    !Array.isArray(config.historicalTrend);
   const historicalSettings = historicalTrendSettings(config);
   const interannualStatus = input?.interannualTrend?.status;
   const annualTrendRatio = finiteNumber(
@@ -379,6 +383,7 @@ function computeExpectedOffers(input, config) {
   );
 
   const historicalTrend =
+    historicalTrendEnabled &&
     interannualStatus === 'active' &&
     annualTrendRatio !== null
       ? clamp(
@@ -545,12 +550,14 @@ function computeOccupationVigilance(input, config) {
     reasonCodes.push('RECENT_TREND_DEGRADING');
   }
 
-  if (input?.interannualTrend?.status !== 'active') {
-    reasonCodes.push('INTERANNUAL_TREND_UNAVAILABLE');
-  } else if (input?.interannualTrend?.direction === 'degrading') {
-    reasonCodes.push('INTERANNUAL_TREND_DEGRADING');
-  } else if (input?.interannualTrend?.direction === 'improving') {
-    reasonCodes.push('INTERANNUAL_TREND_IMPROVING');
+  if (config.historicalTrend) {
+    if (input?.interannualTrend?.status !== 'active') {
+      reasonCodes.push('INTERANNUAL_TREND_UNAVAILABLE');
+    } else if (input?.interannualTrend?.direction === 'degrading') {
+      reasonCodes.push('INTERANNUAL_TREND_DEGRADING');
+    } else if (input?.interannualTrend?.direction === 'improving') {
+      reasonCodes.push('INTERANNUAL_TREND_IMPROVING');
+    }
   }
 
   return {
