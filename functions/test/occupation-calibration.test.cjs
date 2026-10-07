@@ -87,6 +87,14 @@ test('buildCalibration derives reference population and per-ROME offer baselines
       result.config.thresholds.orangeMinRatio,
     true
   );
+  assert.deepEqual(result.config.historicalTrend, {
+    minimumYears: 3,
+    weight: 0.5,
+    stableBand: 0.05,
+    minFactor: 0.9,
+    maxFactor: 1.1,
+  });
+  assert.equal(result.config.calculationVersion, 'occupationVigilance.v1.2');
 });
 
 test('buildCalibration refuses sparse history instead of fabricating a production config', () => {
