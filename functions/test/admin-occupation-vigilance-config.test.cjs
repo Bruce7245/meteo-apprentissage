@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   activateOccupationVigilanceDraft,
   bearerToken,
+  manualCandidateFromDraft,
   stableManualVersion,
 } = require('../admin-occupation-vigilance-config.cjs');
 
@@ -247,4 +248,41 @@ test('activateOccupationVigilanceDraft refuses a stale draft', async () => {
   assert.equal(result.status, 409);
   assert.equal(result.errorCode, 'STALE_DRAFT');
   assert.equal(db.writes.length, 0);
+});
+
+
+test('manualCandidateFromDraft keeps calibrated baselines and population immutable', () => {
+  const active = validCandidate();
+  active.status = 'validated';
+
+  const candidate = manualCandidateFromDraft(active, {
+    referencePopulation15To29: 999999,
+    expectedOffersFloor: 999,
+    baselines: {
+      D1108: {
+        expectedOffersAtReferencePopulation: 999,
+      },
+    },
+    thresholds: {
+      greenMinRatio: 0.95,
+      yellowMinRatio: 0.7,
+      orangeMinRatio: 0.45,
+    },
+    historicalTrend: {
+      minimumYears: 3,
+      weight: 0.6,
+      stableBand: 0.05,
+      minFactor: 0.9,
+      maxFactor: 1.1,
+    },
+  });
+
+  assert.equal(candidate.referencePopulation15To29, 100000);
+  assert.equal(candidate.expectedOffersFloor, 0.5);
+  assert.equal(
+    candidate.baselines.D1108.expectedOffersAtReferencePopulation,
+    20
+  );
+  assert.equal(candidate.thresholds.greenMinRatio, 0.95);
+  assert.equal(candidate.historicalTrend.weight, 0.6);
 });
