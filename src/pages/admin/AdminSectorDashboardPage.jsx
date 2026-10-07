@@ -3,6 +3,7 @@ import AdminLayout from '../../layouts/AdminLayout.jsx';
 import MetricCard from '../../components/dashboard/MetricCard.jsx';
 import OccupationSearch from '../../components/occupation/OccupationSearch.jsx';
 import AdminVigilanceConfigEditor from '../../components/admin/AdminVigilanceConfigEditor.jsx';
+import AdminVigilanceVersionHistory from '../../components/admin/AdminVigilanceVersionHistory.jsx';
 import {
   getActiveOccupationVigilanceConfig,
   getOccupationAnalysisForRome,
@@ -834,6 +835,10 @@ export default function AdminSectorDashboardPage() {
               config={config}
               romeCode={romeCode}
               onActivated={() => window.location.reload()}
+            />
+
+            <AdminVigilanceVersionHistory
+              romeCode={romeCode}
             />
           </>
         ) : null}
