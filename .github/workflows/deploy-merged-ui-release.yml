@@ -1,0 +1,389 @@
+name: Deploy merged UI release
+
+on:
+  push:
+    branches:
+      - release/merged-ui-71
+    paths:
+      - .github/workflows/deploy-merged-ui-release.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy merged UI from main
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+
+    env:
+      EXPECTED_MAIN_SHA: 9cd88a4eb2078ae98c2717f7bae35353362156dc
+
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Verify deployed commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_sha="$(git rev-parse HEAD)"
+          echo "main -> $current_sha"
+
+          if [ "$current_sha" != "$EXPECTED_MAIN_SHA" ]; then
+            echo "Main moved since release authorization." >&2
+            echo "Expected: $EXPECTED_MAIN_SHA" >&2
+            echo "Actual:   $current_sha" >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          npm ci
+          npm ci --prefix functions
+
+      - name: Validate merged application
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run build
+          node --check functions/index.js
+          npm run test:unit --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Preflight production data
+        working-directory: functions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const { initializeApp, getApps } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
+
+          if (getApps().length === 0) {
+            initializeApp({ projectId: 'meteo-apprentissage' });
+          }
+
+          const db = getFirestore();
+
+          function setEnv(key, value) {
+            fs.appendFileSync(
+              process.env.GITHUB_ENV,
+              key + '=' + String(value) + '\n'
+            );
+          }
+
+          (async () => {
+            const pointerSnap = await db
+              .collection('publicOccupationVigilanceIndex')
+              .doc('current')
+              .get();
+
+            if (!pointerSnap.exists) {
+              throw new Error('publicOccupationVigilanceIndex/current missing');
+            }
+
+            const pointer = pointerSnap.data() || {};
+            const runId = String(pointer.runId || '').trim();
+
+            if (!runId) {
+              throw new Error('Published occupation runId missing');
+            }
+
+            const mapSnap = await db
+              .collection('publicOccupationVigilanceMaps')
+              .doc(runId)
+              .collection('entries')
+              .limit(1)
+              .get();
+
+            if (mapSnap.empty) {
+              throw new Error('No published occupation map entry');
+            }
+
+            const mapEntry = mapSnap.docs[0].data() || {};
+            const romeCode = String(mapEntry.romeCode || '').trim();
+
+            if (!/^[A-Z][0-9]{4}$/.test(romeCode)) {
+              throw new Error('Invalid published ROME sample');
+            }
+
+            const detailSnap = await db
+              .collection('publicOccupationVigilanceDetails')
+              .doc(runId)
+              .collection('entries')
+              .where('romeCode', '==', romeCode)
+              .limit(1)
+              .get();
+
+            if (detailSnap.empty) {
+              throw new Error('No published detail for ROME ' + romeCode);
+            }
+
+            const detail = detailSnap.docs[0].data() || {};
+            const departmentCode = String(detail.departmentCode || '').trim();
+
+            if (!departmentCode) {
+              throw new Error('Published occupation detail has no department');
+            }
+
+            const formationSnap = await db
+              .collection('formationDepartmentStats')
+              .limit(1)
+              .get();
+
+            if (formationSnap.empty) {
+              throw new Error('No formationDepartmentStats available');
+            }
+
+            const formationDepartment = String(
+              formationSnap.docs[0].data()?.departmentCode ||
+              formationSnap.docs[0].id
+            ).trim();
+
+            const dailyDatesSnap = await db
+              .collection('dailyOfferSnapshots')
+              .get();
+
+            const dates = dailyDatesSnap.docs
+              .map((doc) => doc.id)
+              .sort((a, b) => String(b).localeCompare(String(a)));
+
+            let offersDepartment = '';
+
+            for (const date of dates.slice(0, 10)) {
+              const departments = await db
+                .collection('dailyOfferSnapshots')
+                .doc(date)
+                .collection('departments')
+                .limit(1)
+                .get();
+
+              if (!departments.empty) {
+                const candidate = departments.docs[0];
+                const data = candidate.data() || {};
+
+                if (String(data.activeRunId || '').trim()) {
+                  offersDepartment = candidate.id;
+                  break;
+                }
+              }
+            }
+
+            if (!offersDepartment) {
+              throw new Error('No recent public offers department found');
+            }
+
+            const searchMeta = await db
+              .collection('publicOccupationSearchIndexMeta')
+              .doc('current')
+              .get();
+
+            if (!searchMeta.exists) {
+              throw new Error('Public occupation search index missing');
+            }
+
+            const searchRunId = String(
+              searchMeta.data()?.runId || ''
+            ).trim();
+
+            if (!searchRunId) {
+              throw new Error('Public occupation search runId missing');
+            }
+
+            const searchRun = await db
+              .collection('publicOccupationSearchIndexes')
+              .doc(searchRunId)
+              .get();
+
+            if (!searchRun.exists || searchRun.data()?.status !== 'ready') {
+              throw new Error('Public occupation search index not ready');
+            }
+
+            setEnv('SMOKE_ROME', romeCode);
+            setEnv('SMOKE_DEPARTMENT', departmentCode);
+            setEnv('FORMATION_DEPARTMENT', formationDepartment);
+            setEnv('OFFERS_DEPARTMENT', offersDepartment);
+
+            console.log(JSON.stringify({
+              publishedRunId: runId,
+              smokeRome: romeCode,
+              smokeDepartment: departmentCode,
+              formationDepartment,
+              offersDepartment,
+              searchRunId,
+            }, null, 2));
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Deploy UI Functions only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy \
+            --project meteo-apprentissage \
+            --only "functions:getPublicOccupationSearchHttp,functions:getPublicOccupationMapHttp,functions:getPublicOccupationDepartmentHttp,functions:getPublicFormationDepartmentStatsHttp,functions:getPublicDepartmentOffersHttp,functions:getActiveOccupationVigilanceConfigHttp,functions:getOccupationVigilanceAnalysisHttp,functions:saveOccupationVigilanceConfigDraftHttp,functions:previewOccupationVigilanceConfigHttp,functions:getOccupationVigilanceConfigHistoryHttp,functions:compareOccupationVigilanceConfigsHttp,functions:activateOccupationVigilanceConfigHttp" \
+            --non-interactive
+
+      - name: Verify protected admin Functions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_401() {
+            name="$1"
+            url="$2"
+            status="$(curl --silent --show-error \
+              --output /tmp/"$name".json \
+              --write-out "%{http_code}" \
+              --max-time 30 \
+              --request POST \
+              --header "Content-Type: application/json" \
+              --data '{}' \
+              "$url")"
+
+            echo "$name -> HTTP $status"
+
+            if [ "$status" != "401" ]; then
+              cat /tmp/"$name".json
+              exit 1
+            fi
+          }
+
+          base="https://europe-west1-meteo-apprentissage.cloudfunctions.net"
+
+          check_401 getActiveOccupationVigilanceConfigHttp "$base/getActiveOccupationVigilanceConfigHttp"
+          check_401 getOccupationVigilanceAnalysisHttp "$base/getOccupationVigilanceAnalysisHttp"
+          check_401 saveOccupationVigilanceConfigDraftHttp "$base/saveOccupationVigilanceConfigDraftHttp"
+          check_401 previewOccupationVigilanceConfigHttp "$base/previewOccupationVigilanceConfigHttp"
+          check_401 getOccupationVigilanceConfigHistoryHttp "$base/getOccupationVigilanceConfigHistoryHttp"
+          check_401 compareOccupationVigilanceConfigsHttp "$base/compareOccupationVigilanceConfigsHttp"
+          check_401 activateOccupationVigilanceConfigHttp "$base/activateOccupationVigilanceConfigHttp"
+
+      - name: Verify public UI Functions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_200() {
+            name="$1"
+            url="$2"
+            status="$(curl --silent --show-error \
+              --location \
+              --output /tmp/"$name".json \
+              --write-out "%{http_code}" \
+              --max-time 30 \
+              "$url")"
+
+            echo "$name -> HTTP $status"
+
+            if [ "$status" != "200" ]; then
+              cat /tmp/"$name".json
+              exit 1
+            fi
+          }
+
+          base="https://europe-west1-meteo-apprentissage.cloudfunctions.net"
+
+          check_200 search "$base/getPublicOccupationSearchHttp?q=$SMOKE_ROME"
+          check_200 map "$base/getPublicOccupationMapHttp?rome=$SMOKE_ROME"
+          check_200 detail "$base/getPublicOccupationDepartmentHttp?department=$SMOKE_DEPARTMENT&rome=$SMOKE_ROME"
+          check_200 formations "$base/getPublicFormationDepartmentStatsHttp?department=$FORMATION_DEPARTMENT"
+          check_200 offers "$base/getPublicDepartmentOffersHttp?department=$OFFERS_DEPARTMENT&limit=1"
+
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          for (const name of [
+            'search',
+            'map',
+            'detail',
+            'formations',
+            'offers',
+          ]) {
+            const payload = JSON.parse(
+              fs.readFileSync('/tmp/' + name + '.json', 'utf8')
+            );
+
+            if (payload?.ok !== true) {
+              throw new Error(name + ' returned ok != true');
+            }
+          }
+          NODE
+
+      - name: Deploy Firebase Hosting
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy \
+            --project meteo-apprentissage \
+            --only hosting \
+            --non-interactive
+
+      - name: Verify Hosting routes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for url in \
+            "https://meteo-apprentissage.web.app/" \
+            "https://meteo-apprentissage.web.app/metiers?rome=$SMOKE_ROME" \
+            "https://meteo-apprentissage.web.app/departement/$SMOKE_DEPARTMENT?rome=$SMOKE_ROME" \
+            "https://meteo-apprentissage.web.app/admin/secteurs"
+          do
+            status="$(curl --silent --show-error \
+              --location \
+              --output /dev/null \
+              --write-out "%{http_code}" \
+              --max-time 30 \
+              "$url")"
+
+            echo "$url -> HTTP $status"
+
+            if [ "$status" != "200" ]; then
+              exit 1
+            fi
+          done
+
+      - name: Release summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Merged UI release"
+            echo
+            echo "- Source branch checked out: main"
+            echo "- Source commit: \`$EXPECTED_MAIN_SHA\`"
+            echo "- 12 targeted HTTP Functions"
+            echo "- Firebase Hosting"
+            echo
+            echo "### Excluded"
+            echo "- No scheduler deployment"
+            echo "- No vigilance run"
+            echo "- No backfill/import"
+            echo "- No Firestore rules deployment"
+            echo "- No config activation"
+          } >> "$GITHUB_STEP_SUMMARY"
