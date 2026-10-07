@@ -23,6 +23,15 @@ function formatNumber(value, maximumFractionDigits = 2) {
   }).format(number);
 }
 
+function optionalFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function formatPercent(value) {
   if (value === null || value === undefined || value === '') return '—';
 
@@ -51,9 +60,9 @@ function thresholdText(row) {
 }
 
 function factorLabel(value) {
-  const number = Number(value);
+  const number = optionalFiniteNumber(value);
 
-  if (!Number.isFinite(number)) return '—';
+  if (number === null) return '—';
   if (number > 1.001) return '×' + formatNumber(number) + ' ↑';
   if (number < 0.999) return '×' + formatNumber(number) + ' ↓';
   return '×1';
@@ -164,15 +173,21 @@ export default function AdminSectorDashboardPage() {
       .filter((row) => {
         if (row.publishedLevel === 'insufficient_data') return false;
 
-        const ratio = Number(row.observedVsExpectedRatio);
-        return Number.isFinite(ratio);
+        const ratio = optionalFiniteNumber(
+          row.observedVsExpectedRatio
+        );
+        return ratio !== null;
       })
       .map((row) => {
-        const ratio = Number(row.observedVsExpectedRatio);
-        const annualTrend = Number(
+        const ratio = optionalFiniteNumber(
+          row.observedVsExpectedRatio
+        );
+        const annualTrend = optionalFiniteNumber(
           row.interannualTrend?.annualTrendRatio
         );
-        const recentTrend = Number(row.recentTrend?.changeRatio);
+        const recentTrend = optionalFiniteNumber(
+          row.recentTrend?.changeRatio
+        );
 
         let editorialScore = Math.max(0, 1 - ratio) * 100;
 
@@ -184,17 +199,15 @@ export default function AdminSectorDashboardPage() {
         ) {
           editorialScore += 20;
         }
-        if (Number.isFinite(recentTrend) && recentTrend <= -0.1) {
+        if (recentTrend !== null && recentTrend <= -0.1) {
           editorialScore += 10;
         }
 
         return {
           ...row,
           editorialScore,
-          annualTrend:
-            Number.isFinite(annualTrend) ? annualTrend : null,
-          recentTrend:
-            Number.isFinite(recentTrend) ? recentTrend : null,
+          annualTrend,
+          recentTrend,
         };
       })
       .filter(
@@ -304,7 +317,14 @@ export default function AdminSectorDashboardPage() {
               value={formatNumber(summary.totalObservedOffers, 0)}
               detail={
                 'Attendu cumulé : ' +
-                formatNumber(summary.totalExpectedOffers, 0)
+                (summary.totalExpectedOffers === null
+                  ? 'Indisponible'
+                  : formatNumber(summary.totalExpectedOffers, 0)) +
+                ' · calculable pour ' +
+                formatNumber(summary.expectedOffersAvailableCount, 0) +
+                '/' +
+                formatNumber(summary.departmentsCount, 0) +
+                ' départements'
               }
             />
             <MetricCard
