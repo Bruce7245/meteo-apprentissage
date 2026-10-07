@@ -3,6 +3,11 @@ name: Deploy occupation vigilance admin
 on:
   workflow_dispatch:
     inputs:
+      confirm_production:
+        description: "Type DEPLOY to confirm production deployment"
+        required: true
+        default: ""
+        type: string
       deploy_functions:
         description: "Deploy targeted occupation vigilance admin Functions"
         required: true
@@ -30,13 +35,28 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: Enforce deployment branch
+      - name: Enforce deployment branch and confirmation
         shell: bash
+        env:
+          CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+          DEPLOY_HOSTING: ${{ inputs.deploy_hosting }}
         run: |
           set -euo pipefail
+
           if [ "$GITHUB_REF_NAME" != "feat/occupation-search-37" ]; then
             echo "Deployment refused from branch: $GITHUB_REF_NAME" >&2
             echo "Expected: feat/occupation-search-37" >&2
+            exit 1
+          fi
+
+          if [ "$CONFIRM_PRODUCTION" != "DEPLOY" ]; then
+            echo "Production deployment requires confirm_production=DEPLOY" >&2
+            exit 1
+          fi
+
+          if [ "$DEPLOY_HOSTING" = "true" ]; then
+            echo "Hosting deployment is intentionally blocked from feat/occupation-search-37." >&2
+            echo "This branch is highly divergent from main; deploy Hosting only from a dedicated reconciled branch." >&2
             exit 1
           fi
 
@@ -69,10 +89,6 @@ jobs:
         if: ${{ inputs.deploy_functions }}
         run: npm ci --prefix functions
 
-      - name: Install frontend dependencies
-        if: ${{ inputs.deploy_hosting }}
-        run: npm ci
-
       - name: Validate targeted backend
         if: ${{ inputs.deploy_functions }}
         working-directory: functions
@@ -92,10 +108,6 @@ jobs:
           grep -q "occupationVigilanceConfigAudit" firestore.rules
           grep -q "occupationVigilanceSnapshots" firestore.rules
 
-      - name: Build frontend
-        if: ${{ inputs.deploy_hosting }}
-        run: npm run build
-
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -114,13 +126,6 @@ jobs:
         run: |
           set -euo pipefail
           npx --yes firebase-tools@latest deploy             --project meteo-apprentissage             --only firestore:rules             --non-interactive
-
-      - name: Deploy Hosting
-        if: ${{ inputs.deploy_hosting }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx --yes firebase-tools@latest deploy             --project meteo-apprentissage             --only hosting             --non-interactive
 
       - name: Verify admin Functions are reachable
         if: ${{ inputs.deploy_functions }}
@@ -166,7 +171,7 @@ jobs:
             echo "- Branch: \`$GITHUB_REF_NAME\`"
             echo "- Functions: \`$DEPLOY_FUNCTIONS\`"
             echo "- Firestore rules: \`$DEPLOY_RULES\`"
-            echo "- Hosting: \`$DEPLOY_HOSTING\`"
+            echo "- Hosting requested: \`$DEPLOY_HOSTING\` (blocked on this branch)"
             echo
             echo "### Safety"
             echo "- No occupation vigilance run was triggered."
