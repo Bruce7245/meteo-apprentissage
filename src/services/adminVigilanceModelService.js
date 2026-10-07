@@ -254,7 +254,8 @@ async function postAdminOccupationConfig(endpoint, body, fallbackMessage) {
 
 export async function previewOccupationVigilanceConfig(
   candidateConfig,
-  romeCode
+  romeCode,
+  baseConfigVersion
 ) {
   const rome = normalizeRomeCode(romeCode);
 
@@ -269,6 +270,7 @@ export async function previewOccupationVigilanceConfig(
     {
       candidateConfig: cleanConfigForDraft(candidateConfig),
       romeCode: rome,
+      baseConfigVersion: String(baseConfigVersion || '').trim(),
     },
     'Impossible de simuler la configuration métier.'
   );
