@@ -14581,6 +14581,42 @@ exports.runOccupationVigilanceHttp = onRequest(
 );
 
 
+const adminAuth = require('./lib/admin-auth.cjs');
+
+exports.getAdminSessionHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await adminAuth.handleAdminSession({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
+exports.recordAdminLogoutHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await adminAuth.handleAdminLogout({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
 const occupationVigilanceAdminConfig = require('./admin-occupation-vigilance-config.cjs');
 
 exports.getActiveOccupationVigilanceConfigHttp = onRequest(

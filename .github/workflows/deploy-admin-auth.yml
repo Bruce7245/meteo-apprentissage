@@ -1,0 +1,173 @@
+name: Deploy admin auth
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_deploy:
+        description: "Type DEPLOY to confirm production deployment"
+        required: true
+        default: ""
+        type: string
+      password_provider_enabled:
+        description: "Firebase Email/Password provider is enabled"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy admin authentication
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+
+    steps:
+      - name: Enforce main and explicit confirmation
+        shell: bash
+        env:
+          CONFIRM_DEPLOY: ${{ inputs.confirm_deploy }}
+          PASSWORD_PROVIDER_ENABLED: ${{ inputs.password_provider_enabled }}
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Deployment refused from branch: $GITHUB_REF_NAME" >&2
+            echo "Expected: main" >&2
+            exit 1
+          fi
+
+          if [ "$CONFIRM_DEPLOY" != "DEPLOY" ]; then
+            echo "Production deployment requires confirm_deploy=DEPLOY" >&2
+            exit 1
+          fi
+
+          if [ "$PASSWORD_PROVIDER_ENABLED" != "true" ]; then
+            echo "Enable Firebase Email/Password authentication before deployment." >&2
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Validate admin authentication
+        run: |
+          set -euo pipefail
+          node --check functions/lib/admin-auth.cjs
+          node --check functions/admin-occupation-vigilance-config.cjs
+          node --check functions/index.js
+          node --check scripts/create-admin.cjs
+          npm run build
+          cd functions
+          node --test test/admin-auth.test.cjs test/admin-occupation-vigilance-config.test.cjs
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Deploy admin auth Functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy \
+            --project meteo-apprentissage \
+            --only "functions:getAdminSessionHttp,functions:recordAdminLogoutHttp" \
+            --non-interactive
+
+      - name: Verify Functions reject unauthenticated access
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_401() {
+            name="$1"
+            url="$2"
+            body_file="$(mktemp)"
+            status="$(curl --silent --show-error \
+              --output "$body_file" \
+              --write-out "%{http_code}" \
+              --max-time 30 \
+              --request POST \
+              --header "Content-Type: application/json" \
+              --data '{}' \
+              "$url")"
+
+            echo "$name -> HTTP $status"
+            cat "$body_file"
+            echo
+
+            if [ "$status" != "401" ]; then
+              echo "Unexpected status for $name: expected 401 without auth." >&2
+              exit 1
+            fi
+          }
+
+          check_401 \
+            "getAdminSessionHttp" \
+            "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getAdminSessionHttp"
+
+          check_401 \
+            "recordAdminLogoutHttp" \
+            "https://europe-west1-meteo-apprentissage.cloudfunctions.net/recordAdminLogoutHttp"
+
+      - name: Deploy Hosting
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy \
+            --project meteo-apprentissage \
+            --only hosting \
+            --non-interactive
+
+      - name: Verify admin page
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error \
+            --location \
+            --output /tmp/admin-auth.html \
+            --write-out "%{http_code}" \
+            --max-time 30 \
+            "https://meteo-apprentissage.web.app/admin")"
+
+          echo "Admin page -> HTTP $status"
+
+          if [ "$status" != "200" ]; then
+            exit 1
+          fi
+
+          test -s /tmp/admin-auth.html
+
+      - name: Deployment summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Admin authentication deployment"
+            echo
+            echo "- Commit: `$GITHUB_SHA`"
+            echo "- Branch: `$GITHUB_REF_NAME`"
+            echo "- Auth mode: Firebase Email/Password"
+            echo "- Functions: getAdminSessionHttp, recordAdminLogoutHttp"
+            echo "- Hosting: deployed after protected Functions"
+            echo
+            echo "No admin password is stored in the repository or workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
