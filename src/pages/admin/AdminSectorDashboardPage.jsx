@@ -155,6 +155,55 @@ export default function AdminSectorDashboardPage() {
     [analysis, selectedDepartmentCode]
   );
 
+  const publicationSignals = useMemo(() => {
+    const rows = Array.isArray(analysis?.rows) ? analysis.rows : [];
+
+    return rows
+      .filter((row) => {
+        if (row.publishedLevel === 'insufficient_data') return false;
+
+        const ratio = Number(row.observedVsExpectedRatio);
+        return Number.isFinite(ratio);
+      })
+      .map((row) => {
+        const ratio = Number(row.observedVsExpectedRatio);
+        const annualTrend = Number(
+          row.interannualTrend?.annualTrendRatio
+        );
+        const recentTrend = Number(row.recentTrend?.changeRatio);
+
+        let editorialScore = Math.max(0, 1 - ratio) * 100;
+
+        if (row.publishedLevel === 'red') editorialScore += 50;
+        if (row.publishedLevel === 'orange') editorialScore += 30;
+        if (
+          row.interannualTrend?.status === 'active' &&
+          row.interannualTrend?.direction === 'degrading'
+        ) {
+          editorialScore += 20;
+        }
+        if (Number.isFinite(recentTrend) && recentTrend <= -0.1) {
+          editorialScore += 10;
+        }
+
+        return {
+          ...row,
+          editorialScore,
+          annualTrend:
+            Number.isFinite(annualTrend) ? annualTrend : null,
+          recentTrend:
+            Number.isFinite(recentTrend) ? recentTrend : null,
+        };
+      })
+      .filter(
+        (row) =>
+          ['red', 'orange'].includes(row.publishedLevel) ||
+          row.interannualTrend?.direction === 'degrading'
+      )
+      .sort((a, b) => b.editorialScore - a.editorialScore)
+      .slice(0, 5);
+  }, [analysis]);
+
   function selectOccupation(selection) {
     const nextRome = normalizeRomeCode(selection?.romeCode);
 
@@ -276,6 +325,78 @@ export default function AdminSectorDashboardPage() {
               detail="Diagnostics disposant du meilleur niveau de confiance"
             />
           </section>
+
+          {publicationSignals.length > 0 ? (
+            <section className="panel">
+              <div className="section-heading">
+                <div>
+                  <p className="kicker">Radar éditorial</p>
+                  <h2>Signaux à regarder pour une publication</h2>
+                </div>
+                <span className="soft-pill">
+                  {publicationSignals.length} signal
+                  {publicationSignals.length > 1 ? 's' : ''}
+                </span>
+              </div>
+
+              <div className="admin-publication-signal-grid">
+                {publicationSignals.map((row) => (
+                  <button
+                    type="button"
+                    key={'signal_' + row.departmentCode}
+                    className="admin-publication-signal"
+                    onClick={() =>
+                      setSelectedDepartmentCode(row.departmentCode)
+                    }
+                  >
+                    <span className="admin-publication-signal-head">
+                      <strong>
+                        {row.departmentName || row.departmentCode}
+                      </strong>
+                      <span
+                        className={
+                          'vigilance-badge vigilance-' +
+                          getLevelCss(row.publishedLevel)
+                        }
+                      >
+                        {getLevelLabel(row.publishedLevel)}
+                      </span>
+                    </span>
+
+                    <span className="admin-publication-signal-value">
+                      {formatNumber(row.activeOffersCount, 0)} offres
+                      {' / '}
+                      {formatNumber(row.expectedOffers, 1)} attendues
+                    </span>
+
+                    <span className="admin-publication-signal-meta">
+                      Écart au niveau attendu :{' '}
+                      {formatPercent(
+                        Number(row.observedVsExpectedRatio) - 1
+                      )}
+                    </span>
+
+                    <span className="admin-publication-signal-meta">
+                      Interannuel :{' '}
+                      {row.annualTrend === null
+                        ? trendLabel(row.interannualTrend)
+                        : formatPercent(row.annualTrend)}
+                      {' · '}
+                      récent :{' '}
+                      {row.recentTrend === null
+                        ? '—'
+                        : formatPercent(row.recentTrend)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <p className="date-line">
+                Ce radar classe des écarts déjà calculés. Il ne publie rien et
+                ne remplace pas la vérification humaine des données.
+              </p>
+            </section>
+          ) : null}
 
           <section className="panel">
             <div className="section-heading">
