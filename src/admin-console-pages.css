@@ -875,3 +875,254 @@
     justify-self: start;
   }
 }
+
+
+/* Stats & publications (#82) */
+
+.admin-stats-filter-panel {
+  margin-bottom: 18px;
+}
+
+.admin-stats-period-switch {
+  display: inline-flex;
+  gap: 4px;
+  border: 1px solid #dfe6ed;
+  border-radius: 11px;
+  padding: 4px;
+  background: #f7f9fb;
+}
+
+.admin-stats-period-switch button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: transparent;
+  color: #718196;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
+.admin-stats-period-switch button.active {
+  background: #ffffff;
+  color: #17334f;
+  box-shadow: 0 2px 8px rgba(15, 33, 55, 0.08);
+}
+
+.admin-stats-two-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.55fr);
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.admin-stats-two-columns > .panel {
+  margin-bottom: 0;
+}
+
+.admin-stats-chart-canvas {
+  width: 100%;
+  min-width: 0;
+}
+
+.admin-stats-level-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-stats-level-summary > div {
+  min-height: 106px;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  border: 1px solid #e4eaf0;
+  border-radius: 13px;
+  padding: 13px;
+  background: #fbfcfd;
+}
+
+.admin-stats-level-summary strong,
+.admin-stats-level-summary small {
+  display: block;
+}
+
+.admin-stats-level-summary strong {
+  color: #1f3851;
+  font-size: 1.55rem;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.admin-stats-level-summary small {
+  color: #8997a7;
+  font-size: 0.67rem;
+}
+
+.admin-stats-current-ratio {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  border-top: 1px solid #e7ecf1;
+  padding-top: 15px;
+}
+
+.admin-stats-current-ratio span {
+  color: #748396;
+  font-size: 0.72rem;
+}
+
+.admin-stats-current-ratio strong {
+  color: #17334f;
+  font-size: 1.35rem;
+  letter-spacing: -0.04em;
+}
+
+.admin-stats-ranking-select {
+  min-width: 245px;
+}
+
+.admin-stats-ranking-table {
+  min-width: 1120px !important;
+}
+
+.admin-stats-ranking-table tbody tr.is-selected {
+  background: #f3f8fb;
+  box-shadow: inset 3px 0 0 #3f7ca3;
+}
+
+.admin-stats-department-history {
+  overflow: hidden;
+}
+
+.admin-stats-level-timeline {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+  overflow-x: auto;
+  padding: 4px 2px 8px;
+}
+
+.admin-stats-level-timeline > div {
+  flex: 0 0 auto;
+  min-width: 104px;
+  display: grid;
+  gap: 7px;
+  border: 1px solid #e4e9ef;
+  border-radius: 11px;
+  padding: 10px;
+  background: #fbfcfd;
+}
+
+.admin-stats-level-timeline > div > span:first-child {
+  color: #8a98a8;
+  font-size: 0.64rem;
+  font-weight: 750;
+}
+
+.admin-stats-publication-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-stats-publication-grid > article {
+  min-height: 210px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e2e8ee;
+  border-radius: 15px;
+  padding: 16px;
+  background: #fbfcfd;
+}
+
+.admin-stats-angle-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: #edf4f8;
+  color: #2f6c93;
+}
+
+.admin-stats-publication-grid p {
+  margin: 15px 0 5px;
+  color: #7c8a9a;
+  font-size: 0.7rem;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.admin-stats-publication-grid strong {
+  color: #203a53;
+  font-size: 1.1rem;
+  letter-spacing: -0.025em;
+}
+
+.admin-stats-publication-grid small {
+  margin-top: 6px;
+  color: #7e8d9e;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.admin-stats-publication-grid button {
+  margin-top: auto;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #dbe4eb;
+  border-radius: 10px;
+  padding: 0 11px;
+  background: #ffffff;
+  color: #315f7e;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
+.admin-stats-publication-grid button:hover:not(:disabled) {
+  border-color: #c5d4df;
+  background: #f7fafc;
+}
+
+.admin-stats-publication-grid button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1100px) {
+  .admin-stats-two-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-stats-publication-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .admin-stats-filter-panel .section-heading {
+    display: grid;
+  }
+
+  .admin-stats-period-switch {
+    justify-self: start;
+  }
+
+  .admin-stats-level-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-stats-ranking-select {
+    min-width: 0;
+    width: 100%;
+  }
+}
