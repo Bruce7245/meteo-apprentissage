@@ -331,8 +331,8 @@ export default function PublicOccupationMapPage() {
     <PublicLayout>
       <JobsFormationsSwitcher active="metiers" />
 
-      <section className="public-hero occupation-sector-hero jobs-formations-hero">
-        <div className="public-hero-copy">
+      <section className="jobs-formations-workspace">
+        <div className="jobs-formations-summary-card">
           <p className="eyebrow">Métiers</p>
           <h1>
             {occupationMode
@@ -374,7 +374,7 @@ export default function PublicOccupationMapPage() {
           ) : null}
         </div>
 
-        <div className="occupation-search-card occupation-sector-card">
+        <aside className="occupation-search-card occupation-sector-card jobs-formations-selector-card">
           <p className="eyebrow">Parcours guidé</p>
           <h2>Choisir un secteur puis un métier</h2>
           <p>
@@ -393,7 +393,7 @@ export default function PublicOccupationMapPage() {
             onDomainSelect={selectDomain}
             onOccupationSelect={selectOccupation}
           />
-        </div>
+        </aside>
       </section>
 
       {invalidSelection ? (
