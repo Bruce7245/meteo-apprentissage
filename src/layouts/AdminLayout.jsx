@@ -2,12 +2,14 @@ import React from 'react';
 import {
   FiActivity,
   FiBriefcase,
+  FiChevronDown,
   FiChevronRight,
   FiFileText,
   FiGrid,
   FiHome,
   FiMap,
   FiMapPin,
+  FiMenu,
   FiMonitor,
 } from 'react-icons/fi';
 import AdminAuthGate from '../components/auth/AdminAuthGate.jsx';
@@ -42,6 +44,38 @@ function isActivePath(currentPath, href) {
     : currentPath === href || currentPath.startsWith(href + '/');
 }
 
+function AdminNavigation({ currentPath, mobile = false }) {
+  return (
+    <nav
+      className={mobile ? 'admin-console-mobile-nav' : 'admin-console-nav'}
+      aria-label={mobile ? 'Navigation administration mobile' : 'Navigation administration'}
+    >
+      {adminGroups.map((group) => (
+        <div className="admin-console-nav-group" key={group.label}>
+          <p>{group.label}</p>
+          {group.links.map((link) => {
+            const Icon = link.icon;
+            const active = isActivePath(currentPath, link.href);
+
+            return (
+              <a
+                key={link.href}
+                href={link.href}
+                className={active ? 'active' : ''}
+                aria-current={active ? 'page' : undefined}
+              >
+                <Icon aria-hidden="true" />
+                <span>{link.label}</span>
+                <FiChevronRight className="admin-console-nav-arrow" aria-hidden="true" />
+              </a>
+            );
+          })}
+        </div>
+      ))}
+    </nav>
+  );
+}
+
 export default function AdminLayout({ children }) {
   const currentPath = window.location.pathname.replace(/\/+$/, '') || '/';
 
@@ -60,30 +94,7 @@ export default function AdminLayout({ children }) {
             <span className="admin-console-environment">PRODUCTION</span>
           </div>
 
-          <nav className="admin-console-nav" aria-label="Navigation administration">
-            {adminGroups.map((group) => (
-              <div className="admin-console-nav-group" key={group.label}>
-                <p>{group.label}</p>
-                {group.links.map((link) => {
-                  const Icon = link.icon;
-                  const active = isActivePath(currentPath, link.href);
-
-                  return (
-                    <a
-                      key={link.href}
-                      href={link.href}
-                      className={active ? 'active' : ''}
-                      aria-current={active ? 'page' : undefined}
-                    >
-                      <Icon aria-hidden="true" />
-                      <span>{link.label}</span>
-                      <FiChevronRight className="admin-console-nav-arrow" aria-hidden="true" />
-                    </a>
-                  );
-                })}
-              </div>
-            ))}
-          </nav>
+          <AdminNavigation currentPath={currentPath} />
 
           <div className="admin-console-sidebar-footer">
             <a href="/" className="admin-console-public-link">
@@ -114,7 +125,21 @@ export default function AdminLayout({ children }) {
                 <small>Administration</small>
               </span>
             </a>
-            <a href="/" className="admin-console-mobile-public">Public</a>
+
+            <details className="admin-console-mobile-menu">
+              <summary>
+                <FiMenu aria-hidden="true" />
+                <span>Menu</span>
+                <FiChevronDown aria-hidden="true" />
+              </summary>
+              <div className="admin-console-mobile-menu-panel">
+                <AdminNavigation currentPath={currentPath} mobile />
+                <a href="/" className="admin-console-mobile-public">
+                  <FiGrid aria-hidden="true" />
+                  Voir le site public
+                </a>
+              </div>
+            </details>
           </header>
 
           <main className="admin-console-main">
