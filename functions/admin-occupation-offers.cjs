@@ -14,11 +14,12 @@ function previousDate(date, days) {
   return instant.toISOString().slice(0, 10);
 }
 function byRomeLookup(summary, rome) {
-  const rows = Array.isArray(summary?.byRome) ? summary.byRome : [];
+  const hasRows = Array.isArray(summary?.byRome);
+  const rows = hasRows ? summary.byRome : [];
   const match = rows.find((item) => item.code === rome);
   const rawLimit = summary?.byRomeStoredCount;
   const knownCount = asNumber(rawLimit);
-  const complete = summary?.byRomeComplete === true || (summary?.byRomeComplete !== false && rows.length < 120 && (knownCount === null || knownCount <= rows.length));
+  const complete = summary?.byRomeComplete === true || (hasRows && summary?.byRomeComplete !== false && rows.length < 120 && (knownCount === null || knownCount <= rows.length));
   return { match: match || null, complete };
 }
 function aggregateRomeDay(date, docs, references, rome) {
@@ -78,18 +79,23 @@ async function loadOccupationOffers(db, { rome, days = 7, today = parisDate() })
   const references = new Map(referencesSnap.docs.map(doc => [normalizeCode(doc.id), doc.data() || {}]));
   const window = [7, 30, 60].includes(days) ? days : 7;
   const dates = Array.from({ length: window },(_,i) => previousDate(today,i));
-  const history = [];
-  // Load two days at a time to avoid unbounded Firestore requests.
-  for(let i=0;i<dates.length;i+=2){
-    const daysBatch=await Promise.all(dates.slice(i,i+2).map(date => loadRomeDay(db,date,references,rome)));
-    history.push(...daysBatch.filter(Boolean));
-  }
-  const latest=history[0] || null;
+  const history = new Array(dates.length);
+  let cursor = 0;
+  // Bounded worker pool; dates retain their original order for reliable latest/day comparisons.
+  await Promise.all(Array.from({length:Math.min(5,dates.length)},async()=>{
+    while(cursor<dates.length){
+      const i=cursor++;
+      history[i]=await loadRomeDay(db,dates[i],references,rome);
+    }
+  }));
+  const availableHistory = history.filter(Boolean);
+  const latest=availableHistory[0] || null;
   return {
     ok:true,romeCode:rome,latestDate:latest?.date || null,
     latest:latest ? { ...latest, departments:undefined } : null,
     departments:latest?.departments || [],
-    history:history.reverse().map(({departments,...other})=>other),
+    // Historical rows allow real territory rankings for every selected date.
+    history:availableHistory.reverse(),
     methodology:'Offres et postes par code ROME issus des instantanés strictement géolocalisés La Bonne Alternance. Plusieurs codes ROME peuvent être associés à une offre. Une absence dans un classement tronqué ne vaut pas zéro. Les sommes ne sont certifiées que pour une couverture complète et un contrôle de plafonnement suffisant.',
   };
 }
