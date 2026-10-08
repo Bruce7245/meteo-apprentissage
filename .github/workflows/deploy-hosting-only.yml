@@ -1,0 +1,104 @@
+name: Deploy Hosting only (controlled)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_deploy:
+        description: "Type DEPLOY to publish frontend assets to production"
+        required: true
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apprentices-frontend-production
+  cancel-in-progress: false
+
+jobs:
+  hosting:
+    name: Validate and deploy ApprentiFR Hosting
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+
+    steps:
+      - name: Restrict production deployment to main
+        shell: bash
+        env:
+          CONFIRM: ${{ inputs.confirm_deploy }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_NAME" != "main" ] || [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
+            echo "Hosting deployment allowed only manually on main." >&2
+            exit 1
+          fi
+          if [ "$CONFIRM" != "DEPLOY" ]; then
+            echo "Type DEPLOY in confirm_deploy to approve production." >&2
+            exit 1
+          fi
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install and validate frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run lint
+          npm run test:ui:kpi
+          npm run build
+          test -s dist/index.html
+
+      - name: Authenticate for Firebase Hosting
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Deploy Hosting only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy \
+            --project meteo-apprentissage \
+            --only hosting \
+            --non-interactive
+
+      - name: Check published department route and assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          site="https://meteo-apprentissage.web.app"
+          for path in / /departement/72 /admin/stats /admin/stats/metiers; do
+            body="$(mktemp)"
+            status="$(curl --silent --show-error \
+              --location --output "$body" --write-out "%{http_code}" \
+              --max-time 30 "$site$path")"
+            echo "$path: HTTP $status"
+            test "$status" = "200"
+            test -s "$body"
+            grep -q '<div id="root"></div>' "$body"
+          done
+
+      - name: Record production scope
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Hosting-only release"
+            echo
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Branch: $GITHUB_REF_NAME"
+            echo "- Scope: Firebase Hosting static assets only."
+            echo "- Tests: lint, KPI SSR regression, build, HTTP smoke checks."
+            echo "- Excluded: Cloud Functions, Firestore, import jobs, schedulers and vigilance rules."
+          } >> "$GITHUB_STEP_SUMMARY"

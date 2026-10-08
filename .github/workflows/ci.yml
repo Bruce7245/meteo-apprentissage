@@ -47,6 +47,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Regressions KPI Chakra SSR
+        run: npm run test:ui:kpi
+
       - name: Validate Functions syntax
         run: node --check functions/index.js
 
