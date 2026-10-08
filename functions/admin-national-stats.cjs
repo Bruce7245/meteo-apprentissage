@@ -146,7 +146,7 @@ function summarizeDay(date, documents, references = new Map(), populations = new
     saturatedDepartments,
     unassessedCapDepartments,
     populationCoveredDepartments,
-    offersPer10000Young: comparable && hasCompletePopulation && youngPopulationTotal > 0
+    offersPer10000Young: coveredDepartments === TOTAL_DEPARTMENTS && hasCompletePopulation && youngPopulationTotal > 0
       ? (offers / youngPopulationTotal) * 10000
       : null,
     comparable,
