@@ -14769,3 +14769,12 @@ exports.activateOccupationVigilanceConfigHttp = onRequest(
     });
   }
 );
+
+const occupationOffersEditorial = require('./admin-occupation-offers.cjs');
+
+exports.getAdminOccupationOffersHttp = onRequest(
+  { region: 'europe-west1', timeoutSeconds: 180, memory: '512MiB', cors: true },
+  async (request, response) => occupationOffersEditorial.handleOccupationOffers({
+    request, response, auth: admin.auth(), db,
+  })
+);
