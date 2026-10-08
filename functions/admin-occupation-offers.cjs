@@ -3,7 +3,7 @@ const { DEPARTMENT_CODES } = require('./admin-national-stats.cjs');
 
 const VALID_CODES = new Set(DEPARTMENT_CODES);
 const ROMECODE = /^[A-Z][0-9]{4}$/;
-const asNumber = (value) => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
+const asNumber = (value) => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
 const normalizeCode = (value) => String(value || '').trim().toUpperCase().padStart(2, '0');
 function parisDate() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -29,7 +29,7 @@ function aggregateRomeDay(date, docs, references, rome) {
   for (const doc of docs) {
     const data = doc.data() || {};
     const code = normalizeCode(doc.id);
-    if (!VALID_CODES.has(code) || data.departmentCode !== code || data.date !== date ||
+    if (!VALID_CODES.has(code) || normalizeCode(data.departmentCode) !== code || data.date !== date ||
         !data.activeRunId || data.qualityStatus === 'quarantined' || !data.strictSummary ||
         asNumber(data.strictSummary.totalOffers) === null ||
         (asNumber(data.storedOffersCount) !== null && Number(data.strictSummary.totalOffers) > Number(data.storedOffersCount))) continue;
@@ -63,7 +63,7 @@ function aggregateRomeDay(date, docs, references, rome) {
     observedOffers: rows.reduce((sum,row) => sum + (row.offers || 0),0),
     openings: rows.every(row => row.complete) && rows.length === DEPARTMENT_CODES.length ? rows.reduce((sum,row) => sum + row.openings,0) : null,
     observedOpenings: rows.reduce((sum,row) => sum + (row.openings || 0),0),
-    comparable: rows.length === DEPARTMENT_CODES.length && unknown === 0 && capped === 0 && unassessed === 0,
+    comparable: rows.length === DEPARTMENT_CODES.length && unknown === 0 && capped === 0 && unassessed === 0 && rows.every(row => row.complete),
     departments: rows,
   };
 }
