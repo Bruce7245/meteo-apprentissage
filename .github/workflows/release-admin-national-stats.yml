@@ -90,6 +90,7 @@ jobs:
           set -euo pipefail
           npm run lint
           npm run build
+          npm run test:ui:kpi
           node --check functions/admin-national-stats.cjs
           node --check functions/admin-occupation-stats.cjs
           node --check functions/index.js
