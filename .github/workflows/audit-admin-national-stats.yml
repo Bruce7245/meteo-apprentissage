@@ -1,0 +1,86 @@
+name: Read-only audit national stats data
+
+on:
+  push:
+    branches:
+      - feat/admin-stats-national-82
+    paths:
+      - .github/workflows/audit-admin-national-stats.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Verify national source aggregates without writes
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Audit Firestore in read-only mode
+        working-directory: functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { initializeApp, getApps } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
+          const { loadNationalStats } = require('./admin-national-stats.cjs');
+          if (getApps().length === 0) initializeApp({ projectId: 'meteo-apprentissage' });
+
+          (async () => {
+            const data = await loadNationalStats(getFirestore(), { days: 7 });
+            const latest = data.latest;
+            if (!latest || latest.coveredDepartments < 1) {
+              throw new Error('No valid national daily offer snapshots found in last 7 days');
+            }
+            const diagnostic = {
+              date: latest.date,
+              coveredDepartments: latest.coveredDepartments,
+              expectedDepartments: latest.expectedDepartments,
+              observedOffers: latest.offers,
+              observedOpenings: latest.openings,
+              newOffersKnownForDepartments: latest.newOffersCoverage,
+              newOffers: latest.newOffers,
+              cappedDepartments: latest.saturatedDepartments,
+              capAssessmentMissing: latest.unassessedCapDepartments,
+              publicationReady: latest.comparable,
+              populationReferenceYear: data.populationReferenceYear,
+              populationCoverage: data.populationReferenceCoverage,
+              youngPopulationDensity: latest.offersPer10000Young,
+              nationalVariationVerified: data.change,
+              nationalVariationIndicative: data.indicativeChange,
+              formationCoverage: data.formations.coveredDepartments,
+              formationDataDates: data.formations.asOfDates,
+              historyPointCount: data.history.length,
+            };
+            console.log('Read-only quality diagnostic:');
+            console.log(JSON.stringify(diagnostic, null, 2));
+            if (!latest.comparable) {
+              console.warn('Data quality not sufficient for a certified national variation or ready-to-publish copy.');
+            }
+          })().catch((error) => {
+            console.error('Read-only audit failure:', error?.message || String(error));
+            process.exitCode = 1;
+          });
+          NODE
