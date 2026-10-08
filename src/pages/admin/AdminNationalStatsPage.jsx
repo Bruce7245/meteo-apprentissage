@@ -28,7 +28,7 @@ function signed(value) {
 function Coverage({ data }) {
   if (!data) return null;
   return <div className={'national-coverage ' + (data.comparable ? 'is-ready' : 'is-partial')} role="status">
-    <strong>{data.comparable ? 'Couverture complète, sources non plafonnées' : 'Couverture partielle ou source potentiellement plafonnée'}</strong>
+    <strong>{data.comparable ? 'Couverture complète et aucun plafonnement signalé' : 'Comparabilité non certifiée : couverture ou contrôles qualité incomplets'}</strong>
     <span>{number(data.coveredDepartments)} / {number(data.expectedDepartments)} départements · {number(data.saturatedDepartments)} signalé(s) plafonné(s) · {number(data.unassessedCapDepartments)} sans contrôle documenté du plafonnement.
       {data.missingDepartments?.length ? ' Départements absents : ' + data.missingDepartments.slice(0, 12).join(', ') + (data.missingDepartments.length > 12 ? '…' : '') + '.' : ''}
       {!data.comparable ? ' Les évolutions nationales ne sont pas calculées.' : ''}
