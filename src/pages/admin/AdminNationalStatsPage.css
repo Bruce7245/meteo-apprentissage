@@ -24,8 +24,12 @@
 .national-facts span { color:#687e92; font-size:.75rem; }
 .national-facts strong { color:#1d3c58; font-size:1.1rem; }
 .national-search-label { display:grid; gap:8px; margin:16px 0; font-size:.74rem; color:#456078; font-weight:750; }
-.national-search-label input { max-width:500px; min-height:44px; padding:0 12px; border:1px solid #d9e5ed; border-radius:9px; background:#fff; }
+.national-search-label input, .national-search-label select { max-width:500px; min-height:44px; padding:0 12px; border:1px solid #d9e5ed; border-radius:9px; background:#fff; }
 .national-publication-copy { border:1px solid #dce6ed; border-radius:12px; padding:18px; background:#f7fafc; }
 .national-publication-copy p, .national-methodology p { font-size:.77rem; line-height:1.6; color:#586d80; }
 .national-methodology { margin-top:18px; }
 @media(max-width:720px){ .national-controls {align-items:flex-start; flex-direction:column;} .national-tabs {overflow-x:auto; flex-wrap:nowrap;} .national-tabs button {white-space:nowrap;} .national-trend-item strong {display:none;} .national-trend {height:200px;} }
+
+.national-search-label select { max-width: 500px; cursor: pointer; }
+.national-publication-warning { border: 1px solid #e8d6a9; background: #fff8e8; color: #735524 !important; border-radius: 9px; padding: 12px; }
+.national-publication-copy button:disabled { opacity: .5; cursor: not-allowed; }
