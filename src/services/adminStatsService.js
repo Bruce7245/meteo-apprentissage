@@ -56,3 +56,22 @@ export async function getOccupationPublicationStats(
 
   return payload || {};
 }
+
+const OCCUPATION_OFFERS_ENDPOINT =
+  'https://europe-west1-meteo-apprentissage.cloudfunctions.net/getAdminOccupationOffersHttp';
+
+export async function getAdminOccupationOffers(romeCode,{days=7}={}){
+  const rome=normalizeRomeCode(romeCode);
+  if(!rome)throw new Error('Code ROME invalide.');
+  const user=await getReadyAdminUser();
+  if(!user)throw new Error('Session administrateur absente.');
+  const response=await fetch(OCCUPATION_OFFERS_ENDPOINT,{
+    method:'POST',headers:{
+      Accept:'application/json','Content-Type':'application/json',
+      Authorization:'Bearer '+await user.getIdToken(),
+    },body:JSON.stringify({romeCode:rome,days}),
+  });
+  const result=await response.json().catch(()=>null);
+  if(!response.ok || !result?.ok)throw new Error(result?.error || 'Statistiques métiers indisponibles.');
+  return result;
+}
