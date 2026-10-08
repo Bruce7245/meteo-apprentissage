@@ -118,6 +118,7 @@ export function buildOccupationInstagramPrompt({
   const validSamples = (Array.isArray(examples) ? examples : []).filter(item =>
     item?.date === date && safeText(item.title) && safeText(item.city) && safeOriginalLink(item.url)
   ).slice(0, 3);
+  const imageSamples = validSamples.slice(0, 2);
 
   return [
     'PROMPT CANVA — ApprentiFR | PUBLICATION MÉTIER INSTAGRAM',
@@ -161,16 +162,16 @@ export function buildOccupationInstagramPrompt({
     'Aucun décor générique sans rapport avec le métier, aucune fausse annonce mise en scène, aucun logo d’employeur inventé, aucun effet 3D.',
     '',
     'COMPOSITION — REPRENDRE LES CODES DU MODÈLE',
-    'EN HAUT : logo en haut à gauche ; dessous, la pastille JAUNE « APPRENTISSAGE » ; puis le métier en TRÈS GRANDES CAPITALES BLANCHES sur deux lignes si besoin. La photo métier occupe essentiellement le haut droit.',
-    'BANDEAU : sous le métier, rectangle bleu vif aux angles légèrement arrondis, avec une question en caractères blancs massifs : « ' + (selectedMetric === 'offers' ? 'OÙ SONT LES OFFRES ?' : 'OÙ SONT LES POSTES ?') + ' ». C’est l’accroche principale, même lorsque le total national est disponible.',
-    'SOUS-TITRE : « Top ' + safeRanking.length + ' des départements » en bleu lumineux, suivi de « classement par nombre de ' + metricName + ' observés » en blanc légèrement atténué.',
+    'EN HAUT : logo officiel x=56,y=30 sans carré blanc artificiel ; pastille JAUNE APPRENTISSAGE x=56,y=124 ; métier blanc XXL aligné à gauche dans x=56–680,y=181–320. Réserver x=725–1030 au sujet photographié, sans visage recouvert.',
+    'BANDEAU : sous le métier, rectangle bleu vif #1459C7 aux coins de rayon 12 px en x=56–714,y=333–405, sans débordement. Question blanche en capitales massives (48–56 px) : « ' + (selectedMetric === 'offers' ? 'OÙ SONT LES OFFRES ?' : 'OÙ SONT LES POSTES ?') + ' ». C’est l’accroche principale, même lorsque le total national est disponible.',
+    'SOUS-TITRE : « Top ' + safeRanking.length + ' des départements » en bleu lumineux (32 px) sur y=421 ; sous-ligne « classement par nombre de ' + metricName + ' observés » en blanc légèrement atténué (22 px) sur y=459. Aucun texte de sous-titre sous y=490.',
     hasNational
-      ? 'Information secondaire possible, sans remplacer le bandeau : « ' + formattedCount(nationalValue) + ' ' + (selectedMetric === 'offers' ? 'OFFRES OBSERVÉES' : 'POSTES PROPOSÉS') + ' » au niveau national. Ne pas donner l’impression d’une chance individuelle de recrutement.'
+      ? 'Information nationale secondaire possible dans une petite étiquette x=745–1024,y=431–487, sans remplacer le bandeau : « ' + formattedCount(nationalValue) + ' ' + (selectedMetric === 'offers' ? 'OFFRES OBSERVÉES' : 'POSTES PROPOSÉS') + ' ». Ne pas surdimensionner ni présenter un volume comme une chance individuelle.'
       : 'Ne PAS afficher de total national comme exhaustif : la source ne permet pas d’affirmer une couverture intégrale. Conserver l’accroche « ' + (selectedMetric === 'offers' ? 'OÙ SONT LES OFFRES ?' : 'OÙ SONT LES POSTES ?') + ' » et le Top ' + safeRanking.length + ' comme informations principales.',
-    'CLASSEMENT : placer cinq cartes horizontales empilées dans la partie gauche ou principale. La première carte est BLEUE avec texte et rang blancs ; les quatre suivantes sont BLANCHES avec noms foncés et GRANDS CHIFFRES DE RANG BLEUS.',
-    'À l’intérieur de chaque carte : rang bien visible, département et numéro, ligne compacte indiquant le volume d’offres et de postes, et silhouette SVG bleue du département alignée à droite. Éviter les tableaux et les barres trop décoratives.',
-    'ENCART LATÉRAL si offres réellement fournies : « Des offres repérées », panneau bleu nuit avec contour bleu vif et titres courts blancs, villes en bleu lumineux. La référence contient une petite icône de recherche ; conserver l’idée d’un repère discret, pas une grosse illustration.',
-    'PIED : date en français, source et limite méthodologique sur une à deux lignes courtes, lisibles et non envahissantes. La même date ne doit pas occuper deux fois trop d’espace.',
+    'CLASSEMENT : cinq cartes horizontales x=56–703 (si panneau offres), aux y=509,588,667,746,825, hauteur 72 px chacune. La première carte est BLEUE #1459C7 avec texte et rang blancs ; les quatre suivantes sont BLANCHES #FFFFFF avec noms bleu nuit et GRANDS CHIFFRES DE RANG BLEUS. Rayon 12 px, bordures discrètes, espacements réguliers.',
+    'INTÉRIEUR DES CARTES : rang aligné à x=76–138 en 46–52 px ; séparateur fin vers x=158 ; nom du département et code x=183–564 en 26–29 px ; ligne offres/postes juste dessous en 19–22 px. À droite, SVG bleu authentique centré dans x=598–693, hauteur MAX 60 px, mode « Contenir » sans déformation. Pour la carte bleue n°1, mettre la silhouette bleue sur un petit carré blanc arrondi ; pour les cartes blanches, aucune grosse vignette ajoutée.',
+    'ENCART LATÉRAL UNIQUEMENT SI OFFRES RÉELLES : panneau x=727–1024,y=509–899, fond bleu nuit, bordure bleue 2–3 px, rayon 16 px, padding 18 px. Titre « Des offres repérées » en blanc 27–30 px, icône recherche discrète, séparateur fin ; titres des annonces 20–23 px, villes et départements 18–21 px en bleu lumineux. Afficher 2 annonces MAXIMUM, séparées par au moins 18 px. Ne rien inventer pour remplir.',
+    'PIED : x=56–1024,y=916–1016, relevé daté en 22–24 px, source 18–20 px et note méthodologique 18 px minimum. Le date ne doit apparaître qu’une fois. Si une phrase est trop longue, condenser ou placer les détails en légende Instagram, jamais en petits caractères illisibles.',
     '',
     'DONNÉES DE LA PUBLICATION — NE RIEN INVENTER',
     'Métier : « ' + job.toUpperCase() + ' » (ROME ' + safeText(romeCode) + ').',
@@ -182,12 +183,12 @@ export function buildOccupationInstagramPrompt({
       'Silhouette SVG bleue à rechercher dans les Illustrations de la marque par le code ' + safeText(r.departmentCode) + '.'
     ),
     '',
-    ...(includeExamples && validSamples.length ? [
+    ...(includeExamples && imageSamples.length ? [
       'DES OFFRES REPÉRÉES — OPTIONNELLES',
-      'Dans l’encart latéral, présenter au maximum 2 exemples en premier. Une troisième offre est possible UNIQUEMENT si le format 1080 × 1040 px la laisse suffisamment lisible, sans réduire le Top 5.',
+      'DANS L’IMAGE : exactement les 1 ou 2 annonces sourcées ci-dessous, au maximum. Ne JAMAIS dessiner la troisième dans l’encart 1080 × 1040 px : réserver l’annonce supplémentaire à la légende.',
       'Reprendre seulement le titre abrégé et la ville ; sans recopier les descriptions complètes, sans prétendre que les annonces sont encore en ligne au moment de la publication.',
-      ...validSamples.map(offerLine),
-      'Liens originaux pour la légende Instagram UNIQUEMENT (pas sur le visuel) :',
+      ...imageSamples.map(offerLine),
+      'INFORMATIONS RÉSERVÉES À LA LÉGENDE INSTAGRAM (HORS VISUEL) : liens originaux et éventuelle troisième annonce :',
       ...validSamples.map(item => item.title + ' — ' + item.url),
       '',
     ] : [
