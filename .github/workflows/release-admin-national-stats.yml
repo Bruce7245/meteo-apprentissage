@@ -1,0 +1,202 @@
+name: Verify or release national admin stats
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Read-only Firestore audit or controlled deployment"
+        required: true
+        default: validate
+        type: choice
+        options:
+          - validate
+          - deploy
+      days:
+        description: "Historical period in days"
+        required: true
+        default: "7"
+        type: choice
+        options:
+          - "7"
+          - "30"
+          - "60"
+      confirm_deploy:
+        description: "For deploy mode, type DEPLOY"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-national-stats-production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Controlled national stats validation
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - name: Check release branch and explicit confirmation
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRM: ${{ inputs.confirm_deploy }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Production credentials require merged main." >&2
+            exit 1
+          fi
+          if [ "$MODE" = "deploy" ] && [ "$CONFIRM" != "DEPLOY" ]; then
+            echo "Deployment requires confirm_deploy=DEPLOY." >&2
+            exit 1
+          fi
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix functions
+
+      - name: Verify frontend and Functions
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run build
+          node --check functions/admin-national-stats.cjs
+          node --check functions/index.js
+          npm run test:unit --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Read-only Firestore audit
+        working-directory: functions
+        env:
+          HISTORY_DAYS: ${{ inputs.days }}
+        run: |
+          node <<'NODE'
+          const { initializeApp, getApps } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
+          const { loadNationalStats } = require('./admin-national-stats.cjs');
+
+          if (getApps().length === 0) initializeApp({ projectId: 'meteo-apprentissage' });
+          (async () => {
+            const result = await loadNationalStats(getFirestore(), {
+              days: Number(process.env.HISTORY_DAYS),
+            });
+            const latest = result.latest;
+            if (!result.ok || !latest || latest.coveredDepartments < 1 ||
+                latest.coveredDepartments > 101 || !Number.isFinite(latest.offers)) {
+              throw new Error('The national source has no usable, internally valid snapshot');
+            }
+            console.log(JSON.stringify({
+              date: result.date,
+              coveredDepartments: latest.coveredDepartments,
+              expectedDepartments: latest.expectedDepartments,
+              knownPotentiallyCapped: latest.saturatedDepartments,
+              capAssessmentMissing: latest.unassessedCapDepartments,
+              observedOffers: latest.offers,
+              observedOpenings: latest.openings,
+              reliableComparison: latest.comparable,
+              populationReferenceYear: result.populationReferenceYear,
+              populationReferenceCoverage: result.populationReferenceCoverage,
+              recordedHistoryPoints: result.history.length,
+              formationCoverage: result.formations.coveredDepartments,
+              formationAsOfDates: result.formations.asOfDates,
+            }, null, 2));
+          })().catch((error) => {
+            console.error('Read-only national stats audit failed:', error.message);
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Deploy national admin stats Function only
+        if: ${{ inputs.mode == 'deploy' }}
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy \
+            --project meteo-apprentissage \
+            --only "functions:getAdminNationalStatsHttp" \
+            --non-interactive
+
+      - name: Require HTTP 401 without a Firebase session
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="https://europe-west1-meteo-apprentissage.cloudfunctions.net/getAdminNationalStatsHttp"
+          status="$(curl --silent --show-error \
+            --output /tmp/admin-national-stats-protected.json \
+            --write-out "%{http_code}" \
+            --max-time 45 \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data '{"days":7}' \
+            "$endpoint")"
+          echo "Unauthenticated national stats request: HTTP $status"
+          if [ "$status" != "401" ]; then
+            echo "Function does not enforce expected unauthenticated access." >&2
+            exit 1
+          fi
+
+      - name: Deploy Hosting after protected Function passes
+        if: ${{ inputs.mode == 'deploy' }}
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy \
+            --project meteo-apprentissage \
+            --only hosting \
+            --non-interactive
+
+      - name: Verify Hosting routes
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in /admin/stats /admin/stats/metiers; do
+            status="$(curl --silent --show-error \
+              --location \
+              --output /tmp/admin-stats-page.html \
+              --write-out "%{http_code}" \
+              --max-time 30 \
+              "https://meteo-apprentissage.web.app$path")"
+            echo "$path: HTTP $status"
+            test "$status" = "200"
+            test -s /tmp/admin-stats-page.html
+          done
+
+      - name: Report scope
+        if: always()
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          {
+            echo "## ApprentiFR — national admin stats"
+            echo
+            echo "- Branch: $GITHUB_REF_NAME"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Mode: $MODE"
+            echo "- Read-only audit uses Firestore Admin SDK."
+            echo "- Deploy mode targets only getAdminNationalStatsHttp and Hosting, after validation."
+            echo "- No data ingestion, publication, configuration activation or scheduler changed."
+          } >> "$GITHUB_STEP_SUMMARY"
