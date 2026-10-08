@@ -80,6 +80,7 @@ jobs:
           npm run lint
           npm run build
           node --check functions/admin-national-stats.cjs
+          node --check functions/admin-occupation-stats.cjs
           node --check functions/index.js
           npm run test:unit --prefix functions
 
@@ -129,13 +130,13 @@ jobs:
           });
           NODE
 
-      - name: Deploy national admin stats Function only
+      - name: Deploy national and occupation editorial stats Functions
         if: ${{ inputs.mode == 'deploy' }}
         run: |
           set -euo pipefail
           npx --yes firebase-tools@latest deploy \
             --project meteo-apprentissage \
-            --only "functions:getAdminNationalStatsHttp" \
+            --only "functions:getAdminNationalStatsHttp,functions:getOccupationVigilanceStatsHttp" \
             --non-interactive
 
       - name: Require HTTP 401 without a Firebase session
@@ -143,20 +144,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          endpoint="https://europe-west1-meteo-apprentissage.cloudfunctions.net/getAdminNationalStatsHttp"
-          status="$(curl --silent --show-error \
-            --output /tmp/admin-national-stats-protected.json \
-            --write-out "%{http_code}" \
-            --max-time 45 \
-            --request POST \
-            --header "Content-Type: application/json" \
-            --data '{"days":7}' \
-            "$endpoint")"
-          echo "Unauthenticated national stats request: HTTP $status"
-          if [ "$status" != "401" ]; then
-            echo "Function does not enforce expected unauthenticated access." >&2
-            exit 1
-          fi
+          check_401() {
+            name="$1"
+            body="$2"
+            endpoint="https://europe-west1-meteo-apprentissage.cloudfunctions.net/$name"
+            output="$(mktemp)"
+            status="$(curl --silent --show-error \
+              --output "$output" \
+              --write-out "%{http_code}" \
+              --max-time 45 \
+              --request POST \
+              --header "Content-Type: application/json" \
+              --data "$body" \
+              "$endpoint")"
+            echo "$name without Firebase session: HTTP $status"
+            if [ "$status" != "401" ]; then
+              echo "Unexpected access status for $name: expected HTTP 401." >&2
+              cat "$output"
+              exit 1
+            fi
+          }
+
+          check_401 "getAdminNationalStatsHttp" '{"days":7}'
+          check_401 "getOccupationVigilanceStatsHttp" '{"romeCode":"D1108","historyLimit":7}'
 
       - name: Deploy Hosting after protected Function passes
         if: ${{ inputs.mode == 'deploy' }}
@@ -197,6 +207,6 @@ jobs:
             echo "- Commit: $GITHUB_SHA"
             echo "- Mode: $MODE"
             echo "- Read-only audit uses Firestore Admin SDK."
-            echo "- Deploy mode targets only getAdminNationalStatsHttp and Hosting, after validation."
+            echo "- Deploy mode targets getAdminNationalStatsHttp, getOccupationVigilanceStatsHttp and Hosting, after validation."
             echo "- No data ingestion, publication, configuration activation or scheduler changed."
           } >> "$GITHUB_STEP_SUMMARY"
