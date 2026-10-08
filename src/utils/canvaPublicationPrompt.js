@@ -120,7 +120,7 @@ export function buildOccupationInstagramPrompt({
   ).slice(0, 3);
 
   return [
-    'PROMPT CANVA — APPrentiFR | PUBLICATION INSTAGRAM MÉTIER',
+    'PROMPT CANVA — ApprentiFR | PUBLICATION INSTAGRAM MÉTIER',
     '',
     'FORMAT ET OBJECTIF',
     'Créer une publication Instagram verticale 1080 × 1350 pixels, très esthétique, dynamique et immédiatement compréhensible par des jeunes cherchant un apprentissage.',
@@ -158,7 +158,7 @@ export function buildOccupationInstagramPrompt({
     ),
     '',
     ...(includeExamples && validSamples.length ? [
-      'BLOC BONUS COURT — EXEMPLES D’OFFRES VÉRIFIÉES',
+      'BLOC BONUS COURT — EXEMPLES D’OFFRES REPÉRÉES',
       'Intégrer si la composition reste lisible deux ou trois exemples, sous l’accroche « Des offres repérées ». Ne montrer que le titre court et la ville, sans recopier les descriptions complètes. Leurs liens sont à conserver dans la légende Instagram, pas en URL longue sur le visuel.',
       ...validSamples.map(offerLine),
       'Liens originaux pour la légende (ne pas afficher dans le décor) :',
@@ -172,7 +172,7 @@ export function buildOccupationInstagramPrompt({
     'PIED ET FIABILITÉ',
     'Ajouter de manière discrète : « Source : ApprentiFR — La Bonne Alternance · Relevé du ' + dateShort + ' ». Une offre peut comporter plusieurs postes et relever de plusieurs codes ROME.',
     'Les volumes sont observés et non exhaustifs ; ce classement ne représente pas les chances individuelles d’obtenir un contrat.',
-    'NE PAS écrire « Données en cours de validation » sur le visuel. Les contrôles de qualité et leur état restent dans l’interface d’administration, sans être déguisés en validation acquise.',
+    'Ne pas afficher sur le visuel les statuts internes de validation ou un badge de contrôle qualité. Ces contrôles restent dans l’administration : ne pas présenter une donnée incertaine comme certifiée.',
     '',
     'RÈGLES DE COMPOSITION',
     'Le fond lié au métier doit être immédiatement identifiable. Garder le classement lisible sur smartphone, sans surcharge : un seul message fort, un Top 5 et éventuellement quelques exemples vérifiés.',
