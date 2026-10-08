@@ -2,6 +2,12 @@ import React,{useEffect,useMemo,useState} from 'react';
 import AdminLayout from '../../layouts/AdminLayout.jsx';
 import OccupationSearch from '../../components/occupation/OccupationSearch.jsx';
 import {getAdminOccupationOffers} from '../../services/adminStatsService.js';
+import {getPublicDepartmentOffers} from '../../services/publicOffersService.js';
+import {
+  buildOccupationInstagramPrompt,
+  formatFrenchPublicationDate,
+  selectOccupationOfferExamples,
+} from '../../utils/canvaPublicationPrompt.js';
 import {normalizeRomeCode} from '../../utils/occupationUtils.js';
 import './AdminOccupationOffersPage.css';
 
@@ -39,6 +45,9 @@ export default function AdminOccupationOffersPage(){
   const [completeOnly,setCompleteOnly]=useState(true);
   const [selectedDate,setSelectedDate]=useState('');
   const [copyNote,setCopyNote]=useState('');
+  const [examples,setExamples]=useState([]);
+  const [examplesLoading,setExamplesLoading]=useState(false);
+  const [includeExamples,setIncludeExamples]=useState(true);
   const [retryCount,setRetryCount]=useState(0);
   useEffect(()=>{
     if(!rome){setResponse(null);return undefined;}
@@ -73,26 +82,62 @@ export default function AdminOccupationOffersPage(){
   const isVerified=Boolean(current?.comparable);
   const title=label||rome;
   const topFive=rows.slice(0,5);
-  const exportBase=()=>['ApprentiFR',title,'ROME '+rome,'Relevé du '+(current?.date||'—'),'',...topFive.map((r,i)=>String(i+1)+'. '+r.departmentName+' ('+r.departmentCode+') : '+fmt(r.offers)+' offre(s), '+fmt(r.openings)+' poste(s)'),'','Source : La Bonne Alternance / ApprentiFR','Une offre peut correspondre à plusieurs postes et codes ROME.',isVerified?'Contrôles complets':'Données non certifiées : plafonnement ou couverture à vérifier'].join('\n');
-  const canvaPrompt=()=>[
-    'Créer une publication Instagram verticale 1080 × 1350 px pour ApprentiFR, observatoire territorial de l’apprentissage.',
-    'Logo officiel : identité visuelle Canva « Bruce DE LUCAS ». Palette : bleu marine #1D3557, bleu secondaire #457B9D, fond #F8FAFC, blanc #FFFFFF et gris #64748B. Typographie Inter, style éditorial institutionnel, sans illustration superflue.',
-    'Titre : APPRENTISSAGE — '+title.toUpperCase()+'. Code ROME : '+rome+'.',
-    'Sous-titre : Les '+topFive.length+' départements avec le plus de '+(metricKey==='offers'?'offres recensées':'postes proposés')+'. Date : '+(current?.date||'date inconnue')+'.',
-    ...(isVerified?['Volume national : '+fmt(current?.offers)+' offres, '+fmt(current?.openings)+' postes.']:['NE PAS AFFICHER DE TOTAL NATIONAL comme exhaustif : contrôles de couverture ou de plafonnement non certifiés.']),
-    'Classement à reproduire sans modifier les chiffres :',
-    ...topFive.map((r,i)=>String(i+1)+'. '+r.departmentName+' ('+r.departmentCode+') : '+fmt(r.offers)+' offres, '+fmt(r.openings)+' postes.'),
-    'Utiliser les vrais fichiers SVG bleus importés dans Canva (sans redessiner les contours) :',
-    ...topFive.map(r=>r.departmentCode+'_'+slug(r.departmentName)+'_bleu.svg'),
-    'Afficher une carte géographique exacte de France et les cinq départements, avec un classement lisible et des barres proportionnelles au critère sélectionné. Ne pas inventer les cartes ni les chiffres.',
-    'En pied : « Source : ApprentiFR / La Bonne Alternance. Relevé du '+(current?.date||'—')+'. Une offre peut comporter plusieurs postes et plusieurs codes ROME. Données observées, non exhaustives. »',
-    ...(isVerified?[]:['Mention obligatoire : « Données en cours de validation ».']),
-    'Tous les textes et graphiques doivent rester modifiables.',
+  const exampleCodes=topFive
+    .filter(row=>row.complete && row.offers>0)
+    .map(row=>row.departmentCode).join(',');
+  useEffect(()=>{
+    if(!rome||!selectedDate||!exampleCodes){
+      setExamples([]);
+      setExamplesLoading(false);
+      return undefined;
+    }
+    let active=true;
+    const controller=new AbortController();
+    const codes=exampleCodes.split(',');
+    setExamples([]);
+    setExamplesLoading(true);
+    // Only publicly exposed, short-form original offer facts are retrieved.
+    // A sample is usable only when its source snapshot has the exact selected date.
+    Promise.allSettled(codes.map(async code=>{
+      const result=await getPublicDepartmentOffers(code,20,{
+        romeCode:rome,signal:controller.signal,
+      });
+      return {...result,departmentName:rows.find(row=>row.departmentCode===code)?.departmentName||code};
+    })).then(results=>{
+      if(!active)return;
+      setExamples(selectOccupationOfferExamples(
+        results.filter(result=>result.status==='fulfilled').map(result=>result.value),
+        selectedDate,
+      ));
+    }).finally(()=>{
+      if(active)setExamplesLoading(false);
+    });
+    return()=>{active=false;controller.abort();};
+  },[rome,selectedDate,exampleCodes]);
+  const exportBase=()=>[
+    'ApprentiFR',title,'ROME '+rome,
+    'Relevé du '+formatFrenchPublicationDate(current?.date,'short'),
+    '',...topFive.map((r,i)=>String(i+1)+'. '+r.departmentName+' ('+r.departmentCode+') : '+fmt(r.offers)+' offre(s), '+fmt(r.openings)+' poste(s)'),
+    '','Source : La Bonne Alternance / ApprentiFR',
+    'Une offre peut correspondre à plusieurs postes et codes ROME.',
+    isVerified?'Contrôles complets':'Données observées, couverture ou plafonnement non certifiés',
   ].join('\n');
+  const canvaPrompt=()=>buildOccupationInstagramPrompt({
+    occupationLabel:title,
+    romeCode:rome,
+    date:current?.date,
+    ranking:rows,
+    metric:metricKey,
+    nationalOffers:current?.offers,
+    nationalOpenings:current?.openings,
+    fullyComparable:isVerified,
+    examples,
+    includeExamples,
+  });
   async function copyText(type='prompt'){try{await navigator.clipboard.writeText(type==='prompt'?canvaPrompt():exportBase());setCopyNote(type==='prompt'?'Prompt Canva copié':'Classement copié');}catch{setCopyNote('Copie impossible : utilisez l’export CSV');}}
   function exportCsv(){csvDownload('apprentifr_'+rome+'_'+(current?.date||'releve')+'.csv',[
     ['Rang','Code ROME','Métier','Date','Département','Code département','Région','Offres','Postes','Fiabilité','SVG bleu'],
-    ...rows.map((r,i)=>[i+1,rome,title,current?.date,r.departmentName,r.departmentCode,r.regionName,r.offers,r.openings,r.complete&&r.capAssessed&&!r.capped?'évalué':'à vérifier',r.departmentCode+'_'+slug(r.departmentName)+'_bleu.svg']),
+    ...rows.map((r,i)=>[i+1,rome,title,formatFrenchPublicationDate(current?.date,'short'),r.departmentName,r.departmentCode,r.regionName,r.offers,r.openings,r.complete&&r.capAssessed&&!r.capped?'évalué':'à vérifier',r.departmentCode+'_'+slug(r.departmentName)+'_bleu.svg']),
   ]);}
   function choose(selection){
     const next=normalizeRomeCode(selection?.romeCode);
@@ -120,7 +165,7 @@ export default function AdminOccupationOffersPage(){
       <section className="editorial-kpis">
         <div className="panel"><small>Offres pour {rome}</small><strong>{fmt(current?.offers)}</strong><span>Minimum observé : {fmt(current?.observedOffers)}</span></div>
         <div className="panel"><small>Postes associés</small><strong>{fmt(current?.openings)}</strong><span>Minimum observé : {fmt(current?.observedOpenings)}</span></div>
-        <div className="panel"><small>Variation vérifiable</small><strong>{signed(variation)}</strong><span>{comparable?'Depuis '+previous.date:'Données non comparables'}</span></div>
+        <div className="panel"><small>Variation vérifiable</small><strong>{signed(variation)}</strong><span>{comparable?'Depuis '+formatFrenchPublicationDate(previous.date,'short'):'Données non comparables'}</span></div>
       </section>
       <section className="panel editorial-filters"><div className="section-heading"><div><p className="kicker">02 / Classement</p><h2>Filtrer et classer les départements</h2></div><span className="soft-pill">{allRows.length} territoire(s) dans le périmètre</span></div>
         <div className="editorial-control-grid">
@@ -129,20 +174,27 @@ export default function AdminOccupationOffersPage(){
           <div className="editorial-field"><label htmlFor="ed-metric">Critère</label><select id="ed-metric" value={metricKey} onChange={e=>setMetricKey(e.target.value)}><option value="offers">Nombre d’offres</option><option value="openings">Nombre de postes</option></select></div>
           <div className="editorial-field"><label htmlFor="ed-min">Minimum {metricKey==='offers'?'d’offres':'de postes'}</label><input id="ed-min" type="number" min="0" value={minimum} onChange={e=>setMinimum(Math.max(0,Number(e.target.value)||0))}/></div>
           <div className="editorial-field"><label htmlFor="ed-count">Nombre de résultats</label><select id="ed-count" value={limit} onChange={e=>setLimit(e.target.value)}><option value="5">Top 5</option><option value="10">Top 10</option><option value="20">Top 20</option><option value="all">Tous</option></select></div>
-          <div className="editorial-field"><label htmlFor="ed-date">Date de référence</label><select id="ed-date" value={selectedDate} onChange={e=>{setSelectedDate(e.target.value);setRegion('all')}}><option value={response.latestDate}>{response.latestDate}</option>{history.filter(p=>p.date!==response.latestDate).map(p=><option key={p.date} value={p.date}>{p.date}</option>)}</select></div>
+          <div className="editorial-field"><label htmlFor="ed-date">Date de référence</label><select id="ed-date" value={selectedDate} onChange={e=>{setSelectedDate(e.target.value);setRegion('all')}}><option value={response.latestDate}>{formatFrenchPublicationDate(response.latestDate,'short')}</option>{history.filter(p=>p.date!==response.latestDate).map(p=><option key={p.date} value={p.date}>{formatFrenchPublicationDate(p.date,'short')}</option>)}</select></div>
         </div>
         <label className="editorial-checkbox"><input type="checkbox" checked={completeOnly} onChange={e=>setCompleteOnly(e.target.checked)}/> Masquer les départements sans décompte métier vérifiable</label>
 
       </section>
-      <section className="panel editorial-results"><div className="section-heading"><div><p className="kicker">Résultats</p><h2>Classement — {title}</h2></div><span className="soft-pill">{current?.date}</span></div>
+      <section className="panel editorial-results"><div className="section-heading"><div><p className="kicker">Résultats</p><h2>Classement — {title}</h2></div><span className="soft-pill">{formatFrenchPublicationDate(current?.date,'short')}</span></div>
         <div className="table-wrapper"><table className="simple-table"><thead><tr><th>Rang</th><th>Département</th><th>Région</th><th>Offres</th><th>Postes</th><th>Statut</th></tr></thead><tbody>{rows.map((r,i)=><tr key={r.departmentCode}><td><strong>{i+1}</strong></td><td><strong>{r.departmentName}</strong><small className="editorial-depcode">{r.departmentCode}</small></td><td>{r.regionName}</td><td><strong>{fmt(r.offers)}</strong></td><td>{fmt(r.openings)}</td><td>{r.complete?(r.capped?'Plafonnement possible':r.capAssessed?'Mesuré':'À vérifier'):'Décompte absent'}</td></tr>)}</tbody></table></div>
         {!rows.length&&<p>Aucun département ne correspond aux filtres et à la date sélectionnés.</p>}
       </section>
       <section className="panel editorial-publication"><div className="section-heading"><div><p className="kicker">03 / Canva</p><h2>Préparer la publication</h2><p>Le texte et le fichier CSV utilisent exclusivement les lignes actuellement sélectionnées.</p></div></div>
+        <label className="editorial-checkbox"><input type="checkbox" checked={includeExamples} onChange={e=>setIncludeExamples(e.target.checked)}/> Ajouter jusqu’à 3 exemples d’offres réellement repérées au relevé sélectionné</label>
+        <div className="editorial-example-status" aria-live="polite">
+          {examplesLoading?'Recherche des annonces originales correspondant au relevé…':
+            examples.length?String(examples.length)+' exemple(s) issus du relevé, avec liens vers les annonces originales.':
+            'Aucun exemple suffisamment vérifié pour ce relevé : Canva n’inventera aucune annonce.'}
+        </div>
+        {includeExamples&&examples.length>0?<div className="editorial-example-list">{examples.map(offer=><a key={offer.url} href={offer.url} target="_blank" rel="noopener noreferrer"><strong>{offer.title}</strong><span>{offer.city} · {offer.departmentName} · Consulter l’annonce originale ↗</span></a>)}</div>:null}
         <div className="editorial-actions"><button type="button" onClick={()=>copyText('prompt')} disabled={!rows.length}>Copier le prompt Canva</button><button type="button" onClick={()=>copyText('data')} disabled={!rows.length}>Copier les chiffres</button><button type="button" onClick={exportCsv} disabled={!rows.length}>Exporter le classement CSV</button></div>
         {copyNote&&<p role="status">{copyNote}</p>}
         <pre className="editorial-preview">{canvaPrompt()}</pre>
-        <p className="editorial-notice">Fichiers visuels : <code>Numdep_nomdep_bleu.svg</code> dans le pack bleu. Vérifie le nom exact de chaque fichier avant import Canva. Ne publie pas un total national marqué « Non établi » comme exhaustif.</p>
+        <p className="editorial-notice">Les silhouettes <code>Numdep_nomdep_bleu.svg</code> sont dans Canva → Identité visuelle « Bruce DE LUCAS » → Illustrations. Aucun fond de carte n’est demandé. Les alertes de qualité restent dans l’administration ; le visuel indique seulement la source et la date du relevé. Ne publie pas un total national marqué « Non établi » comme exhaustif.</p>
       </section>
     </>}
   </AdminLayout>;

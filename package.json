@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "oxlint src functions scripts",
     "test:ui:kpi": "node --test scripts/test-department-kpi-render.mjs",
+    "test:canva-prompt": "node --test scripts/test-canva-publication-prompt.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
