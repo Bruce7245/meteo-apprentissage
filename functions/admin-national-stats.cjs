@@ -168,6 +168,20 @@ function safeChange(latest, previous) {
   };
 }
 
+function indicativeChange(latest, previous) {
+  if (!latest || !previous ||
+      latest.coveredDepartments !== TOTAL_DEPARTMENTS ||
+      previous.coveredDepartments !== TOTAL_DEPARTMENTS ||
+      latest.saturatedDepartments > 0 || previous.saturatedDepartments > 0 ||
+      previous.offers <= 0) return null;
+  return {
+    absolute: latest.offers - previous.offers,
+    ratio: (latest.offers - previous.offers) / previous.offers,
+    previousDate: previous.date,
+    caveat: 'Plafonnement non certifie pour toutes les sources',
+  };
+}
+
 async function loadPopulation(db) {
   const [metaDoc, populationSnap] = await Promise.all([
     db.collection('departmentPopulationReferenceMeta').doc('current').get(),
@@ -237,6 +251,13 @@ async function loadNationalStats(db, { days = 30, today = dateParis() } = {}) {
   const previousComparable = latest?.comparable
     ? points.slice(1).find((point) => point.comparable) : null;
   const change = safeChange(latest, previousComparable);
+  const previousWhole = latest?.coveredDepartments === TOTAL_DEPARTMENTS
+    ? points.slice(1).find((point) =>
+        point.coveredDepartments === TOTAL_DEPARTMENTS &&
+        point.saturatedDepartments === 0
+      )
+    : null;
+  const indicative = !change ? indicativeChange(latest, previousWhole) : null;
 
   const regions = new Map();
   for (const department of latest?.departments || []) {
@@ -289,6 +310,7 @@ async function loadNationalStats(db, { days = 30, today = dateParis() } = {}) {
       missingDepartments: latest.missingDepartments,
     } : null,
     change,
+    indicativeChange: indicative,
     departments: latest?.departments || [],
     regions: [...regions.values()].sort((a, b) => b.offers - a.offers),
     sectors: latest?.sectors || [],
@@ -352,4 +374,5 @@ async function handleNationalStats({ request, response, auth, db } = {}) {
 module.exports = {
   DEPARTMENT_CODES, TOTAL_DEPARTMENTS, recentDates, summarizeDay, safeChange,
   loadPopulation, loadNationalStats, cachedNationalStats, handleNationalStats,
+  indicativeChange,
 };
