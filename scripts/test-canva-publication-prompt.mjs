@@ -137,3 +137,66 @@ test('le bloc offres n’invente rien et disparaît si aucun exemple ne correspo
   assert.match(prompt,/cinq cartes contrastées/);
   assert.match(prompt,/1080 × 1040/);
 });
+
+
+test('cadrage imposé : marges, positions et ratio des cinq cartes', () => {
+  const prompt = buildOccupationInstagramPrompt({
+    occupationLabel: 'Serveur / Serveuse', romeCode: 'G1803',
+    date: day, ranking: departments,
+  });
+  assert.match(prompt, /dimensions EXACTES 1080 × 1040 pixels/);
+  assert.match(prompt, /GRILLE DE COMPOSITION IMPOSÉE/);
+  assert.match(prompt, /x=56 à 1024/);
+  assert.match(prompt, /x=56 à 321, y=124 à 172/);
+  assert.match(prompt, /x=56 à 680, y=181 à 320/);
+  assert.match(prompt, /x=56 à 714, y=333 à 405/);
+  assert.match(prompt, /y=509,588,667,746,825/);
+  assert.match(prompt, /hauteur 72 px chacune/);
+  assert.match(prompt, /x=598–693/);
+  assert.match(prompt, /mode « Contenir » sans déformation/);
+  assert.match(prompt, /RÈGLE ANTI-CHEVAUCHEMENT/);
+  assert.match(prompt, /maximum 3 lignes/);
+  assert.match(prompt, /Ne pas réduire la taille des caractères au point de les rendre illisibles/);
+});
+
+test('la photographie métier est recadrée à droite et se fond dans le bleu nuit sur deux axes', () => {
+  const prompt = buildOccupationInstagramPrompt({
+    occupationLabel: 'Boulanger / Boulangère', romeCode: 'D1102',
+    date: day, ranking: departments,
+  });
+  assert.match(prompt, /CADRAGE : photo du métier x=420–1080, y=0–430/);
+  assert.match(prompt, /FONDU HORIZONTAL OBLIGATOIRE/);
+  assert.match(prompt, /FONDU VERTICAL OBLIGATOIRE/);
+  assert.match(prompt, /#071A32 → transparent/);
+  assert.match(prompt, /100 % vers y=440/);
+  assert.match(prompt, /ne pas couper le visage/i);
+  assert.match(prompt, /aucun bord vertical net/i);
+  assert.match(prompt, /photo.*visible.*cartes/i);
+});
+
+test('deux exemples maximum sur le visuel, troisième lien réservé à la légende', () => {
+  const examples = ['Première annonce', 'Deuxième annonce', 'Troisième annonce'].map((title, i) => ({
+    title, city: 'Lille', departmentName: 'Nord', date: day,
+    url: 'https://example.org/job/' + String(i + 1),
+  }));
+  const prompt = buildOccupationInstagramPrompt({
+    occupationLabel: 'Serveur / Serveuse', romeCode: 'G1803',
+    date: day, ranking: departments, examples,
+  });
+  const [visual, caption] = prompt.split('INFORMATIONS RÉSERVÉES À LA LÉGENDE INSTAGRAM (HORS VISUEL)');
+  assert.match(visual, /Première annonce/);
+  assert.match(visual, /Deuxième annonce/);
+  assert.doesNotMatch(visual, /Troisième annonce/);
+  assert.match(caption, /Troisième annonce/);
+  assert.match(prompt, /Ne JAMAIS dessiner la troisième/);
+});
+
+test('en absence d’offres sourcées le Top 5 utilise toute la largeur', () => {
+  const prompt = buildOccupationInstagramPrompt({
+    occupationLabel: 'Boulanger', romeCode: 'D1102',
+    date: day, ranking: departments, examples: [],
+  });
+  assert.match(prompt, /SANS EXEMPLES : supprimer intégralement l’encart/);
+  assert.match(prompt, /étendre les cinq cartes de x=56 à x=1024/);
+  assert.match(prompt, /Omettre le panneau « Des offres repérées »/);
+});
