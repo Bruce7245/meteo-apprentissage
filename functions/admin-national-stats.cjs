@@ -293,7 +293,7 @@ async function loadNationalStats(db, { days = 30, today = dateParis() } = {}) {
   return {
     ok: true,
     date: latest?.date || null,
-    methodology: 'Somme des offres strictement geolocalisees dans les departements couverts. Observations de la collecte, non estimation exhaustive du marche. Le plafonnement n est pas toujours mesure et des doublons interdepartementaux restent possibles.',
+    methodology: "Somme des offres strictement géolocalisées dans les départements couverts. Il s'agit d'un relevé des offres collectées, pas d'une estimation exhaustive du marché. Le plafonnement peut ne pas être évalué et des doublons entre départements restent possibles.",
     populationReferenceYear: population.referenceYear,
     populationReferenceCoverage: population.coverage,
     latest: latest ? {
