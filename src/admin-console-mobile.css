@@ -1,0 +1,92 @@
+/* Responsive navigation complement for the administration console (#80) */
+
+.admin-console-mobile-menu {
+  position: relative;
+}
+
+.admin-console-mobile-menu > summary {
+  list-style: none;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  padding: 0 10px;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.admin-console-mobile-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-console-mobile-menu-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(350px, calc(100vw - 28px));
+  max-height: calc(100vh - 130px);
+  overflow: auto;
+  border: 1px solid #dfe6ed;
+  border-radius: 16px;
+  padding: 12px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 33, 55, 0.2);
+}
+
+.admin-console-mobile-nav {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-console-mobile-nav .admin-console-nav-group {
+  gap: 4px;
+}
+
+.admin-console-mobile-nav .admin-console-nav-group > p {
+  color: #8897a8;
+}
+
+.admin-console-mobile-nav .admin-console-nav-group > a {
+  color: #56687d;
+  background: #ffffff;
+}
+
+.admin-console-mobile-nav .admin-console-nav-group > a:hover {
+  color: #15314d;
+  background: #f5f8fa;
+}
+
+.admin-console-mobile-nav .admin-console-nav-group > a.active {
+  color: #ffffff;
+  background: #14314d;
+  box-shadow: none;
+}
+
+.admin-console-mobile-public {
+  margin-top: 12px;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #dfe6ed;
+  border-radius: 11px;
+  padding: 0 12px;
+  color: #325f7e;
+  background: #f7fafc;
+}
+
+@media (min-width: 821px) {
+  .admin-console-mobile-menu {
+    display: none;
+  }
+}
+
+@media (max-width: 820px) {
+  .admin-console-mobile-header .admin-console-brand-copy strong {
+    color: #ffffff;
+  }
+}

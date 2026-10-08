@@ -4,6 +4,7 @@ import PublicDepartmentPage from './pages/public/PublicDepartmentPage.jsx';
 import PublicOccupationMapPage from './pages/public/PublicOccupationMapPage.jsx';
 import AdminHomePage from './pages/admin/AdminHomePage.jsx';
 import AdminBulletinsPage from './pages/admin/AdminBulletinsPage.jsx';
+import AdminStatsPage from './pages/admin/AdminStatsPage.jsx';
 import AdminPublishedMapPage from './pages/admin/AdminPublishedMapPage.jsx';
 import AdminDraftMapPage from './pages/admin/AdminDraftMapPage.jsx';
 import AdminSectorDashboardPage from './pages/admin/AdminSectorDashboardPage.jsx';
@@ -59,6 +60,7 @@ function App() {
 
   if (path === '/admin') return <AdminHomePage />;
   if (path === '/admin/bulletins') return <AdminBulletinsPage />;
+  if (path === '/admin/stats') return <AdminStatsPage />;
   if (path === '/admin/carte-publiee') return <AdminPublishedMapPage />;
   if (path === '/admin/carte-a-publier') return <AdminDraftMapPage />;
   if (path === '/admin/secteurs') return <AdminSectorDashboardPage />;

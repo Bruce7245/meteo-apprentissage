@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import {
+  FiArrowLeft,
+  FiCheckCircle,
+  FiEye,
+  FiEyeOff,
+  FiLock,
+  FiMail,
+  FiShield,
+} from 'react-icons/fi';
+import {
   browserSessionPersistence,
   onAuthStateChanged,
   sendPasswordResetEmail,
@@ -28,6 +37,46 @@ function loginErrorMessage(error) {
     default:
       return 'Connexion impossible.';
   }
+}
+
+function AdminAuthBrandPanel() {
+  return (
+    <aside className="admin-auth-brand-panel">
+      <a className="admin-auth-brand" href="/">
+        <span className="admin-console-logo" aria-hidden="true">AF</span>
+        <span>
+          <strong>ApprentiFR</strong>
+          <small>Observatoire territorial de l’apprentissage</small>
+        </span>
+      </a>
+
+      <div className="admin-auth-brand-copy">
+        <p className="admin-console-eyebrow">Administration</p>
+        <h2>Console de pilotage sécurisée</h2>
+        <p>
+          Accédez aux publications, analyses métiers, données entreprises et
+          outils de contrôle depuis un espace réservé aux administrateurs.
+        </p>
+      </div>
+
+      <div className="admin-auth-security-list">
+        <div>
+          <FiShield aria-hidden="true" />
+          <span>
+            <strong>Contrôle serveur</strong>
+            <small>Les droits admin sont vérifiés après authentification.</small>
+          </span>
+        </div>
+        <div>
+          <FiCheckCircle aria-hidden="true" />
+          <span>
+            <strong>Session navigateur</strong>
+            <small>La connexion n’est pas persistée comme session permanente.</small>
+          </span>
+        </div>
+      </div>
+    </aside>
+  );
 }
 
 export default function AdminAuthGate({ children }) {
@@ -136,7 +185,9 @@ export default function AdminAuthGate({ children }) {
     const cleanEmail = email.trim();
 
     if (!cleanEmail) {
-      setError('Saisissez votre adresse e-mail avant de demander un nouveau mot de passe.');
+      setError(
+        'Saisissez votre adresse e-mail avant de demander un nouveau mot de passe.'
+      );
       return;
     }
 
@@ -191,11 +242,18 @@ export default function AdminAuthGate({ children }) {
 
   if (!ready) {
     return (
-      <main className="auth-page">
-        <section className="auth-card">
-          <p className="kicker">ApprentiFR · Administration</p>
-          <h1>Vérification en cours</h1>
-          <p>Contrôle de la session et des droits d’administration.</p>
+      <main className="admin-auth-page">
+        <AdminAuthBrandPanel />
+
+        <section className="admin-auth-content">
+          <div className="admin-auth-card admin-auth-card-loading">
+            <span className="admin-console-loader" />
+            <p className="admin-console-eyebrow">Sécurité</p>
+            <h1>Vérification de la session</h1>
+            <p>
+              Contrôle de l’authentification et des droits administrateur.
+            </p>
+          </div>
         </section>
       </main>
     );
@@ -203,87 +261,122 @@ export default function AdminAuthGate({ children }) {
 
   if (!user || !session) {
     return (
-      <main className="auth-page">
-        <section className="auth-card">
-          <p className="kicker">ApprentiFR · Administration</p>
-          <h1>Accès sécurisé</h1>
-          <p>
-            Connexion réservée aux comptes administrateurs autorisés.
-            L’authentification utilise une adresse e-mail et un mot de passe.
-          </p>
+      <main className="admin-auth-page">
+        <AdminAuthBrandPanel />
 
-          {error ? <div className="state-box error-box">{error}</div> : null}
-          {notice ? <div className="state-box auth-notice">{notice}</div> : null}
+        <section className="admin-auth-content">
+          <div className="admin-auth-card">
+            <div className="admin-auth-card-head">
+              <span className="admin-auth-lock">
+                <FiLock aria-hidden="true" />
+              </span>
+              <div>
+                <p className="admin-console-eyebrow">Accès sécurisé</p>
+                <h1>Connexion administrateur</h1>
+              </div>
+            </div>
 
-          <form className="auth-form" onSubmit={handleLogin}>
-            <label className="auth-field">
-              <span>Adresse e-mail</span>
-              <input
-                type="email"
-                name="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                autoComplete="username"
-                inputMode="email"
-                required
-                disabled={busy}
-              />
-            </label>
+            <p className="admin-auth-intro">
+              Utilisez le compte administrateur autorisé pour accéder à la
+              console.
+            </p>
 
-            <label className="auth-field">
-              <span>Mot de passe</span>
-              <div className="auth-password-field">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  name="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  autoComplete="current-password"
-                  required
-                  disabled={busy}
-                />
+            {error ? (
+              <div className="state-box error-box" role="alert">
+                {error}
+              </div>
+            ) : null}
+
+            {notice ? (
+              <div className="state-box auth-notice" role="status">
+                {notice}
+              </div>
+            ) : null}
+
+            <form className="auth-form" onSubmit={handleLogin}>
+              <label className="auth-field">
+                <span>Adresse e-mail</span>
+                <div className="admin-auth-input">
+                  <FiMail aria-hidden="true" />
+                  <input
+                    type="email"
+                    name="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    autoComplete="username"
+                    inputMode="email"
+                    placeholder="admin@exemple.fr"
+                    required
+                    disabled={busy}
+                  />
+                </div>
+              </label>
+
+              <label className="auth-field">
+                <span>Mot de passe</span>
+                <div className="admin-auth-input admin-auth-password">
+                  <FiLock aria-hidden="true" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    name="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    autoComplete="current-password"
+                    required
+                    disabled={busy}
+                  />
+                  <button
+                    className="admin-auth-password-toggle"
+                    type="button"
+                    onClick={() =>
+                      setShowPassword((value) => !value)
+                    }
+                    disabled={busy}
+                    aria-label={
+                      showPassword
+                        ? 'Masquer le mot de passe'
+                        : 'Afficher le mot de passe'
+                    }
+                  >
+                    {showPassword ? (
+                      <FiEyeOff aria-hidden="true" />
+                    ) : (
+                      <FiEye aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
+              </label>
+
+              <div className="admin-auth-form-actions">
                 <button
-                  className="auth-password-toggle"
-                  type="button"
-                  onClick={() => setShowPassword((value) => !value)}
+                  className="primary-button"
+                  type="submit"
                   disabled={busy}
-                  aria-label={
-                    showPassword
-                      ? 'Masquer le mot de passe'
-                      : 'Afficher le mot de passe'
-                  }
                 >
-                  {showPassword ? 'Masquer' : 'Afficher'}
+                  {busy ? 'Connexion…' : 'Se connecter'}
+                </button>
+
+                <button
+                  className="auth-link-button"
+                  type="button"
+                  onClick={handlePasswordReset}
+                  disabled={busy}
+                >
+                  Mot de passe oublié ?
                 </button>
               </div>
-            </label>
+            </form>
 
-            <button
-              className="primary-button"
-              type="submit"
-              disabled={busy}
-            >
-              {busy ? 'Connexion…' : 'Se connecter'}
-            </button>
-
-            <button
-              className="auth-link-button"
-              type="button"
-              onClick={handlePasswordReset}
-              disabled={busy}
-            >
-              Mot de passe oublié ?
-            </button>
-          </form>
-
-          <div className="auth-footer">
-            <a className="secondary-link" href="/">
-              Retour à la carte publique
-            </a>
-            <small>
-              La session administrateur est limitée à ce navigateur et n’est
-              pas conservée comme connexion permanente.
-            </small>
+            <div className="admin-auth-footer">
+              <a href="/">
+                <FiArrowLeft aria-hidden="true" />
+                Retour au site public
+              </a>
+              <small>
+                La session est limitée à ce navigateur et les droits sont
+                contrôlés côté serveur après connexion.
+              </small>
+            </div>
           </div>
         </section>
       </main>
@@ -294,7 +387,10 @@ export default function AdminAuthGate({ children }) {
     <>
       <div className="admin-session-bar">
         <span>
-          Connecté : <strong>{session.email || user.email || 'Administrateur'}</strong>
+          Connecté :{' '}
+          <strong>
+            {session.email || user.email || 'Administrateur'}
+          </strong>
         </span>
         <button type="button" onClick={handleLogout} disabled={busy}>
           {busy ? 'Déconnexion…' : 'Déconnexion'}

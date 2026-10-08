@@ -166,59 +166,6 @@ export default function AdminSectorDashboardPage() {
     [analysis, selectedDepartmentCode]
   );
 
-  const publicationSignals = useMemo(() => {
-    const rows = Array.isArray(analysis?.rows) ? analysis.rows : [];
-
-    return rows
-      .filter((row) => {
-        if (row.publishedLevel === 'insufficient_data') return false;
-
-        const ratio = optionalFiniteNumber(
-          row.observedVsExpectedRatio
-        );
-        return ratio !== null;
-      })
-      .map((row) => {
-        const ratio = optionalFiniteNumber(
-          row.observedVsExpectedRatio
-        );
-        const annualTrend = optionalFiniteNumber(
-          row.interannualTrend?.annualTrendRatio
-        );
-        const recentTrend = optionalFiniteNumber(
-          row.recentTrend?.changeRatio
-        );
-
-        let editorialScore = Math.max(0, 1 - ratio) * 100;
-
-        if (row.publishedLevel === 'red') editorialScore += 50;
-        if (row.publishedLevel === 'orange') editorialScore += 30;
-        if (
-          row.interannualTrend?.status === 'active' &&
-          row.interannualTrend?.direction === 'degrading'
-        ) {
-          editorialScore += 20;
-        }
-        if (recentTrend !== null && recentTrend <= -0.1) {
-          editorialScore += 10;
-        }
-
-        return {
-          ...row,
-          editorialScore,
-          annualTrend,
-          recentTrend,
-        };
-      })
-      .filter(
-        (row) =>
-          ['red', 'orange'].includes(row.publishedLevel) ||
-          row.interannualTrend?.direction === 'degrading'
-      )
-      .sort((a, b) => b.editorialScore - a.editorialScore)
-      .slice(0, 5);
-  }, [analysis]);
-
   function selectOccupation(selection) {
     const nextRome = normalizeRomeCode(selection?.romeCode);
 
@@ -242,14 +189,27 @@ export default function AdminSectorDashboardPage() {
 
   return (
     <AdminLayout>
-      <section className="admin-page-heading">
-        <p className="kicker">Analyse métier</p>
-        <h1>Moteur de vigilance métiers</h1>
-        <p>
-          La carte nationale reste automatique. Ici, chaque couleur peut être
-          reliée aux offres observées, au niveau attendu, aux seuils locaux et
-          aux facteurs historiques du département.
-        </p>
+      <section className="admin-console-page-head">
+        <div>
+          <p className="admin-console-eyebrow">Décision de vigilance</p>
+          <h1>Moteur de vigilance métiers</h1>
+          <p>
+            Diagnostiquez le niveau calculé, ses seuils et ses facteurs avant
+            toute décision ou simulation différente de la vigilance automatique.
+          </p>
+        </div>
+
+        <div className="admin-console-page-status">
+          <span className="admin-console-live-dot" />
+          <span>
+            <strong>
+              {configLoading
+                ? 'Configuration…'
+                : config?.version || config?.id || 'Version indisponible'}
+            </strong>
+            <small>Configuration active du moteur</small>
+          </span>
+        </div>
       </section>
 
       <section className="panel admin-occupation-search-panel">
@@ -348,77 +308,26 @@ export default function AdminSectorDashboardPage() {
             />
           </section>
 
-          {publicationSignals.length > 0 ? (
-            <section className="panel">
-              <div className="section-heading">
-                <div>
-                  <p className="kicker">Radar éditorial</p>
-                  <h2>Signaux à regarder pour une publication</h2>
-                </div>
-                <span className="soft-pill">
-                  {publicationSignals.length} signal
-                  {publicationSignals.length > 1 ? 's' : ''}
-                </span>
-              </div>
-
-              <div className="admin-publication-signal-grid">
-                {publicationSignals.map((row) => (
-                  <button
-                    type="button"
-                    key={'signal_' + row.departmentCode}
-                    className="admin-publication-signal"
-                    onClick={() =>
-                      setSelectedDepartmentCode(row.departmentCode)
-                    }
-                  >
-                    <span className="admin-publication-signal-head">
-                      <strong>
-                        {row.departmentName || row.departmentCode}
-                      </strong>
-                      <span
-                        className={
-                          'vigilance-badge vigilance-' +
-                          getLevelCss(row.publishedLevel)
-                        }
-                      >
-                        {getLevelLabel(row.publishedLevel)}
-                      </span>
-                    </span>
-
-                    <span className="admin-publication-signal-value">
-                      {formatNumber(row.activeOffersCount, 0)} offres
-                      {' / '}
-                      {formatNumber(row.expectedOffers, 1)} attendues
-                    </span>
-
-                    <span className="admin-publication-signal-meta">
-                      Écart au niveau attendu :{' '}
-                      {formatPercent(
-                        Number(row.observedVsExpectedRatio) - 1
-                      )}
-                    </span>
-
-                    <span className="admin-publication-signal-meta">
-                      Interannuel :{' '}
-                      {row.annualTrend === null
-                        ? trendLabel(row.interannualTrend)
-                        : formatPercent(row.annualTrend)}
-                      {' · '}
-                      récent :{' '}
-                      {row.recentTrend === null
-                        ? '—'
-                        : formatPercent(row.recentTrend)}
-                    </span>
-                  </button>
-                ))}
-              </div>
-
-              <p className="date-line">
-                Ce radar classe des écarts déjà calculés. Il ne publie rien et
-                ne remplace pas la vérification humaine des données.
+          <section className="admin-console-data-note admin-motor-stats-note">
+            <div>
+              <strong>Les statistiques éditoriales sont séparées du moteur</strong>
+              <p>
+                Classements, variations et historiques destinés aux publications
+                sont maintenant regroupés dans Stats & publications. Ici, le
+                moteur reste consacré au diagnostic, à la simulation et à
+                l’arbitrage de vigilance.
               </p>
-            </section>
-          ) : null}
+              <a
+                className="admin-console-inline-link"
+                href={
+                  '/admin/stats' +
+                  (romeCode ? '?rome=' + encodeURIComponent(romeCode) : '')
+                }
+              >
+                Ouvrir Stats & publications
+              </a>
+            </div>
+          </section>
 
           <section className="panel">
             <div className="section-heading">
