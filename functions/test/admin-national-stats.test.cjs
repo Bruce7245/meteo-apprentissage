@@ -10,6 +10,7 @@ const {
   loadNationalStats,
   handleNationalStats,
   cachedNationalStats,
+  indicativeChange,
 } = require('../admin-national-stats.cjs');
 
 const TODAY = '2026-10-08';
@@ -122,6 +123,18 @@ test('une valeur nouvelle offre absente reste null et la qualite sans controle b
   assert.equal(result.newOffers, null);
   assert.equal(result.comparable, false);
   assert.equal(safeChange(result, { ...result, date: YESTERDAY }), null);
+});
+
+test('variation indicative calculee uniquement a couverture 101 et sans plafonnement signale', () => {
+  const latest = summarizeDay(TODAY, DEPARTMENT_CODES.map((code) => doc(code, TODAY, 8, { unassessed: true })));
+  const previous = summarizeDay(YESTERDAY, DEPARTMENT_CODES.map((code) => doc(code, YESTERDAY, 4, { unassessed: true })));
+  assert.equal(safeChange(latest, previous), null);
+  assert.deepEqual(indicativeChange(latest, previous), {
+    absolute: 404, ratio: 1, previousDate: YESTERDAY,
+    caveat: 'Plafonnement non certifie pour toutes les sources',
+  });
+  assert.equal(indicativeChange({ ...latest, coveredDepartments: 100 }, previous), null);
+  assert.equal(indicativeChange({ ...latest, saturatedDepartments: 1 }, previous), null);
 });
 
 test('quarantaines, codes hors territoire, dates et compte incoherent exclus', () => {
