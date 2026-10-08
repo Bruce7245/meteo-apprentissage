@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { FiArrowUp, FiArrowDown } from 'react-icons/fi';
 import {
   Badge,
   Box,
@@ -101,8 +102,8 @@ export default function DepartmentKpiCard({
               gap="1"
               className="department-kpi-trend"
             >
-              {direction === 'up' ? <Stat.UpIndicator /> : null}
-              {direction === 'down' ? <Stat.DownIndicator /> : null}
+              {direction === 'up' ? <FiArrowUp aria-hidden="true" /> : null}
+              {direction === 'down' ? <FiArrowDown aria-hidden="true" /> : null}
               {formattedTrend} {trendLabel}
             </Badge>
           ) : history.length > 0 ? (
