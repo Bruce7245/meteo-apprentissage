@@ -15,7 +15,7 @@ const PICKS=[
 const fmt=(v)=>v===null||v===undefined?'Non établi':new Intl.NumberFormat('fr-FR').format(v);
 const signed=(v)=>v===null?'—':(v>0?'+':'')+new Intl.NumberFormat('fr-FR',{style:'percent',maximumFractionDigits:1}).format(v);
 const slug=(s)=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-function csvEscape(value){const s=String(value??'');return '"'+s.replace(/"/g,'""')+'"';}
+function csvEscape(value){const raw=String(value??'');const s=/^[=+@\-\t\r]/.test(raw.trimStart())?"'"+raw:raw;return '"'+s.replace(/"/g,'""')+'"';}
 function csvDownload(name,rows){
   const content='\uFEFF'+rows.map(row=>row.map(csvEscape).join(';')).join('\r\n');
   const url=URL.createObjectURL(new Blob([content],{type:'text/csv;charset=utf-8'}));
@@ -34,7 +34,7 @@ export default function AdminOccupationOffersPage(){
   const [metricKey,setMetricKey]=useState('offers');
   const [region,setRegion]=useState('all');
   const [query,setQuery]=useState('');
-  const [minimum,setMinimum]=useState(0);
+  const [minimum,setMinimum]=useState(1);
   const [limit,setLimit]=useState('5');
   const [completeOnly,setCompleteOnly]=useState(true);
   const [selectedDate,setSelectedDate]=useState('');
@@ -74,7 +74,22 @@ export default function AdminOccupationOffersPage(){
   const title=label||rome;
   const topFive=rows.slice(0,5);
   const exportBase=()=>['ApprentiFR',title,'ROME '+rome,'Relevé du '+(current?.date||'—'),'',...topFive.map((r,i)=>String(i+1)+'. '+r.departmentName+' ('+r.departmentCode+') : '+fmt(r.offers)+' offre(s), '+fmt(r.openings)+' poste(s)'),'','Source : La Bonne Alternance / ApprentiFR','Une offre peut correspondre à plusieurs postes et codes ROME.',isVerified?'Contrôles complets':'Données non certifiées : plafonnement ou couverture à vérifier'].join('\n');
-  async function copyText(){try{await navigator.clipboard.writeText(exportBase());setCopyNote('Texte copié pour Canva');}catch{setCopyNote('Copie impossible : utilisez l’export CSV');}}
+  const canvaPrompt=()=>[
+    'Créer une publication Instagram verticale 1080 × 1350 px pour ApprentiFR, observatoire territorial de l’apprentissage.',
+    'Logo officiel : identité visuelle Canva « Bruce DE LUCAS ». Palette : bleu marine #1D3557, bleu secondaire #457B9D, fond #F8FAFC, blanc #FFFFFF et gris #64748B. Typographie Inter, style éditorial institutionnel, sans illustration superflue.',
+    'Titre : APPRENTISSAGE — '+title.toUpperCase()+'. Code ROME : '+rome+'.',
+    'Sous-titre : Les '+topFive.length+' départements avec le plus de '+(metricKey==='offers'?'offres recensées':'postes proposés')+'. Date : '+(current?.date||'date inconnue')+'.',
+    ...(isVerified?['Volume national : '+fmt(current?.offers)+' offres, '+fmt(current?.openings)+' postes.']:['NE PAS AFFICHER DE TOTAL NATIONAL comme exhaustif : contrôles de couverture ou de plafonnement non certifiés.']),
+    'Classement à reproduire sans modifier les chiffres :',
+    ...topFive.map((r,i)=>String(i+1)+'. '+r.departmentName+' ('+r.departmentCode+') : '+fmt(r.offers)+' offres, '+fmt(r.openings)+' postes.'),
+    'Utiliser les vrais fichiers SVG bleus importés dans Canva (sans redessiner les contours) :',
+    ...topFive.map(r=>r.departmentCode+'_'+slug(r.departmentName)+'_bleu.svg'),
+    'Afficher une carte géographique exacte de France et les cinq départements, avec un classement lisible et des barres proportionnelles au critère sélectionné. Ne pas inventer les cartes ni les chiffres.',
+    'En pied : « Source : ApprentiFR / La Bonne Alternance. Relevé du '+(current?.date||'—')+'. Une offre peut comporter plusieurs postes et plusieurs codes ROME. Données observées, non exhaustives. »',
+    ...(isVerified?[]:['Mention obligatoire : « Données en cours de validation ».']),
+    'Tous les textes et graphiques doivent rester modifiables.',
+  ].join('\n');
+  async function copyText(type='prompt'){try{await navigator.clipboard.writeText(type==='prompt'?canvaPrompt():exportBase());setCopyNote(type==='prompt'?'Prompt Canva copié':'Classement copié');}catch{setCopyNote('Copie impossible : utilisez l’export CSV');}}
   function exportCsv(){csvDownload('apprentifr_'+rome+'_'+(current?.date||'releve')+'.csv',[
     ['Rang','Code ROME','Métier','Date','Département','Code département','Région','Offres','Postes','Fiabilité','SVG bleu'],
     ...rows.map((r,i)=>[i+1,rome,title,current?.date,r.departmentName,r.departmentCode,r.regionName,r.offers,r.openings,r.complete&&r.capAssessed&&!r.capped?'évalué':'à vérifier',r.departmentCode+'_'+slug(r.departmentName)+'_bleu.svg']),
@@ -84,7 +99,7 @@ export default function AdminOccupationOffersPage(){
     if(!next)return;
     const url=new URL(window.location.href);url.searchParams.set('rome',next);window.history.replaceState(null,'',url.pathname+url.search);
     setRome(next);setLabel(selection.label||selection.trainingLabel||next);
-    setRegion('all');setQuery('');setMinimum(0);
+    setRegion('all');setQuery('');setMinimum(1);
   }
   return <AdminLayout>
     <header className="admin-console-page-head"><div><p className="admin-console-eyebrow">Statistiques & publications / Métiers</p><h1>Explorer les offres par métier</h1><p>Classements territoriaux, filtres et données prêtes pour Canva, à partir des relevés quotidiens.</p></div>
@@ -114,7 +129,7 @@ export default function AdminOccupationOffersPage(){
           <div className="editorial-field"><label htmlFor="ed-metric">Critère</label><select id="ed-metric" value={metricKey} onChange={e=>setMetricKey(e.target.value)}><option value="offers">Nombre d’offres</option><option value="openings">Nombre de postes</option></select></div>
           <div className="editorial-field"><label htmlFor="ed-min">Minimum {metricKey==='offers'?'d’offres':'de postes'}</label><input id="ed-min" type="number" min="0" value={minimum} onChange={e=>setMinimum(Math.max(0,Number(e.target.value)||0))}/></div>
           <div className="editorial-field"><label htmlFor="ed-count">Nombre de résultats</label><select id="ed-count" value={limit} onChange={e=>setLimit(e.target.value)}><option value="5">Top 5</option><option value="10">Top 10</option><option value="20">Top 20</option><option value="all">Tous</option></select></div>
-          <div className="editorial-field"><label htmlFor="ed-date">Date de référence</label><select id="ed-date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)}><option value={response.latestDate}>{response.latestDate}</option>{history.filter(p=>p.date!==response.latestDate).map(p=><option key={p.date} value={p.date}>{p.date}</option>)}</select></div>
+          <div className="editorial-field"><label htmlFor="ed-date">Date de référence</label><select id="ed-date" value={selectedDate} onChange={e=>{setSelectedDate(e.target.value);setRegion('all')}}><option value={response.latestDate}>{response.latestDate}</option>{history.filter(p=>p.date!==response.latestDate).map(p=><option key={p.date} value={p.date}>{p.date}</option>)}</select></div>
         </div>
         <label className="editorial-checkbox"><input type="checkbox" checked={completeOnly} onChange={e=>setCompleteOnly(e.target.checked)}/> Masquer les départements sans décompte métier vérifiable</label>
 
@@ -124,9 +139,9 @@ export default function AdminOccupationOffersPage(){
         {!rows.length&&<p>Aucun département ne correspond aux filtres et à la date sélectionnés.</p>}
       </section>
       <section className="panel editorial-publication"><div className="section-heading"><div><p className="kicker">03 / Canva</p><h2>Préparer la publication</h2><p>Le texte et le fichier CSV utilisent exclusivement les lignes actuellement sélectionnées.</p></div></div>
-        <div className="editorial-actions"><button type="button" onClick={copyText} disabled={!rows.length}>Copier les chiffres</button><button type="button" onClick={exportCsv} disabled={!rows.length}>Exporter le classement CSV</button></div>
+        <div className="editorial-actions"><button type="button" onClick={()=>copyText('prompt')} disabled={!rows.length}>Copier le prompt Canva</button><button type="button" onClick={()=>copyText('data')} disabled={!rows.length}>Copier les chiffres</button><button type="button" onClick={exportCsv} disabled={!rows.length}>Exporter le classement CSV</button></div>
         {copyNote&&<p role="status">{copyNote}</p>}
-        <pre className="editorial-preview">{exportBase()}</pre>
+        <pre className="editorial-preview">{canvaPrompt()}</pre>
         <p className="editorial-notice">Fichiers visuels : <code>Numdep_nomdep_bleu.svg</code> dans le pack bleu. Vérifie le nom exact de chaque fichier avant import Canva. Ne publie pas un total national marqué « Non établi » comme exhaustif.</p>
       </section>
     </>}
