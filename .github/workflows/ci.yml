@@ -50,6 +50,9 @@ jobs:
       - name: Regressions KPI Chakra SSR
         run: npm run test:ui:kpi
 
+      - name: Validate Canva editorial prompts
+        run: npm run test:canva-prompt
+
       - name: Validate Functions syntax
         run: node --check functions/index.js
 
