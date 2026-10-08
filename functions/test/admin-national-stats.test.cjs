@@ -122,6 +122,12 @@ test('une valeur nouvelle offre absente reste null et la qualite sans controle b
   assert.equal(result.saturatedDepartments, 0);
   assert.equal(result.newOffers, null);
   assert.equal(result.comparable, false);
+  const populations = new Map(DEPARTMENT_CODES.map((code) => [
+    code, { population15To29: 1000 },
+  ]));
+  const observedDensity = summarizeDay(TODAY, items, new Map(), populations);
+  assert.equal(observedDensity.offersPer10000Young, 30);
+  assert.equal(observedDensity.comparable, false);
   assert.equal(safeChange(result, { ...result, date: YESTERDAY }), null);
 });
 
