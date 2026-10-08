@@ -1,0 +1,190 @@
+name: Release occupation offers publications
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Read-only validation or explicit production deployment"
+        required: true
+        type: choice
+        default: validate
+        options:
+          - validate
+          - deploy
+      confirm_deploy:
+        description: "For deploy mode, type DEPLOY"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: editorial-occupation-offers-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production
+
+    steps:
+      - name: Confirm main and explicit production approval
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRM: ${{ inputs.confirm_deploy }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Production access requires merged main." >&2
+            exit 1
+          fi
+          if [ "$MODE" != "validate" ] && [ "$MODE" != "deploy" ]; then
+            echo "Invalid release mode." >&2
+            exit 1
+          fi
+          if [ "$MODE" = "deploy" ] && [ "$CONFIRM" != "DEPLOY" ]; then
+            echo "Type DEPLOY to authorize the production release." >&2
+            exit 1
+          fi
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix functions
+
+      - name: Validate frontend and Functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run test:ui:kpi
+          npm run build
+          node --check functions/admin-occupation-offers.cjs
+          node --check functions/index.js
+          node --test functions/test/admin-occupation-offers.test.cjs
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Validate Firestore aggregates without writes
+        shell: bash
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const { initializeApp, getApps } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
+          const { loadOccupationOffers } = require('./admin-occupation-offers.cjs');
+
+          if (!getApps().length) initializeApp({ projectId: 'meteo-apprentissage' });
+          (async () => {
+            const result = await loadOccupationOffers(getFirestore(), { rome: 'D1102', days: 7 });
+            if (!result.ok || !result.latest || result.latest.coveredDepartments < 1 ||
+                result.latest.coveredDepartments > 101) {
+              throw new Error('No valid occupation offer snapshot in last seven days.');
+            }
+            console.log(JSON.stringify({
+              romeCode: result.romeCode,
+              date: result.latestDate,
+              departments: result.latest.coveredDepartments,
+              measuredDepartments: result.latest.measuredDepartments,
+              unknownDepartments: result.latest.unknownDepartments,
+              unassessedCapDepartments: result.latest.unassessedCapDepartments,
+              observedOffers: result.latest.observedOffers,
+              observedOpenings: result.latest.observedOpenings,
+              publicationComparable: result.latest.comparable,
+              historyDays: result.history.length,
+            }, null, 2));
+          })().catch((error) => {
+            console.error('Read-only audit failed: ' + error.message);
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Deploy protected occupation offers Function
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy \
+            --project meteo-apprentissage \
+            --only "functions:getAdminOccupationOffersHttp" \
+            --non-interactive
+
+      - name: Confirm anonymous callers are rejected
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$(mktemp)"
+          status="$(curl --silent --show-error \
+            --output "$output" --write-out '%{http_code}' \
+            --max-time 45 --request POST \
+            --header "Content-Type: application/json" \
+            --data '{"romeCode":"D1102","days":7}' \
+            "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getAdminOccupationOffersHttp")"
+          echo "Anonymous POST: HTTP $status"
+          if [ "$status" != "401" ]; then
+            echo "Expected HTTP 401 from the protected admin endpoint." >&2
+            cat "$output"
+            exit 1
+          fi
+
+      - name: Deploy Hosting after Function security passes
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy \
+            --project meteo-apprentissage \
+            --only hosting \
+            --non-interactive
+
+      - name: Smoke-check published route
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in /admin/stats /admin/stats/metiers /admin/stats/vigilance; do
+            output="$(mktemp)"
+            status="$(curl --silent --show-error --location \
+              --output "$output" --write-out '%{http_code}' \
+              --max-time 45 "https://meteo-apprentissage.web.app$path")"
+            echo "$path: HTTP $status"
+            test "$status" = "200"
+            test -s "$output"
+          done
+
+      - name: Summarize production scope
+        if: always()
+        env:
+          MODE: ${{ inputs.mode }}
+        shell: bash
+        run: |
+          {
+            echo "## Editorial occupation offers release"
+            echo
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Branch: $GITHUB_REF_NAME"
+            echo "- Mode: $MODE"
+            echo "- Relevés Firestore lus sans modifications."
+            echo "- Deploy scope: getAdminOccupationOffersHttp and Hosting only."
+            echo "- No ingestion jobs, schedulers, vigilance settings or Firestore rules changed."
+          } >> "$GITHUB_STEP_SUMMARY"
