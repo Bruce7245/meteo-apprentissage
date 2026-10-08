@@ -43,7 +43,17 @@ test('le prompt devient social media, sans carte, avec silhouettes Canva et déc
     occupationLabel:'Boulanger / Boulangère',romeCode:'D1102',date:day,
     ranking:departments,fullyComparable:true,nationalOffers:112,nationalOpenings:142,
   });
-  assert.match(prompt,/1080 × 1350/);
+  assert.match(prompt,/dimensions EXACTES 1080 × 1040 pixels/);
+  assert.doesNotMatch(prompt,/1080 × 1350/);
+  assert.match(prompt,/PASTILLE JAUNE OBLIGATOIRE/);
+  assert.match(prompt,/#F7C948/);
+  assert.match(prompt,/APPRENTISSAGE/);
+  assert.match(prompt,/bandeau bleu vif/);
+  assert.match(prompt,/OÙ SONT LES OFFRES \?/);
+  assert.match(prompt,/première carte est BLEUE/);
+  assert.match(prompt,/quatre suivantes sont BLANCHES/);
+  assert.match(prompt,/DES OFFRES REPÉRÉES/);
+  assert.match(prompt,/photo.*métier.*fond/i);
   assert.match(prompt,/fourni[l] authentique/i);
   assert.match(prompt,/AUCUNE CARTE DE FRANCE/);
   assert.doesNotMatch(prompt,/Afficher une carte géographique exacte de France/);
@@ -93,4 +103,37 @@ test('aucune fausse ligne du classement avec données incomplètes',()=>{
   });
   assert.match(prompt,/Nord \(59\)/);
   assert.doesNotMatch(prompt,/Paris \(75\) —/);
+});
+
+test('le prompt conserve l’identité graphique aussi lors du classement par postes',()=>{
+  const prompt=buildOccupationInstagramPrompt({
+    occupationLabel:'Serveur / Serveuse',
+    romeCode:'G1803',
+    date:day,
+    ranking:departments,
+    metric:'openings',
+    nationalOpenings:90,
+    fullyComparable:true,
+  });
+  assert.match(prompt,/1080 × 1040 pixels/);
+  assert.match(prompt,/OÙ SONT LES POSTES \?/);
+  assert.match(prompt,/90 POSTES PROPOSÉS/);
+  assert.match(prompt,/PASTILLE JAUNE OBLIGATOIRE/);
+  assert.match(prompt,/restaurant vivant et actuel/i);
+  assert.doesNotMatch(prompt,/1080 × 1350/);
+  assert.doesNotMatch(prompt,/Afficher une carte géographique exacte de France/);
+});
+
+test('le bloc offres n’invente rien et disparaît si aucun exemple ne correspond au relevé',()=>{
+  const prompt=buildOccupationInstagramPrompt({
+    occupationLabel:'Serveur / Serveuse',
+    romeCode:'G1803',
+    date:day,
+    ranking:departments,
+    examples:[{title:'Ancienne annonce',city:'Lille',url:'https://example.org/expired',date:'2026-09-01'}],
+  });
+  assert.match(prompt,/Omettre le panneau « Des offres repérées »/);
+  assert.doesNotMatch(prompt,/Ancienne annonce/);
+  assert.match(prompt,/cinq cartes contrastées/);
+  assert.match(prompt,/1080 × 1040/);
 });
