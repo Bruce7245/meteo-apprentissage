@@ -14653,6 +14653,17 @@ exports.getOccupationVigilanceAnalysisHttp = onRequest(
   }
 );
 
+const nationalStatsAdmin = require('./admin-national-stats.cjs');
+
+exports.getAdminNationalStatsHttp = onRequest(
+  { region: 'europe-west1', timeoutSeconds: 180, memory: '512MiB', cors: true },
+  async (request, response) => {
+    await nationalStatsAdmin.handleNationalStats({
+      request, response, auth: admin.auth(), db,
+    });
+  }
+);
+
 const occupationStatsAdmin = require('./admin-occupation-stats.cjs');
 
 exports.getOccupationVigilanceStatsHttp = onRequest(
