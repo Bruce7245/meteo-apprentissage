@@ -1,6 +1,13 @@
 name: Verify or release national admin stats
 
 on:
+  # A modification to this file on main triggers a read-only production
+  # preflight. Actual deployment remains workflow_dispatch-only.
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/release-admin-national-stats.yml
   workflow_dispatch:
     inputs:
       mode:
@@ -44,12 +51,16 @@ jobs:
       - name: Check release branch and explicit confirmation
         shell: bash
         env:
-          MODE: ${{ inputs.mode }}
+          MODE: ${{ inputs.mode || 'validate' }}
           CONFIRM: ${{ inputs.confirm_deploy }}
         run: |
           set -euo pipefail
           if [ "$GITHUB_REF_NAME" != "main" ]; then
             echo "Production credentials require merged main." >&2
+            exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] && [ "$MODE" != "validate" ]; then
+            echo "Automatic runs may only validate. Deployment is manual." >&2
             exit 1
           fi
           if [ "$MODE" = "deploy" ] && [ "$CONFIRM" != "DEPLOY" ]; then
@@ -92,7 +103,7 @@ jobs:
       - name: Read-only Firestore audit
         working-directory: functions
         env:
-          HISTORY_DAYS: ${{ inputs.days }}
+          HISTORY_DAYS: ${{ inputs.days || '7' }}
         run: |
           node <<'NODE'
           const { initializeApp, getApps } = require('firebase-admin/app');
@@ -129,6 +140,42 @@ jobs:
             process.exitCode = 1;
           });
           NODE
+
+      - name: Check production endpoints without writing
+        if: ${{ inputs.mode != 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_endpoint() {
+            name="$1"
+            payload="$2"
+            response_file="$(mktemp)"
+            status="$(curl --silent --show-error \
+              --output "$response_file" \
+              --write-out "%{http_code}" \
+              --max-time 30 \
+              --request POST \
+              --header "Content-Type: application/json" \
+              --data "$payload" \
+              "https://europe-west1-meteo-apprentissage.cloudfunctions.net/$name" || true)"
+            case "$status" in
+              401) echo "$name: deployed, rejects anonymous access (401)" ;;
+              403) echo "$name: denied by service access control (403); verify IAM before release" ;;
+              404) echo "$name: not deployed at checked URL yet (404)" ;;
+              200)
+                echo "SECURITY FAILURE: $name returned HTTP 200 without a Firebase token." >&2
+                exit 1
+                ;;
+              *)
+                echo "$name: unexpected response HTTP $status; investigate before deployment" >&2
+                exit 1
+                ;;
+            esac
+          }
+
+          check_endpoint "getAdminNationalStatsHttp" '{"days":7}'
+          check_endpoint "getOccupationVigilanceStatsHttp" '{"romeCode":"D1108","historyLimit":7}'
 
       - name: Deploy national and occupation editorial stats Functions
         if: ${{ inputs.mode == 'deploy' }}
@@ -198,7 +245,7 @@ jobs:
         if: always()
         shell: bash
         env:
-          MODE: ${{ inputs.mode }}
+          MODE: ${{ inputs.mode || 'validate' }}
         run: |
           {
             echo "## ApprentiFR — national admin stats"
