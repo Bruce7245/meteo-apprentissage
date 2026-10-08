@@ -91,7 +91,11 @@ export default function AdminNationalStatsPage() {
     <MetricCard label="Offres recensées" value={number(latest?.offers)} detail="Somme des instantanés départementaux" />
     <MetricCard label="Postes proposés" value={number(latest?.openings)} detail="Total des postes associés aux offres" />
     <MetricCard label="Départements couverts" value={latest ? number(latest.coveredDepartments) + ' / ' + number(latest.expectedDepartments) : '—'} detail="Source quotidienne vérifiée" />
-    <MetricCard label="Évolution nationale" value={signed(data?.change?.ratio)} detail={data?.change ? 'vs ' + data.change.previousDate + ' · ' + (data.change.absolute > 0 ? '+' : '') + number(data.change.absolute) : 'Comparaison fiable indisponible'} />
+    <MetricCard label={data?.indicativeChange ? 'Variation indicative' : 'Évolution nationale'} value={signed(data?.change?.ratio ?? data?.indicativeChange?.ratio)} detail={data?.change
+      ? 'Fiable · vs ' + data.change.previousDate + ' · ' + (data.change.absolute > 0 ? '+' : '') + number(data.change.absolute)
+      : data?.indicativeChange
+        ? 'Non certifiée · vs ' + data.indicativeChange.previousDate + ' · ' + (data.indicativeChange.absolute > 0 ? '+' : '') + number(data.indicativeChange.absolute)
+        : 'Comparaison nationale indisponible'} />
   </section>;
   return <AdminLayout>
     <section className="admin-console-page-head"><div><p className="admin-console-eyebrow">Statistiques & analyse</p><h1>État de l’apprentissage en France</h1><p>Vue nationale, territoires, métiers et publications à partir des données collectées.</p></div>
