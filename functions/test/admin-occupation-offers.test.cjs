@@ -38,3 +38,29 @@ test('endpoint refuse un code ROME malforme pour un administrateur authentifie',
  await handleOccupationOffers({request:{method:'POST',body:{romeCode:'<script>'},get:()=> 'Bearer valid'},response,auth,db});
  assert.equal(response.code,400);
 });
+
+test('une synthese byRome absente ne signifie jamais zero offre',()=>{
+ assert.equal(byRomeLookup({},'D1102').complete,false);
+ assert.equal(byRomeLookup({byRome:null},'D1102').complete,false);
+ const result=aggregateRomeDay(date,[doc('72',[],{byRome:undefined})],new Map(),'D1102');
+ assert.equal(result.departments[0].offers,null);
+});
+test('la recherche historique conserve les classements de chaque date',async()=>{
+ const dayBefore='2026-10-07';
+ const old=doc('72',[{code:'D1102',offers:1,openings:2}]);
+ const oldData=old.data();
+ old.data=()=>({...oldData,date:dayBefore});
+ const docsByDate={[date]:[doc('72')],[dayBefore]:[old]};
+ const db={collection:(collectionName)=>{
+   if(collectionName==='departments')return {get:async()=>({docs:[{id:'72',data:()=>({name:'Sarthe',regionName:'Pays de la Loire'})}]})};
+   if(collectionName==='dailyOfferSnapshots')return{doc:(day)=>({collection:()=>({get:async()=>({docs:docsByDate[day]||[],empty:!(docsByDate[day]?.length)})})})};
+   throw new Error('Unexpected collection '+collectionName);
+ }};
+ const {loadOccupationOffers}=require('../admin-occupation-offers.cjs');
+ const result=await loadOccupationOffers(db,{rome:'D1102',days:7,today:date});
+ assert.equal(result.latestDate,date);
+ assert.deepEqual(result.history.map(x=>x.date),[dayBefore,date]);
+ assert.equal(result.history[0].departments[0].offers,1);
+ assert.equal(result.history[1].departments[0].openings,6);
+ assert.equal(result.departments[0].offers,3);
+});
