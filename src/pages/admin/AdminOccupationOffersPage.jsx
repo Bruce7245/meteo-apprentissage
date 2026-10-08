@@ -39,19 +39,19 @@ export default function AdminOccupationOffersPage(){
   const [completeOnly,setCompleteOnly]=useState(true);
   const [selectedDate,setSelectedDate]=useState('');
   const [copyNote,setCopyNote]=useState('');
+  const [retryCount,setRetryCount]=useState(0);
   useEffect(()=>{
     if(!rome){setResponse(null);return undefined;}
     let active=true;
     setBusy(true);setError('');setResponse(null);setSelectedDate('');
     getAdminOccupationOffers(rome,{days}).then(result=>{if(active){setResponse(result);setSelectedDate(result.latestDate||'');}}).catch(e=>{if(active)setError(e.message)}).finally(()=>{if(active)setBusy(false)});
     return()=>{active=false};
-  },[rome,days]);
+  },[rome,days,retryCount]);
   const history=useMemo(()=>response?.history||[],[response]);
   const dateRows=useMemo(()=>{
     const date=selectedDate||response?.latestDate;
-    if(date===response?.latestDate)return response?.departments||[];
-    return []; // Historical aggregates cannot be used to invent department-level history.
-  },[response,selectedDate]);
+    return history.find(point=>point.date===date)?.departments || [];
+  },[history,selectedDate,response?.latestDate]);
   const current=history.find(item=>item.date===selectedDate) || response?.latest || null;
   const regions=useMemo(()=>[...new Set(dateRows.map(r=>r.regionName).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'fr')),[dateRows]);
   const rows=useMemo(()=>{
@@ -93,12 +93,12 @@ export default function AdminOccupationOffersPage(){
     <section className="panel editorial-filters">
       <div className="section-heading"><div><p className="kicker">01 / Métier</p><h2>Choisir un métier (ROME)</h2></div><span className="soft-pill">{rome||'Aucun métier'}</span></div>
       <div className="editorial-picks">{PICKS.map(p=><button type="button" key={p.rome} className={rome===p.rome?'editorial-chip is-active':'editorial-chip'} onClick={()=>choose({romeCode:p.rome,label:p.name})}>{p.name} <small>{p.rome}</small></button>)}</div>
-      <div className="editorial-picker-row"><OccupationSearch onOccupationSelect={choose} initialRomeCode={rome} initialLabel={label}/><div className="editorial-field"><label htmlFor="editorial-rome">Ou saisir un code ROME</label><input id="editorial-rome" placeholder="D1102" maxLength={5} onKeyDown={e=>{if(e.key==='Enter')choose({romeCode:e.currentTarget.value,label:e.currentTarget.value.toUpperCase()})}}/><small>Entrée pour valider</small></div></div>
+      <div className="editorial-picker-row"><OccupationSearch key={rome || "initial"} onOccupationSelect={choose} initialRomeCode={rome} initialLabel={label}/><div className="editorial-field"><label htmlFor="editorial-rome">Ou saisir un code ROME</label><input id="editorial-rome" placeholder="D1102" maxLength={5} onKeyDown={e=>{if(e.key==='Enter')choose({romeCode:e.currentTarget.value,label:e.currentTarget.value.toUpperCase()})}}/><small>Entrée pour valider</small></div></div>
       <div className="editorial-switch"><span>Période de recherche</span>{[7,30,60].map(n=><button type="button" key={n} className={days===n?'is-active':''} onClick={()=>setDays(n)}>{n} jours</button>)}</div>
     </section>
     {!rome&&<section className="panel"><h2>Sélectionne un métier pour commencer.</h2><p>Tu peux utiliser les raccourcis ou la recherche.</p></section>}
     {busy&&<section className="panel" role="status">Chargement du classement métier et vérification des données…</section>}
-    {error&&<section className="admin-console-alert admin-console-alert-error" role="alert"><strong>Données indisponibles</strong><p>{error}</p><button onClick={()=>{const next=rome;setRome('');setTimeout(()=>setRome(next),0)}}>Réessayer</button></section>}
+    {error&&<section className="admin-console-alert admin-console-alert-error" role="alert"><strong>Données indisponibles</strong><p>{error}</p><button onClick={()=>setRetryCount(n=>n+1)}>Réessayer</button></section>}
     {!busy&&!error&&response&& !response.latest&&<section className="panel"><h2>Aucun relevé disponible</h2><p>Le métier sélectionné ne possède pas encore d’instantané sur la période demandée.</p></section>}
     {!busy&&!error&&response?.latest&&<>
       <section className={'panel editorial-quality '+(isVerified?'is-valid':'is-warning')} role="status"><strong>{isVerified?'Relevé intégralement comparable':'Relevé observé, couverture ou plafonnement non certifiés'}</strong><span>{current?.coveredDepartments} / 101 départements · {current?.measuredDepartments} mesurés · {current?.unknownDepartments} avec ROME potentiellement tronqué · {current?.unassessedCapDepartments} sans contrôle de plafonnement · {current?.cappedDepartments} potentiellement plafonnés</span></section>
@@ -114,10 +114,10 @@ export default function AdminOccupationOffersPage(){
           <div className="editorial-field"><label htmlFor="ed-metric">Critère</label><select id="ed-metric" value={metricKey} onChange={e=>setMetricKey(e.target.value)}><option value="offers">Nombre d’offres</option><option value="openings">Nombre de postes</option></select></div>
           <div className="editorial-field"><label htmlFor="ed-min">Minimum {metricKey==='offers'?'d’offres':'de postes'}</label><input id="ed-min" type="number" min="0" value={minimum} onChange={e=>setMinimum(Math.max(0,Number(e.target.value)||0))}/></div>
           <div className="editorial-field"><label htmlFor="ed-count">Nombre de résultats</label><select id="ed-count" value={limit} onChange={e=>setLimit(e.target.value)}><option value="5">Top 5</option><option value="10">Top 10</option><option value="20">Top 20</option><option value="all">Tous</option></select></div>
-          <div className="editorial-field"><label htmlFor="ed-date">Date de référence</label><select id="ed-date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)}><option value={response.latestDate}>{response.latestDate}</option>{history.filter(p=>p.date!==response.latestDate).map(p=><option key={p.date} value={p.date}>{p.date} (historique national)</option>)}</select></div>
+          <div className="editorial-field"><label htmlFor="ed-date">Date de référence</label><select id="ed-date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)}><option value={response.latestDate}>{response.latestDate}</option>{history.filter(p=>p.date!==response.latestDate).map(p=><option key={p.date} value={p.date}>{p.date}</option>)}</select></div>
         </div>
         <label className="editorial-checkbox"><input type="checkbox" checked={completeOnly} onChange={e=>setCompleteOnly(e.target.checked)}/> Masquer les départements sans décompte métier vérifiable</label>
-        {selectedDate!==response.latestDate&&<p className="editorial-notice">La date sélectionnée ne comporte qu'un historique national ; aucun classement départemental n'est produit sans relevé géographique de cette date. Reviens à la dernière date pour exporter un Top 5.</p>}
+
       </section>
       <section className="panel editorial-results"><div className="section-heading"><div><p className="kicker">Résultats</p><h2>Classement — {title}</h2></div><span className="soft-pill">{current?.date}</span></div>
         <div className="table-wrapper"><table className="simple-table"><thead><tr><th>Rang</th><th>Département</th><th>Région</th><th>Offres</th><th>Postes</th><th>Statut</th></tr></thead><tbody>{rows.map((r,i)=><tr key={r.departmentCode}><td><strong>{i+1}</strong></td><td><strong>{r.departmentName}</strong><small className="editorial-depcode">{r.departmentCode}</small></td><td>{r.regionName}</td><td><strong>{fmt(r.offers)}</strong></td><td>{fmt(r.openings)}</td><td>{r.complete?(r.capped?'Plafonnement possible':r.capAssessed?'Mesuré':'À vérifier'):'Décompte absent'}</td></tr>)}</tbody></table></div>
