@@ -187,7 +187,7 @@ export default function AdminOccupationOffersPage(){
         <label className="editorial-checkbox"><input type="checkbox" checked={includeExamples} onChange={e=>setIncludeExamples(e.target.checked)}/> Ajouter jusqu’à 3 exemples d’offres réellement repérées au relevé sélectionné</label>
         <div className="editorial-example-status" aria-live="polite">
           {examplesLoading?'Recherche des annonces originales correspondant au relevé…':
-            examples.length?String(examples.length)+' exemple(s) vérifié(s), avec liens vers les annonces originales.':
+            examples.length?String(examples.length)+' exemple(s) issus du relevé, avec liens vers les annonces originales.':
             'Aucun exemple suffisamment vérifié pour ce relevé : Canva n’inventera aucune annonce.'}
         </div>
         {includeExamples&&examples.length>0?<div className="editorial-example-list">{examples.map(offer=><a key={offer.url} href={offer.url} target="_blank" rel="noopener noreferrer"><strong>{offer.title}</strong><span>{offer.city} · {offer.departmentName} · Consulter l’annonce originale ↗</span></a>)}</div>:null}
