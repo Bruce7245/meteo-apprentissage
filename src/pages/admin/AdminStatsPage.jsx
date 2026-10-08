@@ -387,6 +387,9 @@ export default function AdminStatsPage() {
         </div>
       </section>
 
+      <section className="panel national-return-link">
+        <a className="admin-detail-button" href="/admin/stats">← Retour à la vue nationale</a>
+      </section>
       <section className="panel admin-stats-filter-panel">
         <div className="section-heading">
           <div>
