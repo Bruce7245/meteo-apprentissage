@@ -6,6 +6,7 @@ on:
       - feat/admin-stats-national-82
     paths:
       - .github/workflows/audit-admin-national-stats.yml
+      - functions/admin-national-stats.cjs
   workflow_dispatch:
 
 permissions:
