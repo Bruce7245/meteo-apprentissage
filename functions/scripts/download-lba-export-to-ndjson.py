@@ -98,7 +98,7 @@ def main():
             with input_stream(compressed_path) as source, temporary_ndjson.open(
                 "w", encoding="utf-8"
             ) as dest:
-                for job in ijson.items(source, prefix):
+                for job in ijson.items(source, prefix, use_float=True):
                     rows += 1
                     if not isinstance(job, dict) or not isinstance(job.get("offer"), dict):
                         invalid_offers += 1
