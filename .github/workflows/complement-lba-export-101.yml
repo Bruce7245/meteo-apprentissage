@@ -1,4 +1,4 @@
-name: Complement export LBA - preflight corrige #101
+name: Complement export LBA - staging versionne #101
 
 on:
   push:
@@ -17,12 +17,12 @@ concurrency:
 
 jobs:
   complement:
-    name: Previsualiser complement national sans modifier les statistiques
+    name: Preparer le complement Firestore hors production active
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 40
     env:
-      MODE: preview
+      MODE: stage
       BASELINE_DATE: '2026-10-08'
       GCLOUD_PROJECT: meteo-apprentissage
       EXPORT_NDJSON_PATH: /tmp/apprentifr-export.ndjson
@@ -54,7 +54,7 @@ jobs:
           "$RUNNER_TEMP/lba-venv/bin/python" -m py_compile functions/scripts/download-lba-export-to-ndjson.py
           npm run test:unit --prefix functions
 
-      - name: Authentifier Google Cloud (lecture seule pour le preflight)
+      - name: Authentifier Google Cloud pour ecriture staging privee
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
@@ -77,7 +77,7 @@ jobs:
             --meta "$EXPORT_META_PATH"
           unset TOKEN
 
-      - name: Reconciler 101 departements - simulation
+      - name: Ecrire generation versionnee 101 departements hors production active
         shell: bash
         run: |
           set -euo pipefail
