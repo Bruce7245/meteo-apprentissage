@@ -335,10 +335,21 @@ async function runDailyComplement({db,token,now=new Date(),publishEnabled=false}
   const originalRoot=await db.collection('dailyOfferSnapshots').doc(target).get();
   if(isPublishedExportForDate(originalRoot,target)){
     // Pas de remplacement d'une generation export/complement deja publiee.
-    return {status:'skipped_already_published',date:target};
+    const status=originalRoot.data()?.status==='export_complement_published'
+      ? 'already_completed':'skipped_baseline_is_full_export';
+    if(publishEnabled && status==='skipped_baseline_is_full_export') {
+      await runRef.set({
+        date:target,status,exportDay,
+        finishedAt:admin.firestore.FieldValue.serverTimestamp(),
+        description:'La veille etait deja issue de l export national',
+      },{merge:true});
+    }
+    return {status,date:target};
   }
-  const locked=await acquire(db,runRef,target,now);
-  if(locked!=='acquired')return {status:locked,date:target};
+  if(publishEnabled){
+    const locked=await acquire(db,runRef,target,now);
+    if(locked!=='acquired')return {status:locked,date:target};
+  }
   try {
     const baseline=await loadBaseline(db,target);
     const metadata=await fetchMetadata(token,now);
@@ -362,19 +373,24 @@ async function runDailyComplement({db,token,now=new Date(),publishEnabled=false}
       exportLastUpdate:metadata.lastUpdate,export:raw.stats,
       completedAt:admin.firestore.FieldValue.serverTimestamp(),
     };
+    if(!publishEnabled) return report;
     await runRef.set(report,{merge:true});
-    if(!publishEnabled)return report;
     await stage(db,runRef,target,plan,baseline);
     await validateStage(db,target,plan);
     await publish(db,runRef,target,plan,baseline,now);
     return {...await verify(db,target,plan),metrics:plan.metrics};
   }catch(error){
-    try{
-      await runRef.set({
-        status:'failed',errorCode:errorCode(error),
-        failedAt:admin.firestore.FieldValue.serverTimestamp(),
-      },{merge:true});
-    }catch(_ignored){}
+    if(publishEnabled){
+      try{
+        const existing=await runRef.get();
+        const published=existing.data()?.status==='published';
+        await runRef.set({
+          ...(published ? {lastVerificationErrorCode:errorCode(error)} :
+            {status:'failed',errorCode:errorCode(error)}),
+          failedAt:admin.firestore.FieldValue.serverTimestamp(),
+        },{merge:true});
+      }catch(_ignored){}
+    }
     // Pas d'URL signee, d'offres ou de secret dans l'exception exposee.
     throw new Error(errorCode(error));
   }
