@@ -209,6 +209,7 @@ async function buildPlan(meta, day, runId, base) {
     fromNdjson: 0, staged: 0, stagedNew: 0, stagedMatched: 0,
     stagedEnriched: 0, stagedUnchanged: 0, duplicateInExport: 0,
     invalidIdentities: 0, unlocated: 0, departmentConflicts: 0,
+    recoveredCrossDepartment: 0,
     fieldConflicts: 0, divergentOpeningCounts: 0, missingRome: 0,
     withoutCity: 0, stagingAfterExportCreatedDate: 0,
   };
@@ -281,6 +282,8 @@ async function buildPlan(meta, day, runId, base) {
     sources.set(o.partnerLabel, (sources.get(o.partnerLabel) || 0) + 1);
   }
   totals.staged = staged.length;
+  assert(Object.values(totals).every((value) => Number.isInteger(value) && value >= 0),
+    'Compteurs de reconciliation invalides : publication interdite');
   assert(totals.fromNdjson === Number(meta.offerRows),
     'Incoherence du nombre de lignes de l export');
   assert(totals.staged + unlocated.length + totals.invalidIdentities +
