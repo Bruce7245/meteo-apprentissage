@@ -138,9 +138,10 @@ async function loadBaseline(db,date){
 }
 function departmentTotals(items,original){
   const counts={before:Number(original?.strict||0),after:items.length,
-    added:0,enriched:0,unchanged:0,baselineOnly:0,review:0};
+    added:0,enriched:0,unchanged:0,baselineOnly:0,review:0,reclassified:0};
   for(const offer of items){
     const state=offer.complement?.status;
+    if(offer.complement?.reclassifiedFromSearchDepartment)counts.reclassified++;
     if(state==='added')counts.added++;
     else if(state==='enriched')counts.enriched++;
     else if(state==='unchanged')counts.unchanged++;
@@ -303,6 +304,7 @@ async function publish(db,runRef,date,plan,baseline,now){
     runId:plan.runId,exportLastUpdate:plan.exportLastUpdate,
     baselineDate:plan.baselineDate,exportDay:plan.exportDay,
     metrics:plan.metrics,conflictTypes:plan.conflictTypes,
+    fieldsFilled:plan.fieldsFilled,
     afterOffers:plan.metrics.afterOffers,
     initialOffers:plan.metrics.initialStrict,
     added:plan.metrics.added,enriched:plan.metrics.enriched,
@@ -370,6 +372,7 @@ async function runDailyComplement({db,token,now=new Date(),publishEnabled=false}
       unchanged:plan.metrics.unchanged,baselineOnly:plan.metrics.baselineOnly,
       review:plan.metrics.review,quarantined:plan.metrics.quarantined,
       metrics:plan.metrics,conflictTypes:plan.conflictTypes,
+      fieldsFilled:plan.fieldsFilled,
       exportLastUpdate:metadata.lastUpdate,export:raw.stats,
       completedAt:admin.firestore.FieldValue.serverTimestamp(),
     };
