@@ -1,0 +1,69 @@
+name: Integrer le complement export LBA 09-10-2026
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-lba-export-complement-101
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    name: Publication atomique 101 departements apres guards production
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Installer et tester les Functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix functions
+          node --check functions/scripts/activate-lba-export-complement-2026-10-09.cjs
+          node --check functions/scripts/rollback-lba-export-complement-2026-10-09.cjs
+          npm run test:unit --prefix functions
+
+      - name: Authentifier Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Copier les offres puis publier atomiquement les 101 resumes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node functions/scripts/activate-lba-export-complement-2026-10-09.cjs
+
+      - name: Confirmer que l'API publique sert le stock active
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 60 \
+            "https://europe-west1-meteo-apprentissage.cloudfunctions.net/getPublicDepartmentOffersHttp?department=72&limit=3&activationAudit=20261009" \
+            --output /tmp/apprentifr-export-activation-public.json
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const payload=JSON.parse(fs.readFileSync('/tmp/apprentifr-export-activation-public.json','utf8'));
+          if(!payload.ok || !payload.exists || payload.data?.date!=='2026-10-09' ||
+            payload.data?.methodologyBreak!==true || !Number.isInteger(payload.data?.totalOffers))
+              throw new Error('Le lecteur public n expose pas encore la photographie export');
+          console.log(JSON.stringify({
+            publicApiVerified:true,
+            department:'72',
+            snapshotDate:payload.data.date,
+            offers:payload.data.totalOffers,
+            methodologyBreak:payload.data.methodologyBreak,
+            trendSuspended:payload.data.trends?.offers===null,
+          }));
+          NODE
