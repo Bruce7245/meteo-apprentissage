@@ -1,4 +1,4 @@
-name: Audit Function LBA complement J-1 04h #103
+name: Audit Function LBA complement J-1 04h #103 - detail
 
 on:
   push:
@@ -76,6 +76,10 @@ jobs:
               date:report.date,exportDay:report.exportDay,
               status:report.status,initialOffers:report.initialOffers,
               added:report.added,enriched:report.enriched,
+              enrichedMeaningful:report.metrics.enrichedMeaningful,
+              enrichedTechnicalOnly:report.metrics.technicalOnlyEnriched,
+              reclassified:report.metrics.reclassified,
+              fieldsFilled:report.fieldsFilled,
               unchanged:report.unchanged,baselineOnly:report.baselineOnly,
               review:report.review,quarantined:report.quarantined,
               afterOffers:report.afterOffers,rawRows:report.export?.rowsParsed,
@@ -88,7 +92,8 @@ jobs:
                 '', '| Etat | Total |','|---|---:|',
                 '| Avant (08/10) | '+report.initialOffers+' |',
                 '| Ajoutees en complement | '+report.added+' |',
-                '| Enrichies | '+report.enriched+' |',
+                '| Enrichies (dont utiles) | '+report.enriched+' ('+report.metrics.enrichedMeaningful+') |',
+                '| Reclassées (CP corrigé) | '+report.metrics.reclassified+' |',
                 '| A verifier | '+report.review+' |',
                 '| Presentes uniquement dans le releve initial | '+report.baselineOnly+' |',
                 '| Apres complement | '+report.afterOffers+' |',
