@@ -1,6 +1,15 @@
 # ApprentiFR — normalisation et fusion de l'export LBA (issue #101)
 
-**Statut : prototype / aucune migration ni écriture Firestore activée.**
+**Statut au 09/10/2026 : génération privée Firestore enregistrée et vérifiée ; aucune publication ni écriture dans les instantanés historiques actifs.**
+
+## Complément réalisé (09/10/2026)
+
+- Génération privée `lbaExportComplementRuns/lba_export_20261009010140` avec **10 086** offres normalisées et **104** annonces sans département en quarantaine.
+- Parmi les 10 086, **8 380** identifiants présents dans l'ancien relevé et enrichis dans la génération, **1 706** supplémentaires. **438** précédemment retournés dans le mauvais département de recherche ont été rattachés à celui de leur code postal. Les **287** enregistrements présents uniquement le 08/10 restent dans l'historique.
+- 101 documents départementaux contrôlés, sommes concordantes ; 115 divergences de champs signalées sans écrasement et une divergence d'effectifs.
+- Contrôle indépendant : 08/10 intact à **8 751 stockées / 8 217 strictes**.
+- Aucun changement de `dailyOfferSnapshots`, `departmentDailyStats`, moteur de vigilance, calendrier ni données publiques.
+- [Ecriture GitHub Actions](https://github.com/Bruce7245/meteo-apprentissage/actions/runs/37975035553), [vérification](https://github.com/Bruce7245/meteo-apprentissage/actions/runs/37975637259).
 
 ## Pourquoi
 
@@ -20,7 +29,7 @@ Audit du 09/10/2026 : export national 10 190 offres, dont 10 190 avec ROME valid
 
 Un export mis à jour le 09/10 à 03h ne reconstitue **pas** l'état du 08/10 à 23h59. Des offres disparues entre les deux heures manquent dans l'export et d'autres peuvent être apparues.
 
-**Ne pas** injecter les 1 726 annonces absentes dans la photographie datée du 08/10. Les offres enrichies après coup doivent préserver leur provenance et date d'enrichissement. Toute insertion relève d'un nouveau jeu de données avec `observedAt` réel, pas d'une `creation` supposée.
+**Ne pas** injecter les 1 706 annonces localisables absentes dans la photographie datée du 08/10. Les offres enrichies après coup doivent préserver leur provenance et date d'enrichissement. Toute insertion relève d'un nouveau jeu de données avec `observedAt` réel, pas d'une `creation` supposée.
 
 ## Publication sûre / changement de schéma restant à concevoir
 
