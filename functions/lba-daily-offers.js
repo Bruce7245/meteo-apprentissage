@@ -565,6 +565,19 @@ async function commitOffers(departmentRef, offers) {
 
 async function importDepartment(date, departmentCode, runId) {
   const startedAt = new Date();
+  const dailyRoot = await db.collection("dailyOfferSnapshots").doc(date).get();
+  if (require('./lib/lba-export-publication-guard.cjs')
+      .isPublishedExportForDate(dailyRoot, date)) {
+    logger.info("Generation export active : import departemental ignore pour le snapshot", {
+      date, departmentCode,
+    });
+    return {
+      departmentCode, skipped: true, reason: "EXPORT_SNAPSHOT_PROTECTED",
+      rawJobsCount: 0, storedOffersCount: 0,
+      totalOpenings: 0, newTodayOffers: null,
+      newTodayOpenings: null, isPossiblySaturated: null, saturatedSources: [],
+    };
+  }
 
   const rawJobs = await fetchDepartmentJobs(departmentCode);
 
@@ -1172,11 +1185,14 @@ exports.getPublicDepartmentOffersHttp = onRequest(
         return;
       }
 
-      const offersSnapshot = await latest.ref
+      const query = latest.ref
         .collection("offers")
-        .where("runId", "==", activeRunId)
-        .limit(1000)
-        .get();
+        .where("runId", "==", activeRunId);
+      // Un export peut contenir plus de 1 000 annonces dans un departement.
+      // La limite historique tronquerait les totaux ROME de la page publique.
+      const offersSnapshot = meta.methodologyBreak === true
+        ? await query.get()
+        : await query.limit(1000).get();
 
       const payload = buildPublicOffersPayload({
         date: latest.date,
@@ -1196,10 +1212,15 @@ exports.getPublicDepartmentOffersHttp = onRequest(
       );
 
       payload.history = history;
-      payload.trends = {
-        offers: computePublicTrend(history.map((item) => item.totalOffers)),
-        openings: computePublicTrend(history.map((item) => item.totalOpenings)),
-      };
+      const methodologyBreak = meta.methodologyBreak === true;
+      payload.methodologyBreak = methodologyBreak;
+      payload.qualityMethod = cleanText(meta.qualityMethod);
+      payload.trends = methodologyBreak
+        ? { offers: null, openings: null }
+        : {
+            offers: computePublicTrend(history.map((item) => item.totalOffers)),
+            openings: computePublicTrend(history.map((item) => item.totalOpenings)),
+          };
 
       res.set("Cache-Control", "public, max-age=300, s-maxage=600");
       res.json({
