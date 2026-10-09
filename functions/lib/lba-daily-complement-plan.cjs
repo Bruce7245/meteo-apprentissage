@@ -135,7 +135,7 @@ function buildDailyComplementPlan({
       });
       continue;
     }
-    let item,classification,conflicts=[],reclassified=false;
+    let item,classification,conflicts=[],reclassified=false,fieldsCompleted=[];
     if(previous){
       const conflictingDept=previous.locationQuality==='in_department' &&
         previous.departmentCode!==candidate.departmentCode;
@@ -151,6 +151,7 @@ function buildDailyComplementPlan({
           x!=='locationQuality'&&x!=='isInRequestedDepartment');
         for(const field of fields)
           filledFields.set(field,(filledFields.get(field)||0)+1);
+        fieldsCompleted=fields;
         const meaningful=fields.some(field=>MEANINGFUL_FIELDS.has(field));
         if(patch.changed){
           if(meaningful)metrics.enrichedMeaningful++;
@@ -184,6 +185,7 @@ function buildDailyComplementPlan({
         exportDay,exportLastUpdate,baselineDate,conflicts,
       }),
       reclassifiedFromSearchDepartment:reclassified,
+      fieldsCompleted,
     };
     item.collectionPhase='complement_04h';
     item.collectionSource=previous?'daily_search_plus_lba_export':'lba_export_only';
