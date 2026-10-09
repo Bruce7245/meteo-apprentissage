@@ -1,6 +1,11 @@
 name: Deploy Function LBA complement 04h J-1 #103
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/deploy-lba-daily-complement-103.yml
   workflow_dispatch:
 
 permissions:
