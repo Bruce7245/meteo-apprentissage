@@ -22,3 +22,10 @@ test('accepts admin firestore document snapshot', () => {
   assert.equal(isPublishedExportForDate(doc,'2026-10-09'),true);
   assert.equal(isPublishedExportForDate({...doc,exists:false},'2026-10-09'),false);
 });
+
+test('complete 04h de la veille protege aussi le snapshot actif', () => {
+  const value={date:'2026-10-10',status:'export_complement_published',
+    publishedExportRunId:'lba_export_20261011010140'};
+  assert.equal(isPublishedExportForDate(value,'2026-10-10'),true);
+  assert.equal(isPublishedExportForDate(value,'2026-10-11'),false);
+});
