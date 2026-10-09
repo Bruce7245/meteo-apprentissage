@@ -1,0 +1,38 @@
+name: Validate LBA export normalization and reconciliation #101
+
+on:
+  push:
+    branches:
+      - feat/lba-export-reconciliation-101
+    paths:
+      - functions/lib/lba-export-reconciliation.cjs
+      - functions/test/lba-export-reconciliation.test.cjs
+      - .github/workflows/validate-lba-export-reconciliation-101.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Unit tests and import non regression (no Firebase access)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+      - name: Verify syntax
+        run: |
+          node --check functions/lib/lba-export-reconciliation.cjs
+          node --check functions/test/lba-export-reconciliation.test.cjs
+      - name: Test export normalization and existing snapshots
+        run: |
+          node --test functions/test/lba-export-reconciliation.test.cjs functions/test/daily-offer-snapshot.test.cjs
+      - name: Install dependencies
+        run: npm ci --prefix functions
+      - name: Run existing Functions regression tests
+        run: npm run test:unit --prefix functions
