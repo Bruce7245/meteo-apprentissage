@@ -35,6 +35,7 @@ function doc(id, date, offers, options = {}) {
       storedOffersCount: offers + 1,
       strictSummary,
       ...(options.qualityStatus ? { qualityStatus: options.qualityStatus } : {}),
+      ...(options.methodologyBreak ? { methodologyBreak: true } : {}),
     }),
   };
 }
@@ -256,4 +257,24 @@ test('un Firebase token non admin ne peut pas lire les statistiques', async () =
     db,
   });
   assert.equal(response.code, 403);
+});
+
+test('export national integre : aucune fausse hausse n est calculee', async () => {
+  const historical = DEPARTMENT_CODES.map((code) =>
+    doc(code, YESTERDAY, 8, {unassessed:true}));
+  const enriched = DEPARTMENT_CODES.map((code) =>
+    doc(code, TODAY, 10, {unassessed:true,methodologyBreak:true}));
+  const latest = summarizeDay(TODAY,enriched);
+  const previous = summarizeDay(YESTERDAY,historical);
+  assert.equal(latest.methodologyBreak,true);
+  assert.equal(latest.comparable,false);
+  assert.equal(safeChange(latest,previous),null);
+  assert.equal(indicativeChange(latest,previous),null);
+  const {db}=mockDatabase({[TODAY]:enriched,[YESTERDAY]:historical});
+  const result=await loadNationalStats(db,{days:7,today:TODAY});
+  assert.equal(result.latest.methodologyBreak,true);
+  assert.equal(result.change,null);
+  assert.equal(result.indicativeChange,null);
+  assert.equal(result.history.at(-1).methodologyBreak,true);
+  assert.match(result.methodology,/Rupture methodologique|Rupture méthodologique/);
 });
