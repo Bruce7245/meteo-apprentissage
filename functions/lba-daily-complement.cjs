@@ -366,7 +366,8 @@ async function runDailyComplement({db,token,now=new Date(),publishEnabled=false}
     required(plan.metrics.initialStrict>=100,'BASELINE_SUSPICIOUSLY_SMALL');
     const report={
       date:target,exportDay,runId:plan.runId,qualityMethod:METHOD,
-      status:publishEnabled?'staging':'preview_verified',
+      status:publishEnabled?'processing':'preview_verified',
+      phase:publishEnabled?'staging':'preview',
       initialOffers:plan.metrics.initialStrict,afterOffers:plan.metrics.afterOffers,
       added:plan.metrics.added,enriched:plan.metrics.enriched,
       unchanged:plan.metrics.unchanged,baselineOnly:plan.metrics.baselineOnly,
