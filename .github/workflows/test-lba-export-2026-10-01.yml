@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   compare-readonly:
-    name: Comparer une par une les offres 08-10 (lecture seule)
+    name: Diagnostiquer plafonds et dates 08-10 (lecture seule)
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 25
