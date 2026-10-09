@@ -264,56 +264,80 @@ async function publish(db,runRef,date,plan,baseline,now){
   const previousMethod=prev.empty?null:prev.docs[0].data()?.qualityMethod;
   const methodologyBreak=previousMethod!==METHOD;
   const oldByCode=new Map(baseline.parents.map(p=>[p.code,p]));
-  const batch=db.batch();
-  for(const dept of plan.departments){
-    const initial=oldByCode.get(dept.code);
-    const counts=departmentTotals(dept.offers,initial);
-    const summary=safeObject({
-      ...dept.summary,isPossiblySaturated:null,newTodayOffers:null,
-      newTodayOpenings:null,qualityMethod:METHOD,methodologyBreak,
-    });
-    const fields={
-      ...initial.meta,date,departmentCode:dept.code,
-      activeRunId:plan.runId,source:'la_bonne_alternance',
+  const refs=plan.departments.map(dept=>root.collection('departments').doc(dept.code));
+
+  // Toutes les lectures et le remplacement des pointeurs sont lies dans
+  // UNE transaction. Si une autre collecte a modifie le relevé pendant
+  // la preparation, la transaction refuse de le remplacer.
+  await db.runTransaction(async tx=>{
+    const snapshots=await tx.getAll(root,runRef,...refs);
+    const currentRoot=snapshots[0];
+    const currentRun=snapshots[1];
+    required(!isPublishedExportForDate(currentRoot,date),
+      'BASELINE_PUBLISHED_DURING_COMPLEMENT');
+    required(currentRun.exists && currentRun.data()?.status==='processing' &&
+      currentRun.data()?.runId===plan.runId,
+      'COMPLEMENT_RUN_LOCK_CHANGED');
+    for(let idx=0;idx<plan.departments.length;idx++){
+      const current=snapshots[idx+2];
+      const initial=oldByCode.get(plan.departments[idx].code);
+      const meta=current.data()||{};
+      required(current.exists && initial &&
+        meta.activeRunId===initial.activeRunId &&
+        meta.storedOffersCount===initial.stored &&
+        meta.strictSummary?.totalOffers===initial.strict,
+        'BASELINE_CHANGED_DURING_COMPLEMENT');
+    }
+
+    for(let idx=0;idx<plan.departments.length;idx++){
+      const dept=plan.departments[idx];
+      const initial=oldByCode.get(dept.code);
+      const counts=departmentTotals(dept.offers,initial);
+      const summary=safeObject({
+        ...dept.summary,isPossiblySaturated:null,newTodayOffers:null,
+        newTodayOpenings:null,qualityMethod:METHOD,methodologyBreak,
+      });
+      tx.set(refs[idx],{
+        ...initial.meta,date,departmentCode:dept.code,
+        activeRunId:plan.runId,source:'la_bonne_alternance',
+        sourceRoute:'/job/v1/search + /job/v1/export',
+        qualityMethod:METHOD,methodologyBreak,
+        collectionPhase:'complement_04h',
+        complementApplied:true,complementRunId:plan.runId,
+        complementExportLastUpdate:plan.exportLastUpdate,
+        complementAppliedAt:admin.firestore.FieldValue.serverTimestamp(),
+        initialStoredOffersCount:initial.stored,
+        initialStrictOffersCount:initial.strict,
+        storedOffersCount:counts.after,strictSummary:summary,summary,
+        complement:counts,newTodayOffers:null,newTodayOpenings:null,
+        isPossiblySaturated:null,saturatedSources:[],
+        schemaVersion:'dailyOfferSnapshots.complement04h.v1',
+      });
+    }
+    tx.set(root,{
+      date,status:'export_complement_published',
+      publishedExportRunId:plan.runId,
       sourceRoute:'/job/v1/search + /job/v1/export',
       qualityMethod:METHOD,methodologyBreak,
       collectionPhase:'complement_04h',
-      complementApplied:true,complementRunId:plan.runId,
-      complementExportLastUpdate:plan.exportLastUpdate,
-      complementAppliedAt:admin.firestore.FieldValue.serverTimestamp(),
-      initialStoredOffersCount:initial.stored,
-      initialStrictOffersCount:initial.strict,
-      storedOffersCount:counts.after,strictSummary:summary,summary,
-      complement:counts,newTodayOffers:null,newTodayOpenings:null,
-      isPossiblySaturated:null,saturatedSources:[],
-      schemaVersion:'dailyOfferSnapshots.complement04h.v1',
-    };
-    // Les champs non-cites de la collecte initiale sont preserves.
-    batch.set(root.collection('departments').doc(dept.code),fields);
-  }
-  batch.set(root,{
-    date,status:'export_complement_published',
-    publishedExportRunId:plan.runId,sourceRoute:'/job/v1/search + /job/v1/export',
-    qualityMethod:METHOD,methodologyBreak,collectionPhase:'complement_04h',
-    complementReportRef:runRef.path,
-    updatedAt:admin.firestore.FieldValue.serverTimestamp(),
-  },{merge:true});
-  batch.set(runRef,{
-    status:'published',publishedAt:admin.firestore.FieldValue.serverTimestamp(),
-    finishedAt:admin.firestore.FieldValue.serverTimestamp(),
-    runId:plan.runId,exportLastUpdate:plan.exportLastUpdate,
-    baselineDate:plan.baselineDate,exportDay:plan.exportDay,
-    metrics:plan.metrics,conflictTypes:plan.conflictTypes,
-    fieldsFilled:plan.fieldsFilled,
-    afterOffers:plan.metrics.afterOffers,
-    initialOffers:plan.metrics.initialStrict,
-    added:plan.metrics.added,enriched:plan.metrics.enriched,
-    unchanged:plan.metrics.unchanged,baselineOnly:plan.metrics.baselineOnly,
-    review:plan.metrics.review,quarantined:plan.metrics.quarantined,
-    methodologyBreak,qualityMethod:METHOD,
-    cleanupNeeded:false,
-  },{merge:true});
-  await batch.commit();
+      complementReportRef:runRef.path,
+      updatedAt:admin.firestore.FieldValue.serverTimestamp(),
+    },{merge:true});
+    tx.set(runRef,{
+      status:'published',publishedAt:admin.firestore.FieldValue.serverTimestamp(),
+      finishedAt:admin.firestore.FieldValue.serverTimestamp(),
+      runId:plan.runId,exportLastUpdate:plan.exportLastUpdate,
+      baselineDate:plan.baselineDate,exportDay:plan.exportDay,
+      metrics:plan.metrics,conflictTypes:plan.conflictTypes,
+      fieldsFilled:plan.fieldsFilled,
+      afterOffers:plan.metrics.afterOffers,
+      initialOffers:plan.metrics.initialStrict,
+      added:plan.metrics.added,enriched:plan.metrics.enriched,
+      unchanged:plan.metrics.unchanged,baselineOnly:plan.metrics.baselineOnly,
+      review:plan.metrics.review,quarantined:plan.metrics.quarantined,
+      methodologyBreak,qualityMethod:METHOD,cleanupNeeded:false,
+    },{merge:true});
+  });
 }
 async function verify(db,date,plan) {
   const root=db.collection('dailyOfferSnapshots').doc(date);
