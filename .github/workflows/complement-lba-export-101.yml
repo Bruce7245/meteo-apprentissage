@@ -25,8 +25,8 @@ jobs:
       MODE: preview
       BASELINE_DATE: '2026-10-08'
       GCLOUD_PROJECT: meteo-apprentissage
-      EXPORT_NDJSON_PATH: ${{ runner.temp }}/apprentifr-export.ndjson
-      EXPORT_META_PATH: ${{ runner.temp }}/apprentifr-export-meta.json
+      EXPORT_NDJSON_PATH: /tmp/apprentifr-export.ndjson
+      EXPORT_META_PATH: /tmp/apprentifr-export-meta.json
 
     steps:
       - name: Recuperer la branche de complement
