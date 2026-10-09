@@ -3,9 +3,9 @@ name: Test ponctuel export LBA
 on:
   push:
     branches:
-      - test/lba-export-2026-10-08
+      - test/lba-export-2026-10-01
     paths:
-      - .github/workflows/test-lba-export-2026-10-08.yml
+      - .github/workflows/test-lba-export-2026-10-01.yml
   workflow_dispatch:
 
 permissions:
