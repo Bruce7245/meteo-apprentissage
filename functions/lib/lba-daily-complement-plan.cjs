@@ -168,8 +168,10 @@ function buildDailyComplementPlan({
         if(patch.openingCountChanged){
           metrics.openingConflicts++;conflicts.push('openingCount');
         }
+        // Un identifiant technique (lbaId/partnerJobId) complete la
+        // tracabilite, pas le contenu metier visible d'une annonce.
         classification=conflicts.length?'review':
-          patch.changed?'enriched':'unchanged';
+          meaningful?'enriched':'unchanged';
       }
     }else{
       item=safeRow(candidate,runId,baselineDate);
