@@ -313,6 +313,66 @@ for source in src_all:
     })
 source_detail.sort(key=lambda r: (-r["export_total"], -r["firestore_stock_strict"], r["source"]))
 
+
+# Diagnostic du plafond de 150 par source dans chaque appel departemental.
+# Un compteur strict peut etre sous 150 si les offres hors departement sont filtrees.
+source_dept_export = Counter(
+    (r["source"], r["dept"]) for r in deduped if r["dept"]
+)
+source_dept_fs_all = Counter(
+    (r["source"], r["dept"]) for r in fs
+)
+source_dept_fs_strict = Counter(
+    (r["source"], r["dept"]) for r in fs if r["strict"]
+)
+source_dept_missing = Counter()
+misdated_by_source = Counter()
+misdated_previous_date = Counter()
+unmatched_by_creation_period = Counter()
+source_created_08_matched_older = Counter()
+for row in deduped:
+    p = row["source"]
+    pid_hits = fs_by_pid.get((p, row["pid"]), set()) if row["pid"] else set()
+    hash_hits = fs_by_hash.get((p, row["doc_id"]), set())
+    hits = pid_hits | hash_hits
+    if not hits:
+        if row["dept"]:
+            source_dept_missing[(p, row["dept"])] += 1
+        created = row["created"]
+        if not created:
+            unmatched_by_creation_period["creation_absente"] += 1
+        elif created == DATE:
+            unmatched_by_creation_period["cree_le_08"] += 1
+        elif created < DATE:
+            unmatched_by_creation_period["cree_avant_le_08"] += 1
+        else:
+            unmatched_by_creation_period["cree_apres_le_08"] += 1
+    elif row["created"] == DATE and not any(fs[i]["created"] == DATE for i in hits):
+        misdated_by_source[p] += 1
+        for former in sorted({fs[i]["created"] or "date_inconnue" for i in hits}):
+            misdated_previous_date[former] += 1
+        source_created_08_matched_older[p] += 1
+
+pair_ranking = []
+for (source, dept), missing in source_dept_missing.most_common(24):
+    pair_ranking.append({
+        "source": source, "department": dept, "export_total": source_dept_export[(source, dept)],
+        "firestore_raw": source_dept_fs_all[(source, dept)],
+        "firestore_strict": source_dept_fs_strict[(source, dept)],
+        "export_absent_fs": missing,
+        "raw_source_dept_at_150": source_dept_fs_all[(source, dept)] == 150,
+    })
+capped_pairs = []
+for (source, dept), count in source_dept_fs_all.items():
+    if count >= 150:
+        capped_pairs.append({
+            "source": source, "department": dept, "firestore_raw": count,
+            "firestore_strict": source_dept_fs_strict[(source, dept)],
+            "export_total": source_dept_export[(source, dept)],
+            "export_absent_fs": source_dept_missing[(source, dept)],
+        })
+capped_pairs.sort(key=lambda r: (-r["export_absent_fs"], r["source"], r["department"]))
+
 report = {
     "date_reference": DATE,
     "export_actualise": api_meta.get("lastUpdate"),
@@ -348,6 +408,12 @@ report = {
     "first_firestore_imported": min((m["imported_at"] for m in fs_meta if m["imported_at"]), default=None),
     "last_firestore_imported": max((m["imported_at"] for m in fs_meta if m["imported_at"]), default=None),
     "sources": source_detail[:22],
+    "source_department_largest_missing": pair_ranking,
+    "source_department_with_150_or_more_firestore_rows": capped_pairs[:45],
+    "count_source_dept_at_150_or_more": len(capped_pairs),
+    "absent_export_classified_by_creation": dict(unmatched_by_creation_period),
+    "export_created_08_matched_in_firestore_but_different_creation_date": dict(misdated_by_source),
+    "firestore_creation_dates_for_those_disagreements": dict(misdated_previous_date),
     "top_export_created_oct08_unmatched": top(source_export_new_only, 12),
     "top_firestore_created_oct08_unmatched": top(source_fs_new_only, 12),
     "top_departments_with_unmatched_export": top(dept_exp_unmatched, 12),
