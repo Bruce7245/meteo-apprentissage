@@ -36,7 +36,8 @@ function complementInfo(status,{exportDay,exportLastUpdate,baselineDate,conflict
   };
 }
 function buildDailyComplementPlan({
-  baselineOffers=[],exportJobs=[],baselineDate,exportDay,exportLastUpdate,runId
+  baselineOffers=[],exportJobs=[],baselineDate,exportDay,exportLastUpdate,runId,
+  minOffers=7000,
 }={}){
   required(sameDate(baselineDate)&&sameDate(exportDay)&&baselineDate<exportDay,
     'INVALID_COMPLEMENT_DATES');
@@ -187,7 +188,7 @@ function buildDailyComplementPlan({
   metrics.afterOpenings=departments.reduce((sum,d)=>sum+d.summary.totalOpenings,0);
   required(departments.length===101 && byDepartment.size===101,'MISSING_DEPARTMENTS');
   required(metrics.afterOffers>=metrics.initialStrict,'COMPLEMENT_DELETED_INITIAL_OFFERS');
-  required(metrics.afterOffers>=Math.max(7000,metrics.initialStrict),
+  required(metrics.afterOffers>=Math.max(minOffers,metrics.initialStrict),
     'COMPLEMENT_LOW_COVERAGE');
   required(departments.reduce((n,d)=>n+d.offers.length,0)===staged.size,
     'COMPLEMENT_SUM_MISMATCH');
