@@ -124,12 +124,19 @@ function makeStageOffer(result, previous, runId, day) {
   let conflicts = [];
   let changed = false;
   let departmentMismatch = false;
+  let recoveredCrossDepartment = false;
   let changeInOpenings = false;
 
   if (previous) {
     provenance = 'baseline_enriched';
-    departmentMismatch =
-      previous.departmentCode && previous.departmentCode !== projected.departmentCode;
+    const differentSearchDepartment =
+      Boolean(previous.departmentCode && previous.departmentCode !== projected.departmentCode);
+    // Une offre renvoyee par la recherche d'un autre departement n'est
+    // pas une contradiction si son CP normalise confirmait deja le bon.
+    recoveredCrossDepartment = differentSearchDepartment &&
+      previous.locationQuality === 'out_of_department' &&
+      previous.effectiveDepartmentCode === projected.departmentCode;
+    departmentMismatch = differentSearchDepartment && !recoveredCrossDepartment;
     if (!departmentMismatch) {
       const patch = patchExistingOffer(previous, result);
       conflicts = patch.conflicts;
@@ -167,19 +174,21 @@ function makeStageOffer(result, previous, runId, day) {
     originalPresent: Boolean(previous),
     status: departmentMismatch ? 'department_conflict' :
       conflicts.length || changeInOpenings ? 'fields_conflict_review' :
-        changed ? 'enriched_without_overwrite' :
-          previous ? 'existing_unchanged' : 'new_from_export',
+        recoveredCrossDepartment ? 'relocated_from_cross_department_search' :
+          changed ? 'enriched_without_overwrite' :
+            previous ? 'existing_unchanged' : 'new_from_export',
     hasConflicts: Boolean(departmentMismatch || conflicts.length || changeInOpenings),
     conflictFields: conflicts,
     openingCountDivergent: changeInOpenings,
     departmentDivergent: Boolean(departmentMismatch),
+    recoveredCrossDepartment,
     provenance,
   };
   row.qualityStatus = row.reconciliation.hasConflicts ? 'needs_review' : 'staged_unverified';
   // Aucun nom/URL/adresse dans les journaux. La copie Firestore s'effectue
   // dans une generation privee accessible uniquement aux administrateurs.
   return {row: stripUndefined(row), changed, conflicts,
-    departmentMismatch, changeInOpenings};
+    departmentMismatch, recoveredCrossDepartment, changeInOpenings};
 }
 
 async function buildPlan(meta, day, runId, base) {
@@ -254,6 +263,7 @@ async function buildPlan(meta, day, runId, base) {
     if (prepared.changed) totals.stagedEnriched++;
     else if (previous) totals.stagedUnchanged++;
     if (prepared.departmentMismatch) totals.departmentConflicts++;
+    if (prepared.recoveredCrossDepartment) totals.recoveredCrossDepartment++;
     if (prepared.changeInOpenings) totals.divergentOpeningCounts++;
     for (const field of prepared.conflicts) {
       totals.fieldConflicts++;
