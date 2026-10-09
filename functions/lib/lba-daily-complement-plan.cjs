@@ -10,6 +10,12 @@ const DEPARTMENTS=[
 ];
 const VALID=new Set(DEPARTMENTS);
 const ROME=/^[A-Z][0-9]{4}$/;
+const MEANINGFUL_FIELDS=new Set([
+  'title','romeCodes','city','postalCode','nafCode','nafLabel',
+  'companyName','companyLegalName','siret','sectorCode','sectorLabel',
+  'opco','idcc','applyUrl','contractTypes','contractStartDate',
+  'publicationExpirationDate',
+]);
 
 function required(ok,code){if(!ok)throw new Error(code);}
 function sameDate(date){return /^\d{4}-\d{2}-\d{2}$/.test(String(date||''));}
@@ -67,6 +73,8 @@ function buildDailyComplementPlan({
     exportCreatedAfterBaseline:0,exportWithoutCreationDate:0,
     withoutCreationQuarantined:0,
     added:0,enriched:0,unchanged:0,baselineOnly:0,review:0,
+    enrichedMeaningful:0,technicalOnlyEnriched:0,
+    reclassified:0,
     conflicts:0,openingConflicts:0,departmentConflicts:0,
     quarantined:0,invalidIdentity:0,
     afterOffers:0,afterOpenings:0,
@@ -75,6 +83,7 @@ function buildDailyComplementPlan({
   const selectedExport=new Set();
   const quarantined=[];
   const conflictTypes=new Map();
+  const filledFields=new Map();
   function review(kind){conflictTypes.set(kind,(conflictTypes.get(kind)||0)+1);}
   const rows=Array.isArray(exportJobs)?exportJobs:[];
   for(const job of rows){
@@ -126,7 +135,7 @@ function buildDailyComplementPlan({
       });
       continue;
     }
-    let item,classification,conflicts=[];
+    let item,classification,conflicts=[],reclassified=false;
     if(previous){
       const conflictingDept=previous.locationQuality==='in_department' &&
         previous.departmentCode!==candidate.departmentCode;
@@ -138,6 +147,17 @@ function buildDailyComplementPlan({
         classification='review';conflicts=['departmentCode'];
       }else{
         const patch=patchExistingOffer(previous,result);
+        const fields=Object.keys(patch.patch).filter(x=>x!=='locationNormalization'&&
+          x!=='locationQuality'&&x!=='isInRequestedDepartment');
+        for(const field of fields)
+          filledFields.set(field,(filledFields.get(field)||0)+1);
+        const meaningful=fields.some(field=>MEANINGFUL_FIELDS.has(field));
+        if(patch.changed){
+          if(meaningful)metrics.enrichedMeaningful++;
+          else metrics.technicalOnlyEnriched++;
+        }
+        reclassified=previous.locationQuality!=='in_department';
+        if(reclassified)metrics.reclassified++;
         item=safeRow({...candidate,...previous,...patch.patch},runId,baselineDate);
         item.departmentCode=candidate.departmentCode;
         item.effectiveDepartmentCode=candidate.departmentCode;
@@ -159,9 +179,12 @@ function buildDailyComplementPlan({
     for(const type of conflicts)review(type);
     metrics.conflicts+=conflicts.length;
     metrics[classification]++;
-    item.complement=complementInfo(classification,{
-      exportDay,exportLastUpdate,baselineDate,conflicts,
-    });
+    item.complement={
+      ...complementInfo(classification,{
+        exportDay,exportLastUpdate,baselineDate,conflicts,
+      }),
+      reclassifiedFromSearchDepartment:reclassified,
+    };
     item.collectionPhase='complement_04h';
     item.collectionSource=previous?'daily_search_plus_lba_export':'lba_export_only';
     item.locationNormalization=item.locationNormalization||{
@@ -209,10 +232,14 @@ function buildDailyComplementPlan({
   required(metrics.afterOffers===metrics.added+metrics.enriched+
     metrics.unchanged+metrics.review+metrics.baselineOnly,
     'COMPLEMENT_CLASSIFICATION_MISMATCH');
+  required(metrics.afterOffers===metrics.initialStrict+
+    metrics.added+metrics.reclassified,
+    'COMPLEMENT_BEFORE_AFTER_MISMATCH');
   return {
     baselineDate,exportDay,runId,exportLastUpdate,
     metrics,departments,quarantined,
     conflictTypes:Object.fromEntries(conflictTypes),
+    fieldsFilled:Object.fromEntries([...filledFields].sort((a,b)=>b[1]-a[1])),
   };
 }
 module.exports={buildDailyComplementPlan,DEPARTMENTS};
