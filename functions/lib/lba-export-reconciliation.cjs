@@ -8,7 +8,8 @@ const { createHash } = require('node:crypto');
 const { buildOccupationOfferSnapshot } = require('./daily-offer-snapshot.cjs');
 
 const VALID_DEPARTMENTS = new Set([
-  ...Array.from({ length: 95 }, (_, i) => String(i + 1).padStart(2, '0')),
+  ...Array.from({ length: 95 }, (_, i) => String(i + 1).padStart(2, '0'))
+    .filter((code) => code !== '20'),
   '2A', '2B', '971', '972', '973', '974', '976',
 ]);
 const ROME = /^[A-Z][0-9]{4}$/;
