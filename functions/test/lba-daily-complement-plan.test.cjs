@@ -82,3 +82,26 @@ test('les 101 departements et les totaux sont toujours coherents',()=>{
   assert.equal(x.departments.reduce((n,d)=>n+d.summary.totalOffers,0),2);
   assert.equal(x.departments.find(x=>x.code==='974').summary.totalOffers,1);
 });
+
+test('deux annonces semblables mais avec ID differents ne sont pas dedoublonnees',()=>{
+  const x=plan([job('ID-1'),job('ID-2')]);
+  assert.equal(x.metrics.added,2);
+  assert.equal(x.metrics.afterOffers,2);
+  assert.equal(x.metrics.exportDuplicateIds,0);
+});
+test('une nouvelle annonce sans date est mise a part au lieu d etre attribuee a la veille',()=>{
+  const d=job('ID-A');
+  d.offer.publication.creation=null;
+  const x=plan([d]);
+  assert.equal(x.metrics.added,0);
+  assert.equal(x.metrics.quarantined,1);
+  assert.equal(x.metrics.withoutCreationQuarantined,1);
+});
+test('une annonce ancienne sans date peut etre conservee et enrichie par identifiant',()=>{
+  const old=original(job('ID-B'));
+  const d=job('ID-B');
+  d.offer.publication.creation=null;
+  const x=plan([d],[old]);
+  assert.equal(x.metrics.added,0);
+  assert.equal(x.metrics.afterOffers,1);
+});
