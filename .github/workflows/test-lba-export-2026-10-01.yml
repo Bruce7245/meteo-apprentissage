@@ -1,4 +1,4 @@
-name: Test ponctuel export LBA
+name: Audit comparatif offres LBA et Firestore - 08-10
 
 on:
   push:
@@ -12,220 +12,38 @@ permissions:
   contents: read
 
 jobs:
-  test-export:
-    name: Export national 08/10 (streaming, lecture seule)
+  compare-readonly:
+    name: Comparer une par une les offres 08-10 (lecture seule)
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 25
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Recuperer les scripts sur la branche de test
+        uses: actions/checkout@v4
 
-      - uses: google-github-actions/auth@v2
+      - name: Authentifier Google Cloud
+        uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - name: Installer gcloud
+        uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: meteo-apprentissage
 
-      - name: Installer le parseur JSON en streaming
+      - name: Installer les lecteurs streaming et Firestore
         shell: bash
         run: |
-          python3 -m venv "$RUNNER_TEMP/lba-export-venv"
-          "$RUNNER_TEMP/lba-export-venv/bin/pip" install --disable-pip-version-check --quiet 'ijson==3.4.0.post0'
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/lba-compare-venv"
+          "$RUNNER_TEMP/lba-compare-venv/bin/pip" install --disable-pip-version-check --quiet 'ijson==3.4.0.post0' 'google-cloud-firestore==2.21.0'
 
-      - name: Tester l'export national sans chargement complet en memoire
+      - name: Exporter une fois et comparer les identifiants (read-only)
         shell: bash
         run: |
           set -euo pipefail
           TOKEN="$(gcloud secrets versions access latest --secret=API_APPRENTISSAGE_TOKEN --project=meteo-apprentissage)"
           test -n "$TOKEN"
           echo "::add-mask::$TOKEN"
-          API_APPRENTISSAGE_TOKEN="$TOKEN" "$RUNNER_TEMP/lba-export-venv/bin/python" - <<'PY'
-          import gzip
-          import ijson
-          import json
-          import os
-          import shutil
-          import tempfile
-          import urllib.error
-          import urllib.request
-          from collections import Counter
-          from datetime import datetime
-          from pathlib import Path
-          from urllib.parse import urlsplit
-          from zoneinfo import ZoneInfo
-
-          TARGET = '2026-10-08'
-          ENDPOINT = 'https://api.apprentissage.beta.gouv.fr/api/job/v1/export'
-          TOKEN = os.environ['API_APPRENTISSAGE_TOKEN']
-          PARIS = ZoneInfo('Europe/Paris')
-
-          def local_creation_date(job):
-              offer = job.get('offer') or {}
-              creation = (offer.get('publication') or {}).get('creation')
-              if not creation:
-                  creation = (job.get('publication') or {}).get('creation')
-              if not isinstance(creation, str) or not creation:
-                  return None
-              try:
-                  parsed = datetime.fromisoformat(creation.replace('Z', '+00:00'))
-                  return (parsed.astimezone(PARIS) if parsed.tzinfo else parsed).date().isoformat()
-              except ValueError:
-                  return None
-
-
-          def department_of(job):
-              import re
-              workplace = job.get('workplace') or {}
-              location = workplace.get('location') or {}
-              if not isinstance(location, dict):
-                  location = {}
-              direct = location.get('department') or job.get('department')
-              if isinstance(direct, str):
-                  token = direct.strip().upper()
-                  if re.fullmatch(r'(?:0[1-9]|[1-8][0-9]|9[0-5]|2A|2B|97[1-6])', token):
-                      return token
-              candidates = [
-                  location.get('zipcode'), location.get('postcode'), location.get('postal_code'),
-                  workplace.get('zipcode'), workplace.get('postal_code'),
-                  location.get('address'), workplace.get('address'),
-              ]
-              for raw in candidates:
-                  if isinstance(raw, dict):
-                      raw = raw.get('zipcode') or raw.get('postal_code') or raw.get('postcode') or raw.get('label')
-                  if not isinstance(raw, str):
-                      continue
-                  match = re.search(r'\b(\d{5})\b', raw)
-                  if not match:
-                      continue
-                  post = match.group(1)
-                  if post.startswith(('971','972','973','974','975','976')):
-                      return post[:3]
-                  if post.startswith('20'):
-                      return '2A' if int(post) < 20200 else '2B'
-                  return post[:2]
-              return 'non_renseigne'
-
-          def input_stream(path):
-              with open(path, 'rb') as check:
-                  zipped = check.read(2) == b'\x1f\x8b'
-              return gzip.open(path, 'rb') if zipped else open(path, 'rb')
-
-          def job_array_prefix(path):
-              allowed = {'', 'jobs', 'offers', 'offres', 'items', 'results',
-                         'data.jobs', 'data.offers', 'data.offres',
-                         'data.items', 'data.results', 'export.jobs', 'export.offers'}
-              with input_stream(path) as file:
-                  for prefix, event, _ in ijson.parse(file):
-                      if event == 'start_array' and prefix in allowed:
-                          return f'{prefix}.item' if prefix else 'item'
-              raise RuntimeError('Aucun tableau d offres reconnu dans l export JSON')
-
-          request = urllib.request.Request(ENDPOINT, headers={
-              'Accept': 'application/json',
-              'Authorization': f'Bearer {TOKEN}',
-          })
-          try:
-              with urllib.request.urlopen(request, timeout=50) as response:
-                  metadata = json.load(response)
-          except urllib.error.HTTPError as error:
-              raise RuntimeError(f'GET /job/v1/export retourne HTTP {error.code}') from None
-
-          signed_url = metadata.get('url')
-          if not isinstance(signed_url, str) or urlsplit(signed_url).scheme != 'https':
-              raise RuntimeError('URL HTTPS de telechargement absente de l export')
-
-          with tempfile.TemporaryDirectory(prefix='apprentifr-lba-') as directory:
-              path = Path(directory) / 'export.bin'
-              try:
-                  with urllib.request.urlopen(signed_url, timeout=120) as response:
-                      with path.open('wb') as destination:
-                          shutil.copyfileobj(response, destination, length=1024 * 1024)
-              except urllib.error.HTTPError as error:
-                  raise RuntimeError(f'Telechargement export retourne HTTP {error.code}') from None
-
-              prefix = job_array_prefix(path)
-              total_rows = 0
-              job_offers = 0
-              dated_offers = 0
-              match_count = 0
-              recruiters_excluded = 0
-              openings = 0
-              missing_identifiers = 0
-              identifiers = set()
-              departments = Counter()
-              sources = Counter()
-              geo_known_all = 0
-              geo_known_created = 0
-
-              with input_stream(path) as file:
-                  for job in ijson.items(file, prefix):
-                      total_rows += 1
-                      if not isinstance(job, dict) or not isinstance(job.get('offer'), dict):
-                          continue
-                      identifier = job.get('identifier') or {}
-                      partner = str(identifier.get('partner_label') or 'source_inconnue')
-                      if partner == 'recruteurs_lba':
-                          recruiters_excluded += 1
-                          continue
-                      job_offers += 1
-                      dep = department_of(job)
-                      if dep != 'non_renseigne':
-                          geo_known_all += 1
-                      created = local_creation_date(job)
-                      if created:
-                          dated_offers += 1
-                      if created != TARGET:
-                          continue
-                      match_count += 1
-                      if dep != 'non_renseigne':
-                          geo_known_created += 1
-                      stable_id = identifier.get('partner_job_id') or identifier.get('id')
-                      if stable_id:
-                          identifiers.add((partner, str(stable_id)))
-                      else:
-                          missing_identifiers += 1
-                      opening_count = (job.get('offer') or {}).get('opening_count') or 0
-                      try:
-                          openings += max(0, int(opening_count))
-                      except (TypeError, ValueError):
-                          pass
-                      departments[dep] += 1
-                      sources[partner] += 1
-
-              if job_offers == 0:
-                  raise RuntimeError('Aucune annonce reconnue: verifier la structure de l export')
-              report = {
-                  'date_creation_filtre': TARGET,
-                  'date_export': metadata.get('lastUpdate'),
-                  'taille_export_telecharge_octets': path.stat().st_size,
-                  'nombre_appels_API_export': 1,
-                  'nombre_telechargements': 1,
-                  'tableau_detecte': prefix,
-                  'total_lignes_export': total_rows,
-                  'offres_d_emploi_reconnues': job_offers,
-                  'offres_localisables': geo_known_all,
-                  'recruteurs_exclus': recruiters_excluded,
-                  'offres_avec_date_creation_connue': dated_offers,
-                  'offres_creees_le_08_10_encore_presentes': match_count,
-                  'offres_creees_le_08_localisables': geo_known_created,
-                  'identifiants_distincts': len(identifiers),
-                  'offres_sans_identifiant_stable': missing_identifiers,
-                  'postes_annonces_sur_ces_offres': openings,
-                  'principaux_departements': departments.most_common(12),
-                  'principales_sources': sources.most_common(12),
-                  'interpretation': 'Offres creees le 08/10 encore dans le dernier export, et non toutes les offres du 08/10.'
-              }
-              print(json.dumps(report, ensure_ascii=False, indent=2))
-          PY
-
-      - name: Comparer au releve Firestore du 08-10 (lecture seule)
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$RUNNER_TEMP/lba-export-venv/bin/pip" install --disable-pip-version-check --quiet 'google-cloud-firestore==2.21.0'
-          "$RUNNER_TEMP/lba-export-venv/bin/python" scripts/test-lba-firestore-2026-10-08.py
-
-# Relance comparaison 08-10-2026
+          API_APPRENTISSAGE_TOKEN="$TOKEN" "$RUNNER_TEMP/lba-compare-venv/bin/python" scripts/compare-lba-export-firestore-2026-10-08.py
