@@ -3,9 +3,9 @@ name: Test ponctuel export LBA
 on:
   push:
     branches:
-      - test/lba-export-2026-10-01
+      - test/lba-export-2026-10-08
     paths:
-      - .github/workflows/test-lba-export-2026-10-01.yml
+      - .github/workflows/test-lba-export-2026-10-08.yml
   workflow_dispatch:
 
 permissions:
@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   test-export:
-    name: Export national 01/10 (streaming, lecture seule)
+    name: Export national 08/10 (streaming, lecture seule)
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 25
@@ -57,7 +57,7 @@ jobs:
           from urllib.parse import urlsplit
           from zoneinfo import ZoneInfo
 
-          TARGET = '2026-10-01'
+          TARGET = '2026-10-08'
           ENDPOINT = 'https://api.apprentissage.beta.gouv.fr/api/job/v1/export'
           TOKEN = os.environ['API_APPRENTISSAGE_TOKEN']
           PARIS = ZoneInfo('Europe/Paris')
@@ -171,13 +171,13 @@ jobs:
                   'offres_d_emploi_reconnues': job_offers,
                   'recruteurs_exclus': recruiters_excluded,
                   'offres_avec_date_creation_connue': dated_offers,
-                  'offres_creees_le_01_10_encore_presentes': match_count,
+                  'offres_creees_le_08_10_encore_presentes': match_count,
                   'identifiants_distincts': len(identifiers),
                   'offres_sans_identifiant_stable': missing_identifiers,
                   'postes_annonces_sur_ces_offres': openings,
                   'principaux_departements': departments.most_common(12),
                   'principales_sources': sources.most_common(12),
-                  'interpretation': 'Offres creees le 01/10 encore dans le dernier export, et non toutes les offres du 01/10.'
+                  'interpretation': 'Offres creees le 08/10 encore dans le dernier export, et non toutes les offres du 08/10.'
               }
               print(json.dumps(report, ensure_ascii=False, indent=2))
           PY
