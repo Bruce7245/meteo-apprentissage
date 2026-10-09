@@ -1,6 +1,11 @@
 name: Integrer le complement export LBA 09-10-2026
 
 on:
+  push:
+    branches:
+      - feat/lba-export-reconciliation-101
+    paths:
+      - .github/workflows/activate-lba-export-complement-101.yml
   workflow_dispatch:
 
 permissions:
