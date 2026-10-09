@@ -1213,9 +1213,13 @@ exports.getPublicDepartmentOffersHttp = onRequest(
 
       payload.history = history;
       const methodologyBreak = meta.methodologyBreak === true;
+      const breakDates = recentSnapshots
+        .filter((item) => item.snapshot.data()?.methodologyBreak === true)
+        .map((item) => item.date);
       payload.methodologyBreak = methodologyBreak;
+      payload.methodologyBreakDates = breakDates;
       payload.qualityMethod = cleanText(meta.qualityMethod);
-      payload.trends = methodologyBreak
+      payload.trends = breakDates.length > 0
         ? { offers: null, openings: null }
         : {
             offers: computePublicTrend(history.map((item) => item.totalOffers)),
