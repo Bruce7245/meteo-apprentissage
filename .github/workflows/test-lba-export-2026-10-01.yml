@@ -75,6 +75,39 @@ jobs:
               except ValueError:
                   return None
 
+
+          def department_of(job):
+              import re
+              workplace = job.get('workplace') or {}
+              location = workplace.get('location') or {}
+              if not isinstance(location, dict):
+                  location = {}
+              direct = location.get('department') or job.get('department')
+              if isinstance(direct, str):
+                  token = direct.strip().upper()
+                  if re.fullmatch(r'(?:0[1-9]|[1-8][0-9]|9[0-5]|2A|2B|97[1-6])', token):
+                      return token
+              candidates = [
+                  location.get('zipcode'), location.get('postcode'), location.get('postal_code'),
+                  workplace.get('zipcode'), workplace.get('postal_code'),
+                  location.get('address'), workplace.get('address'),
+              ]
+              for raw in candidates:
+                  if isinstance(raw, dict):
+                      raw = raw.get('zipcode') or raw.get('postal_code') or raw.get('postcode') or raw.get('label')
+                  if not isinstance(raw, str):
+                      continue
+                  match = re.search(r'\b(\d{5})\b', raw)
+                  if not match:
+                      continue
+                  post = match.group(1)
+                  if post.startswith(('971','972','973','974','975','976')):
+                      return post[:3]
+                  if post.startswith('20'):
+                      return '2A' if int(post) < 20200 else '2B'
+                  return post[:2]
+              return 'non_renseigne'
+
           def input_stream(path):
               with open(path, 'rb') as check:
                   zipped = check.read(2) == b'\x1f\x8b'
@@ -124,6 +157,8 @@ jobs:
               identifiers = set()
               departments = Counter()
               sources = Counter()
+              geo_known_all = 0
+              geo_known_created = 0
 
               with input_stream(path) as file:
                   for job in ijson.items(file, prefix):
@@ -136,12 +171,17 @@ jobs:
                           recruiters_excluded += 1
                           continue
                       job_offers += 1
+                      dep = department_of(job)
+                      if dep != 'non_renseigne':
+                          geo_known_all += 1
                       created = local_creation_date(job)
                       if created:
                           dated_offers += 1
                       if created != TARGET:
                           continue
                       match_count += 1
+                      if dep != 'non_renseigne':
+                          geo_known_created += 1
                       stable_id = identifier.get('partner_job_id') or identifier.get('id')
                       if stable_id:
                           identifiers.add((partner, str(stable_id)))
@@ -152,9 +192,6 @@ jobs:
                           openings += max(0, int(opening_count))
                       except (TypeError, ValueError):
                           pass
-                      location = (job.get('workplace') or {}).get('location') or {}
-                      raw_dep = location.get('department') or 'non_renseigne'
-                      dep = raw_dep if isinstance(raw_dep, str) and len(raw_dep) < 10 else 'non_renseigne'
                       departments[dep] += 1
                       sources[partner] += 1
 
@@ -169,9 +206,11 @@ jobs:
                   'tableau_detecte': prefix,
                   'total_lignes_export': total_rows,
                   'offres_d_emploi_reconnues': job_offers,
+                  'offres_localisables': geo_known_all,
                   'recruteurs_exclus': recruiters_excluded,
                   'offres_avec_date_creation_connue': dated_offers,
                   'offres_creees_le_08_10_encore_presentes': match_count,
+                  'offres_creees_le_08_localisables': geo_known_created,
                   'identifiants_distincts': len(identifiers),
                   'offres_sans_identifiant_stable': missing_identifiers,
                   'postes_annonces_sur_ces_offres': openings,
