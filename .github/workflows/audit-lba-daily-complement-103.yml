@@ -1,0 +1,103 @@
+name: Audit Function LBA complement J-1 04h #103
+
+on:
+  push:
+    branches:
+      - feat/lba-daily-complement-4h-103
+    paths:
+      - .github/workflows/audit-lba-daily-complement-103.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Test reel lecture seule - veille et complement
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Installer et executer les tests unitaires
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix functions
+          node --check functions/lba-daily-complement.cjs
+          node --test functions/test/lba-daily-complement-plan.test.cjs functions/test/lba-export-stream.test.cjs
+          npm run test:unit --prefix functions
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: meteo-apprentissage
+
+      - name: Rapprocher releve 08-10 et export 09-10 SANS ECRITURE
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud secrets versions access latest --secret=API_APPRENTISSAGE_TOKEN --project=meteo-apprentissage)"
+          test -n "$TOKEN"
+          echo "::add-mask::$TOKEN"
+          API_APPRENTISSAGE_TOKEN="$TOKEN" node <<'NODE'
+          const admin = require('./functions/node_modules/firebase-admin');
+          const {runDailyComplement}=require('./functions/lba-daily-complement.cjs');
+          const assert=require('node:assert/strict');
+          if(!admin.apps.length)admin.initializeApp({projectId:'meteo-apprentissage'});
+          (async()=>{
+            const report=await runDailyComplement({
+              db:admin.firestore(),
+              token:process.env.API_APPRENTISSAGE_TOKEN,
+              now:new Date('2026-10-09T02:30:00Z'),
+              publishEnabled:false,
+            });
+            assert.equal(report.date,'2026-10-08');
+            assert.equal(report.exportDay,'2026-10-09');
+            assert.equal(report.status,'preview_verified');
+            assert(report.initialOffers>=8000);
+            assert(report.afterOffers>=report.initialOffers);
+            assert.equal(report.metrics.afterOffers,
+              report.metrics.added+report.metrics.enriched+
+              report.metrics.unchanged+report.metrics.review+
+              report.metrics.baselineOnly);
+            console.log('=== AUDIT REEL 4H, 08/10 (LECTURE SEULE) ===');
+            console.log(JSON.stringify({
+              date:report.date,exportDay:report.exportDay,
+              status:report.status,initialOffers:report.initialOffers,
+              added:report.added,enriched:report.enriched,
+              unchanged:report.unchanged,baselineOnly:report.baselineOnly,
+              review:report.review,quarantined:report.quarantined,
+              afterOffers:report.afterOffers,rawRows:report.export?.rowsParsed,
+              missingCreation:report.metrics.withoutCreationQuarantined,
+            },null,2));
+            if(process.env.GITHUB_STEP_SUMMARY){
+              const f=require('node:fs');
+              f.appendFileSync(process.env.GITHUB_STEP_SUMMARY,[
+                '## Rapprochement 04h : audit reel de la veille, sans ecriture',
+                '', '| Etat | Total |','|---|---:|',
+                '| Avant (08/10) | '+report.initialOffers+' |',
+                '| Ajoutees en complement | '+report.added+' |',
+                '| Enrichies | '+report.enriched+' |',
+                '| A verifier | '+report.review+' |',
+                '| Presentes uniquement dans le releve initial | '+report.baselineOnly+' |',
+                '| Apres complement | '+report.afterOffers+' |',
+                '', '**0 ecriture dans les snapshots et dans le registre des executions.**',''
+              ].join('\n'));
+            }
+          })().catch(e=>{
+            const msg=String(e?.message||e);
+            console.error(/^[A-Z0-9_]+$/.test(msg)?msg:'AUDIT_FAILED');
+            process.exitCode=1;
+          });
+          NODE
