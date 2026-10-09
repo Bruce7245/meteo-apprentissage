@@ -58,12 +58,14 @@ function buildDailyComplementPlan({
     if(old)quality.duplicateBaseline++;
     byId.set(row.offerDocId,chooseBaseline(old,row));
   }
+  required(quality.invalidBaseline===0, 'INVALID_BASELINE_RECORDS');
   const initial=new Map([...byId].filter(([,r])=>r.locationQuality==='in_department'));
   const metrics={
     initialStored:list.length,initialStrict:initial.size,
     initialDuplicates:quality.duplicateBaseline,invalidBaseline:quality.invalidBaseline,
     exportEntries:0,exportOfferRows:0,exportDuplicateIds:0,
     exportCreatedAfterBaseline:0,exportWithoutCreationDate:0,
+    withoutCreationQuarantined:0,
     added:0,enriched:0,unchanged:0,baselineOnly:0,review:0,
     conflicts:0,openingConflicts:0,departmentConflicts:0,
     quarantined:0,invalidIdentity:0,
@@ -112,6 +114,18 @@ function buildDailyComplementPlan({
       continue;
     }
     const previous=byId.get(candidate.offerDocId);
+    // Ne pas affirmer qu'une offre sans date de creation et inconnue a 23h59
+    // existait deja la veille. Conserver le cas en quarantaine.
+    if (!previous && !creation) {
+      metrics.withoutCreationQuarantined++;
+      metrics.quarantined++;
+      quarantined.push({
+        offerDocId:id.offerDocId,partnerLabel:id.source,
+        reason:'missing_creation_date_for_previous_day',
+        observedDate:exportDay,runId,baselineDate,
+      });
+      continue;
+    }
     let item,classification,conflicts=[];
     if(previous){
       const conflictingDept=previous.locationQuality==='in_department' &&
