@@ -1,4 +1,4 @@
-name: Diagnostic recherche LBA 29-75-974
+name: Audit completude export LBA - ROME et villes
 
 on:
   push:
@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   compare-readonly:
-    name: Verifier recherche actuelle 29-75-974 (lecture seule)
+    name: Mesurer les champs ROME et localisation (lecture seule)
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 25
@@ -39,11 +39,11 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/lba-compare-venv"
           "$RUNNER_TEMP/lba-compare-venv/bin/pip" install --disable-pip-version-check --quiet 'ijson==3.4.0.post0' 'google-cloud-firestore==2.21.0'
 
-      - name: Interroger la recherche directement sur trois departements (read-only)
+      - name: Lire export national et mesurer ROME ville code postal (read-only)
         shell: bash
         run: |
           set -euo pipefail
           TOKEN="$(gcloud secrets versions access latest --secret=API_APPRENTISSAGE_TOKEN --project=meteo-apprentissage)"
           test -n "$TOKEN"
           echo "::add-mask::$TOKEN"
-          API_APPRENTISSAGE_TOKEN="$TOKEN" "$RUNNER_TEMP/lba-compare-venv/bin/python" scripts/diagnose-lba-search-29-75-974.py
+          API_APPRENTISSAGE_TOKEN="$TOKEN" "$RUNNER_TEMP/lba-compare-venv/bin/python" scripts/audit-lba-export-field-coverage-2026-10-09.py
