@@ -181,3 +181,10 @@ jobs:
               }
               print(json.dumps(report, ensure_ascii=False, indent=2))
           PY
+
+      - name: Comparer au releve Firestore du 08-10 (lecture seule)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/lba-export-venv/bin/pip" install --disable-pip-version-check --quiet 'google-cloud-firestore==2.21.0'
+          "$RUNNER_TEMP/lba-export-venv/bin/python" scripts/test-lba-firestore-2026-10-08.py
