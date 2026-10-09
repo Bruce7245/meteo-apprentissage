@@ -8,7 +8,6 @@
 const { StringDecoder } = require('node:string_decoder');
 const { Readable } = require('node:stream');
 const { createGunzip } = require('node:zlib');
-const { once } = require('node:events');
 
 const ALLOWED_ARRAY_PATHS = new Set([
   '', 'jobs', 'offers', 'offres', 'items', 'results',
@@ -46,21 +45,30 @@ function createOfferArrayScanner(onItem, { maxItemChars = MAX_ITEM_CHARS } = {})
     for (let i = 0; i < chunk.length; i++) {
       const c = chunk[i];
       if (stringMode) {
-        if (readingKey) {
-          if (keyChars.length > 512) throw new Error('LBA_EXPORT_KEY_TOO_LARGE');
-          keyChars += c;
+        if (escaped) {
+          if (readingKey) keyChars += c;
+          escaped = false;
+          continue;
         }
-        if (escaped) { escaped = false; continue; }
-        if (c === '\\') { escaped = true; continue; }
+        if (c === '\\') {
+          if (readingKey) keyChars += c;
+          escaped = true;
+          continue;
+        }
         if (c === '"') {
           stringMode = false;
           if (readingKey) {
             const top = stack[stack.length - 1];
             if (!top || top.type !== 'object') throw new Error('LBA_EXPORT_BAD_KEY');
-            top.key = JSON.parse('"' + keyChars);
+            top.key = JSON.parse('"' + keyChars + '"');
             readingKey = false;
             keyChars = '';
           }
+          continue;
+        }
+        if (readingKey) {
+          if (keyChars.length > 512) throw new Error('LBA_EXPORT_KEY_TOO_LARGE');
+          keyChars += c;
         }
         continue;
       }
