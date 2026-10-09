@@ -1,0 +1,90 @@
+name: Complement export LBA - staging versionne #101
+
+on:
+  push:
+    branches:
+      - feat/lba-export-reconciliation-101
+    paths:
+      - .github/workflows/complement-lba-export-101.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lba-export-complement-101
+  cancel-in-progress: false
+
+jobs:
+  complement:
+    name: Preparer le complement Firestore hors production active
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 40
+    env:
+      MODE: stage
+      BASELINE_DATE: '2026-10-08'
+      GCLOUD_PROJECT: meteo-apprentissage
+      EXPORT_NDJSON_PATH: /tmp/apprentifr-export.ndjson
+      EXPORT_META_PATH: /tmp/apprentifr-export-meta.json
+
+    steps:
+      - name: Recuperer la branche de complement
+        uses: actions/checkout@v4
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Installer les dependances
+        run: |
+          set -euo pipefail
+          npm ci --prefix functions
+          python3 -m venv "$RUNNER_TEMP/lba-venv"
+          "$RUNNER_TEMP/lba-venv/bin/pip" install --disable-pip-version-check --quiet 'ijson==3.4.0.post0'
+
+      - name: Syntaxe et tests de non-regression
+        run: |
+          set -euo pipefail
+          node --check functions/scripts/prepare-lba-export-complement.cjs
+          node --check functions/lib/lba-export-reconciliation.cjs
+          "$RUNNER_TEMP/lba-venv/bin/python" -m py_compile functions/scripts/download-lba-export-to-ndjson.py
+          npm run test:unit --prefix functions
+
+      - name: Authentifier Google Cloud pour ecriture staging privee
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Installer gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: meteo-apprentissage
+
+      - name: Telecharger UNE fois l'export national
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(gcloud secrets versions access latest --secret=API_APPRENTISSAGE_TOKEN --project=meteo-apprentissage)"
+          test -n "$TOKEN"
+          echo "::add-mask::$TOKEN"
+          API_APPRENTISSAGE_TOKEN="$TOKEN" \
+            "$RUNNER_TEMP/lba-venv/bin/python" functions/scripts/download-lba-export-to-ndjson.py \
+            --out "$EXPORT_NDJSON_PATH" \
+            --meta "$EXPORT_META_PATH"
+          unset TOKEN
+
+      - name: Ecrire generation versionnee 101 departements hors production active
+        shell: bash
+        run: |
+          set -euo pipefail
+          node functions/scripts/prepare-lba-export-complement.cjs
+
+      - name: Nettoyer les fichiers ephemeres de l'export
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$EXPORT_NDJSON_PATH" "$EXPORT_META_PATH"

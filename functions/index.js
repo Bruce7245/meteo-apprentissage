@@ -14117,6 +14117,17 @@ async function importDailyOffersForDepartments({
   delayMs = 1200,
   executionMode = 'manual',
 }) {
+  // Eviter qu'une collecte LBA /search ecrase la generation export active
+  // pour cette date; les autres stats/observations continuent normalement.
+  const dailyExportRoot = write
+    ? await db.collection('dailyOfferSnapshots').doc(targetDate).get()
+    : null;
+  const preserveExportSnapshot = require('./lib/lba-export-publication-guard.cjs')
+    .isPublishedExportForDate(dailyExportRoot, targetDate);
+  if (preserveExportSnapshot) {
+    console.log('Generation export protegee pour', targetDate);
+  }
+
   const allDepartments = await loadDepartments();
   const wanted = new Set(departmentCodes || []);
 
@@ -14242,6 +14253,7 @@ async function importDailyOffersForDepartments({
           .collection('departments')
           .doc(department.code);
 
+        if (!preserveExportSnapshot) {
         let occupationOfferBatch = db.batch();
         let occupationOfferBatchCount = 0;
 
@@ -14287,6 +14299,8 @@ async function importDailyOffersForDepartments({
           },
           { merge: true }
         );
+
+        }
 
         let observationBatch = db.batch();
         let observationBatchCount = 0;

@@ -57,6 +57,7 @@ function mergeBreakdown(target, items) {
 
 function summarizeDay(date, documents, references = new Map(), populations = new Map()) {
   const rowsByDepartment = new Map();
+  let methodologyBreak = false;
 
   for (const document of documents) {
     const data = typeof document.data === 'function' ? document.data() || {} : document || {};
@@ -84,6 +85,8 @@ function summarizeDay(date, documents, references = new Map(), populations = new
     const population = populations.get(code) || null;
     const youngPopulation = numberOrNull(population?.population15To29);
     const ref = references.get(code) || {};
+
+    if (data.methodologyBreak === true) methodologyBreak = true;
 
     rowsByDepartment.set(code, {
       departmentCode: code,
@@ -131,12 +134,12 @@ function summarizeDay(date, documents, references = new Map(), populations = new
   );
   const coveredDepartments = departments.length;
   const comparable = coveredDepartments === TOTAL_DEPARTMENTS &&
-    saturatedDepartments === 0 && unassessedCapDepartments === 0;
+    saturatedDepartments === 0 && unassessedCapDepartments === 0 && !methodologyBreak;
   const hasCompletePopulation = populationCoveredDepartments === TOTAL_DEPARTMENTS;
   const coveredCodes = new Set(departments.map((row) => row.departmentCode));
 
   return {
-    date, offers, openings,
+    date, offers, openings, methodologyBreak,
     newOffers: newOffersCoverage === coveredDepartments && coveredDepartments > 0
       ? newOffers : null,
     newOffersCoverage,
@@ -158,6 +161,7 @@ function summarizeDay(date, documents, references = new Map(), populations = new
 }
 
 function safeChange(latest, previous) {
+  if (latest?.methodologyBreak || previous?.methodologyBreak) return null;
   if (!latest || !previous || !latest.comparable || !previous.comparable ||
       previous.offers <= 0) return null;
 
@@ -169,6 +173,7 @@ function safeChange(latest, previous) {
 }
 
 function indicativeChange(latest, previous) {
+  if (latest?.methodologyBreak || previous?.methodologyBreak) return null;
   if (!latest || !previous ||
       latest.coveredDepartments !== TOTAL_DEPARTMENTS ||
       previous.coveredDepartments !== TOTAL_DEPARTMENTS ||
@@ -293,7 +298,9 @@ async function loadNationalStats(db, { days = 30, today = dateParis() } = {}) {
   return {
     ok: true,
     date: latest?.date || null,
-    methodology: "Somme des offres strictement géolocalisées dans les départements couverts. Il s'agit d'un relevé des offres collectées, pas d'une estimation exhaustive du marché. Le plafonnement peut ne pas être évalué et des doublons entre départements restent possibles.",
+    methodology: latest?.methodologyBreak
+      ? "Rupture méthodologique le 09/10/2026 : photographie enrichie via export national LBA. Les variations avec les collectes départementales précédentes ne sont pas comparables. Communes non encore certifiées BAN/INSEE."
+      : "Somme des offres strictement géolocalisées dans les départements couverts. Il s'agit d'un relevé des offres collectées, pas d'une estimation exhaustive du marché. Le plafonnement peut ne pas être évalué et des doublons entre départements restent possibles.",
     populationReferenceYear: population.referenceYear,
     populationReferenceCoverage: population.coverage,
     latest: latest ? {
@@ -307,6 +314,7 @@ async function loadNationalStats(db, { days = 30, today = dateParis() } = {}) {
       populationCoveredDepartments: latest.populationCoveredDepartments,
       offersPer10000Young: latest.offersPer10000Young,
       comparable: latest.comparable,
+      methodologyBreak: latest.methodologyBreak === true,
       missingDepartments: latest.missingDepartments,
     } : null,
     change,
@@ -321,6 +329,7 @@ async function loadNationalStats(db, { days = 30, today = dateParis() } = {}) {
       saturatedDepartments: point.saturatedDepartments,
       unassessedCapDepartments: point.unassessedCapDepartments,
       comparable: point.comparable,
+      methodologyBreak: point.methodologyBreak === true,
     })),
     formations,
   };
