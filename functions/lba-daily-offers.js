@@ -1190,7 +1190,8 @@ exports.getPublicDepartmentOffersHttp = onRequest(
         .where("runId", "==", activeRunId);
       // Un export peut contenir plus de 1 000 annonces dans un departement.
       // La limite historique tronquerait les totaux ROME de la page publique.
-      const offersSnapshot = meta.methodologyBreak === true
+      const offersSnapshot = (meta.methodologyBreak === true ||
+        meta.qualityMethod === 'search_2359_plus_export_complement_0400_v1')
         ? await query.get()
         : await query.limit(1000).get();
 

@@ -14792,3 +14792,39 @@ exports.getAdminOccupationOffersHttp = onRequest(
     request, response, auth: admin.auth(), db,
   })
 );
+
+
+// LBA_DAILY_COMPLEMENT_04H_V1
+// La collecte de 23h59 n'est pas modifiee. Cette Function enrichit la
+// photographie de la veille, sans effacer les documents du releve initial.
+const lbaDailyComplement = require('./lba-daily-complement.cjs');
+
+exports.complementPreviousDayLbaOffers = onSchedule(
+  {
+    schedule: '0 4 * * *',
+    timeZone: 'Europe/Paris',
+    region: 'europe-west1',
+    timeoutSeconds: 1800,
+    memory: '2GiB',
+    cpu: 2,
+    maxInstances: 1,
+    secrets: [API_APPRENTISSAGE_TOKEN],
+  },
+  async () => {
+    const result = await lbaDailyComplement.runDailyComplement({
+      db,
+      token: API_APPRENTISSAGE_TOKEN.value(),
+      now: new Date(),
+      publishEnabled: true,
+    });
+    console.log('LBA complement 04h (aggregates only)', JSON.stringify({
+      date: result.date || null,
+      status: result.status,
+      before: result.metrics?.initialStrict ?? null,
+      added: result.metrics?.added ?? null,
+      enriched: result.metrics?.enriched ?? null,
+      after: result.metrics?.afterOffers ?? null,
+    }));
+    return result;
+  }
+);
