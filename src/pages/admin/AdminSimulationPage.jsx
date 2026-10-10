@@ -1,5 +1,5 @@
 import React, {useMemo, useRef, useState} from 'react';
-import {FiArrowRight, FiBarChart2, FiGitCompare, FiShield, FiTrendingUp} from 'react-icons/fi';
+import {FiArrowRight, FiBarChart2, FiRepeat, FiShield, FiTrendingUp} from 'react-icons/fi';
 import AdminLayout from '../../layouts/AdminLayout.jsx';
 import OccupationSearch from '../../components/occupation/OccupationSearch.jsx';
 import {getOccupationAnalysisForRome} from '../../services/adminVigilanceModelService.js';
@@ -288,7 +288,7 @@ export default function AdminSimulationPage() {
           </label>
           <button type="submit" className="primary-button admin-simulation-submit"
             disabled={running || !romeCode || !departmentCode}>
-            <FiGitCompare aria-hidden="true" />
+            <FiRepeat aria-hidden="true" />
             {running ? 'Simulation en cours…' : 'Simulation'}
           </button>
         </div>
