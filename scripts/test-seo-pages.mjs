@@ -83,6 +83,7 @@ test('Firebase Hosting serves dedicated /metiers HTML before SPA fallback, prese
   const rewrites = config.hosting.rewrites;
   assert.deepEqual(rewrites, [
     { source: '/metiers', destination: '/metiers.html' },
+    { source: '/departement/**', destination: '/departement-unpublished.html' },
     { source: '!/@(assets|src)/**', destination: '/index.html' },
   ]);
   const redirects = config.hosting.redirects || [];
@@ -91,6 +92,12 @@ test('Firebase Hosting serves dedicated /metiers HTML before SPA fallback, prese
       rule.source === source && rule.destination === '/metiers' && rule.type === 301
     ), 'Missing canonical redirect: ' + source);
   }
+  assert.equal(config.hosting.cleanUrls, true);
+  assert.equal(config.hosting.trailingSlash, false);
+  const fallback = await read('dist/departement-unpublished.html');
+  assert.match(fallback, /<meta name="robots" content="noindex,follow"/);
+  assert.doesNotMatch(fallback, /<link rel="canonical"/);
+  assert.ok(extractProductionAssets(fallback).some(asset => asset.kind === 'js'));
   const headers = config.hosting.headers || [];
   for (const source of ['/admin', '/admin/**']) {
     const rule = headers.find(item => item.source === source);
