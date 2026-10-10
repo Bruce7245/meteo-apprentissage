@@ -1,0 +1,116 @@
+name: Corriger le Scheduler INSEE suspendu #115
+
+on:
+  push:
+    branches:
+      - fix/insee-scheduler-stall-114
+    paths:
+      - .github/workflows/resume-paused-insee-scheduler-115.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: insee-companies-collection-production
+  cancel-in-progress: false
+
+jobs:
+  resume:
+    name: Reprendre le seul Scheduler INSEE et verifier la collecte
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+      - name: Install functions dependencies
+        run: npm ci --prefix functions
+      - name: Authenticate Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+      - name: Confirm existing job status, read-only
+        working-directory: functions
+        run: |
+          node --input-type=module <<'NODE'
+          import { getApps, initializeApp } from 'firebase-admin/app';
+          import { getFirestore } from 'firebase-admin/firestore';
+          if (!getApps().length) initializeApp({ projectId: 'meteo-apprentissage' });
+          const db = getFirestore();
+          const snap = await db.collection('adminJobs').doc('inseeNationalBackgroundJob').get();
+          const job = snap.data() || {};
+          console.log(JSON.stringify({ status: job.status || null, position: job.currentPosition || null, totalPages: job.totalPages ?? null, leaseUntilMs: job.leaseUntilMs ?? null }));
+          if (job.status !== 'running') throw new Error('Job national absent ou pas running : ne pas reactiver le Scheduler');
+          NODE
+      - name: Resume ONLY the paused INSEE Cloud Scheduler
+        shell: bash
+        run: |
+          set -euo pipefail
+          job="firebase-schedule-resumeInseeNationalBackgroundJob-europe-west1"
+          state="$(gcloud scheduler jobs describe "$job" --location=europe-west1 --project=meteo-apprentissage --format='value(state)')"
+          echo "INSEE Scheduler initial state: $state"
+          case "$state" in
+            PAUSED)
+              gcloud scheduler jobs resume "$job" --location=europe-west1 --project=meteo-apprentissage --quiet
+              ;;
+            ENABLED)
+              echo "Scheduler was already enabled; proceeding with one test run."
+              ;;
+            *)
+              echo "Unsupported Scheduler state: $state" >&2
+              exit 1
+              ;;
+          esac
+          final_state="$(gcloud scheduler jobs describe "$job" --location=europe-west1 --project=meteo-apprentissage --format='value(state)')"
+          echo "INSEE Scheduler new state: $final_state"
+          test "$final_state" = "ENABLED"
+      - name: Trigger ONE controlled scheduler run immediately
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud scheduler jobs run firebase-schedule-resumeInseeNationalBackgroundJob-europe-west1 \
+            --location=europe-west1 --project=meteo-apprentissage
+      - name: Verify first INSEE job invocation and progress
+        working-directory: functions
+        run: |
+          node --input-type=module <<'NODE'
+          import { getApps, initializeApp } from 'firebase-admin/app';
+          import { getFirestore } from 'firebase-admin/firestore';
+          if (!getApps().length) initializeApp({ projectId: 'meteo-apprentissage' });
+          const db = getFirestore();
+          const read = () => db.collection('adminJobs').doc('inseeNationalBackgroundJob').get();
+          const iso = x => typeof x?.toDate === 'function' ? x.toDate().toISOString() : null;
+          const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+          let succeeded = false;
+          for (let i = 0; i < 12; i++) {
+            const job = (await read()).data() || {};
+            const result = {
+              status: job.status || null,
+              position: job.currentPosition || null,
+              department: job.currentDepartmentCode || null,
+              totalPages: job.totalPages ?? null,
+              totalReceived: job.totalReceived ?? null,
+              lastHeartbeatAt: iso(job.lastHeartbeatAt),
+              lastLeaseAt: iso(job.lastLeaseAt),
+              error: job.errorMessage?.slice(0,1000) || null,
+            };
+            console.log(JSON.stringify({ check:i + 1, ...result }));
+            if (job.status === 'error') throw new Error('Job entered error state: ' + (job.errorMessage || 'unknown'));
+            if (Number(job.totalPages || 0) > 0) { succeeded = true; break; }
+            if (i < 11) await sleep(15000);
+          }
+          if (!succeeded) {
+            throw new Error('No imported page after trigger. Inspect Scheduler lastAttemptTime and service invocation.');
+          }
+          NODE
+      - name: Read final scheduler attempt metadata
+        if: always()
+        shell: bash
+        run: |
+          gcloud scheduler jobs describe firebase-schedule-resumeInseeNationalBackgroundJob-europe-west1 \
+            --location=europe-west1 --project=meteo-apprentissage \
+            --format='yaml(state,lastAttemptTime,status)' || true
