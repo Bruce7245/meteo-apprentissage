@@ -170,6 +170,11 @@ jobs:
             grep -q '<div id="root"></div>' "$file"
           done
 
+      - name: Validate served JavaScript and stylesheet MIME
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        run: node scripts/check-hosting-assets.mjs
+
       - name: Report scope
         if: always()
         shell: bash
