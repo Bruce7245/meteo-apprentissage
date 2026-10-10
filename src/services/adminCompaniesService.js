@@ -97,7 +97,10 @@ export async function getAdminCompaniesDashboard() {
         importAvailable: Boolean(importState),
         // Dry-runs and old incomplete cursors never certify real coverage.
         importComplete:
-          importState?.complete === true && importState?.write === true,
+          importState?.complete === true &&
+          importState?.write === true &&
+          importState?.employerOnly !== false &&
+          importState?.activeOnly !== true,
         importPagesRead: finiteNumber(importState?.pagesRead),
         importReceivedCount: finiteNumber(
           importState?.receivedCount
