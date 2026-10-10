@@ -7,6 +7,11 @@ const {
   calculateMonth, compare, checkSeasonality,
 } = require('./lib/admin-monthly-settings.cjs');
 
+const {
+  DEFAULT_WEIGHTS, SEASONALITY_NEUTRAL_FACTOR,
+  validateWeights, simulateTerritorialScores,
+} = require('./lib/admin-weighted-score.cjs');
+
 const DEFAULT = Array(12).fill('unknown');
 const MONTH_CACHE = new Map();
 const CACHE_LIMIT = 8;
@@ -88,6 +93,100 @@ async function saveSeasonality({input, ref, db, admin, response, FieldValue}) {
   }
 }
 
+function savedScoreWeights(snapshot) {
+  const data = snapshot.exists ? snapshot.data() || {} : {};
+  const verified = validateWeights(data.weights || DEFAULT_WEIGHTS);
+  if (!verified.ok) {
+    return {
+      weights: DEFAULT_WEIGHTS,
+      version: 0,
+      reason: '',
+      configurationWarning: 'Brouillon de coefficients invalide : valeurs par défaut utilisées.',
+    };
+  }
+  return {
+    weights: verified.weights,
+    version: Number.isSafeInteger(data.version) && data.version >= 0
+      ? data.version : 0,
+    reason: typeof data.reason === 'string' ? data.reason : '',
+    configurationWarning: null,
+  };
+}
+
+async function saveScoreWeights({input, db, admin, response, FieldValue}) {
+  const verified = validateWeights(input.weights);
+  if (!verified.ok) {
+    response.status(400).json({ok: false, error: verified.errors.join(' ')});
+    return;
+  }
+  if (input.seasonalityFactor !== undefined &&
+      input.seasonalityFactor !== SEASONALITY_NEUTRAL_FACTOR) {
+    response.status(400).json({
+      ok: false,
+      error: 'Le correcteur saisonnier reste 1,00 sans historique validé.',
+    });
+    return;
+  }
+  const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+  if (reason.length < 10 || reason.length > 1000) {
+    response.status(400).json({
+      ok: false,
+      error: 'Justification obligatoire (10 à 1 000 caractères).',
+    });
+    return;
+  }
+  const expected = input.expectedVersion;
+  if (!Number.isSafeInteger(expected) || expected < 0) {
+    response.status(400).json({ok: false, error: 'Version invalide'});
+    return;
+  }
+
+  const ref = db.collection('adminWeightedScoreDraft').doc('current');
+  try {
+    const version = await db.runTransaction(async tx => {
+      const doc = await tx.get(ref);
+      const previous = doc.exists ? doc.data() || {} : {};
+      const current = Number(previous.version || 0);
+      if (current !== expected) throw new Error('VERSION_CONFLICT');
+      const version = current + 1;
+      const payload = {
+        weights: verified.weights,
+        seasonalityFactor: SEASONALITY_NEUTRAL_FACTOR,
+        mode: 'simulation_only',
+        version,
+        reason,
+        updatedBy: admin.uid,
+        updatedAt: FieldValue.serverTimestamp(),
+        schemaVersion: 'adminWeightedScoreDraft.v1',
+      };
+      tx.set(ref, payload);
+      tx.set(
+        db.collection('adminWeightedScoreDraftHistory')
+          .doc('national_' + String(version).padStart(6, '0')),
+        {
+          ...payload,
+          previousWeights: previous.weights || DEFAULT_WEIGHTS,
+          previousVersion: current,
+          createdAt: FieldValue.serverTimestamp(),
+        }
+      );
+      return version;
+    });
+    response.status(200).json({
+      ok: true, version,
+      warning: 'Paramètres enregistrés en simulation uniquement. Aucune vigilance publiée modifiée.',
+    });
+  } catch (error) {
+    if (error.message === 'VERSION_CONFLICT') {
+      response.status(409).json({
+        ok: false, error: 'Brouillon modifié dans une autre session : rechargez avant de modifier.',
+      });
+      return;
+    }
+    throw error;
+  }
+}
+
 // Do not scan 90 calendar days if Firestore has only a week of snapshots.
 // A small, bounded in-memory cache avoids repeating thousands of reads when
 // an administrator switches tabs or refreshes a month.
@@ -154,7 +253,7 @@ function employerMap(importSnap, statsSnap, nafIndexSnap) {
   return counts;
 }
 
-async function handleRead({input, ref, db, response}) {
+async function handleRead({input, ref, db, response, preview = false}) {
   const month = typeof input.month === 'string' ? input.month : '';
   const today = parisToday();
   if (!validMonth(month, today)) {
@@ -166,8 +265,9 @@ async function handleRead({input, ref, db, response}) {
   const previousYear = monthShift(month, -12);
   const months = [month, previousMonth, previousYear];
 
-  const [configSnap, populationMeta, populationSnap, importSnap,
+  const [configSnap, scoreDraftSnap, populationMeta, populationSnap, importSnap,
     statsSnap, nafIndexSnap, departmentSnap, allDateRefs] = await Promise.all([
+    db.collection('adminWeightedScoreDraft').doc('current').get(),
     ref.get(),
     db.collection('departmentPopulationReferenceMeta').doc('current').get(),
     db.collection('departmentPopulationReference').get(),
@@ -206,6 +306,25 @@ async function handleRead({input, ref, db, response}) {
     };
   });
 
+  const scoreConfig = savedScoreWeights(scoreDraftSnap);
+  let scoreWeights = scoreConfig.weights;
+  if (preview) {
+    const checked = validateWeights(input.weights);
+    if (!checked.ok) {
+      response.status(400).json({ok: false, error: checked.errors.join(' ')});
+      return;
+    }
+    if (input.seasonalityFactor !== undefined &&
+        input.seasonalityFactor !== SEASONALITY_NEUTRAL_FACTOR) {
+      response.status(400).json({
+        ok: false, error: 'Facteur saisonnier neutre obligatoire : 1,00.',
+      });
+      return;
+    }
+    scoreWeights = checked.weights;
+  }
+  const scoring = simulateTerritorialScores(departments, scoreWeights);
+
   const config = configSnap.exists ? configSnap.data() || {} : {};
   const summary = {
     departments: departments.length,
@@ -219,6 +338,8 @@ async function handleRead({input, ref, db, response}) {
   response.status(200).json({
     ok: true, month, previousMonth, previousYear,
     departments, summary, populationReferenceYear: referenceYear,
+    scoreConfig,
+    scoreSimulation: {...scoring, isPreview: preview},
     seasonality: {
       months: Array.isArray(config.months) && config.months.length === 12
         ? config.months : DEFAULT,
@@ -241,6 +362,10 @@ async function handler({request, response, auth, db, FieldValue}) {
     const ref = db.collection('adminMonthlySeasonality').doc('national');
     if (input.action === 'save') {
       await saveSeasonality({input, ref, db, admin, response, FieldValue});
+    } else if (input.action === 'saveScoreWeights') {
+      await saveScoreWeights({input, db, admin, response, FieldValue});
+    } else if (input.action === 'previewScores') {
+      await handleRead({input, ref, db, response, preview: true});
     } else if (!input.action || input.action === 'read') {
       await handleRead({input, ref, db, response});
     } else {
@@ -254,4 +379,5 @@ async function handler({request, response, auth, db, FieldValue}) {
 
 module.exports = {
   handler, parisToday, validMonth, populationMap, employerMap, readMonth,
+  savedScoreWeights, saveScoreWeights,
 };
