@@ -57,6 +57,7 @@ jobs:
           npm run lint
           npm run test:ui:kpi
           npm run test:canva-prompt
+          node --test scripts/test-editorial-catalogue-scroll.mjs
           npm run build
           test -s dist/index.html
           node --test scripts/test-hosting-assets.mjs
