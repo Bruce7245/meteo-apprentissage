@@ -9,8 +9,8 @@ import './admin-console-pages.css';
 
 // Faceted ROME and sector URLs are useful for visitors but do not yet have
 // dedicated, stable SEO content. Keep the base pages as canonical targets.
-const path = window.location.pathname.replace(/\/++$/, '') || '/';
-if (window.location.search && (path === '/metiers' || /^\\/departement\\/[^/]+$/.test(path))) {
+const path = window.location.pathname.replace(/\/+$/, '') || '/';
+if (window.location.search && (path === '/metiers' || /^\/departement\/[^/]+$/.test(path))) {
   let robots = document.querySelector('meta[name="robots"]');
   if (!robots) {
     robots = document.createElement('meta');
