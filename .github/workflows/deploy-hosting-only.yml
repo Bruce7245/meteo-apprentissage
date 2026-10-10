@@ -104,16 +104,19 @@ jobs:
         run: |
           set -euo pipefail
           site="https://meteo-apprentissage.web.app"
-          curl --fail --silent --show-error --location --max-time 30 "$site/sitemap.xml" |
-            grep -Fq '<loc>https://apprentifr.fr/metiers</loc>'
-          curl --fail --silent --show-error --location --max-time 30 "$site/robots.txt" |
-            grep -Fq 'Sitemap: https://apprentifr.fr/sitemap.xml'
-          curl --fail --silent --show-error --location --max-time 30 "$site/" |
-            grep -Fq '<link rel="canonical" href="https://apprentifr.fr/"'
-          curl --fail --silent --show-error --location --max-time 30 "$site/metiers" |
-            grep -Fq '<link rel="canonical" href="https://apprentifr.fr/metiers"'
-          curl --fail --silent --show-error --location --max-time 30 "$site/admin" --head |
-            grep -iq '^x-robots-tag: noindex, nofollow'
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+          curl --fail --silent --show-error --location --max-time 30 "$site/sitemap.xml" --output "$tmpdir/sitemap.xml"
+          curl --fail --silent --show-error --location --max-time 30 "$site/robots.txt" --output "$tmpdir/robots.txt"
+          curl --fail --silent --show-error --location --max-time 30 "$site/" --output "$tmpdir/index.html"
+          curl --fail --silent --show-error --location --max-time 30 "$site/metiers" --output "$tmpdir/metiers.html"
+          curl --fail --silent --show-error --location --max-time 30 "$site/admin" --head --output "$tmpdir/admin-headers.txt"
+          grep -Fq '<loc>https://apprentifr.fr/metiers</loc>' "$tmpdir/sitemap.xml"
+          grep -Fq 'Sitemap: https://apprentifr.fr/sitemap.xml' "$tmpdir/robots.txt"
+          grep -Fq '<link rel="canonical" href="https://apprentifr.fr/"' "$tmpdir/index.html"
+          grep -Fq '<link rel="canonical" href="https://apprentifr.fr/metiers"' "$tmpdir/metiers.html"
+          grep -Fq '<title>Métiers et formations en apprentissage' "$tmpdir/metiers.html"
+          grep -iq '^x-robots-tag: noindex, nofollow' "$tmpdir/admin-headers.txt"
 
       - name: Record production scope
         if: always()
