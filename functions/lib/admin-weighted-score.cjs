@@ -168,9 +168,15 @@ function simulateOne(row, reference, weights) {
     employers,
     trend: trend?.score ?? null,
   };
+  const applicableWeights = {
+    ...coefficients,
+    // M−1 and M−12 share a single 4/5 weight. One valid
+    // comparator carries only half the maximum trend influence.
+    trend: trend ? coefficients.trend * trend.componentsUsed / 2 : 0,
+  };
   const activeWeights = {};
   const contributions = Object.entries(components).filter(([key, value]) => {
-    const weight = coefficients[key];
+    const weight = applicableWeights[key];
     activeWeights[key] = value === null ? 0 : weight;
     return weight > 0 && value !== null;
   });
@@ -189,7 +195,7 @@ function simulateOne(row, reference, weights) {
   }
 
   const totalWeight = contributions.reduce((sum, [key]) =>
-    sum + coefficients[key], 0);
+    sum + applicableWeights[key], 0);
   if (totalWeight === 0) {
     return {
       score: null, quality: 'unavailable', reasons: ['ZERO_TOTAL_WEIGHT'],
@@ -200,7 +206,7 @@ function simulateOne(row, reference, weights) {
   }
 
   const score = round(contributions.reduce((sum, [key, value]) =>
-    sum + value * coefficients[key], 0) / totalWeight);
+    sum + value * applicableWeights[key], 0) / totalWeight);
   const hasAllComponents = components.density !== null &&
     (coefficients.employers === 0 || components.employers !== null) &&
     (coefficients.trend === 0 || (trend && trend.componentsUsed === 2));
