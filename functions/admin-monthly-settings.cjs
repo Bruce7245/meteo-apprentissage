@@ -12,6 +12,8 @@ const {
   validateWeights, simulateTerritorialScores,
 } = require('./lib/admin-weighted-score.cjs');
 
+const {buildAlignedProvisionalRows} = require('./lib/admin-provisional-preview.cjs');
+
 const DEFAULT = Array(12).fill('unknown');
 const MONTH_CACHE = new Map();
 const CACHE_LIMIT = 8;
@@ -258,6 +260,12 @@ async function handleRead({input, ref, db, response, preview = false}) {
   const month = typeof input.month === 'string' ? input.month : '';
   const today = parisToday();
   const romeCode = typeof input.romeCode === 'string' ? input.romeCode.trim().toUpperCase() : '';
+  const focusDepartmentCode = typeof input.departmentCode === 'string'
+    ? input.departmentCode.trim().toUpperCase() : '';
+  if (focusDepartmentCode && !DEPS.includes(focusDepartmentCode)) {
+    response.status(400).json({ok: false, error: 'Département invalide'});
+    return;
+  }
   if (romeCode && !ROME_RE.test(romeCode)) {
     response.status(400).json({ok: false, error: 'Code métier ROME invalide'});
     return;
@@ -329,7 +337,20 @@ async function handleRead({input, ref, db, response, preview = false}) {
     }
     scoreWeights = checked.weights;
   }
-  const scoring = simulateTerritorialScores(departments, scoreWeights);
+  let scoring = simulateTerritorialScores(departments, scoreWeights);
+  // The monthly table keeps its strict month-level completeness rules.
+  // Only admin score simulation may use a provisional reference on the same
+  // exact validated days for at least 75 departments (no calendar backfill).
+  if (scoring.summary.scored === 0 &&
+      results[0].some(row => row.quality === 'incomplete' && row.daysObserved >= 3)) {
+    const aligned = buildAlignedProvisionalRows(departments, {
+      focusDepartmentCode: focusDepartmentCode || null,
+    });
+    scoring = aligned.available
+      ? simulateTerritorialScores(aligned.rows, scoreWeights, {provisional: true})
+      : scoring;
+    scoring = {...scoring, previewBasis: aligned.basis};
+  }
 
   const config = configSnap.exists ? configSnap.data() || {} : {};
   const summary = {
@@ -345,7 +366,8 @@ async function handleRead({input, ref, db, response, preview = false}) {
     ok: true, month, previousMonth, previousYear,
     scope: romeCode ? 'rome_department' : 'all_offers_department',
     romeCode: romeCode || null,
-    departments, summary, populationReferenceYear: referenceYear,
+    departments: departments.map(({dailySamples, ...safeRow}) => safeRow),
+    summary, populationReferenceYear: referenceYear,
     scoreConfig,
     scoreSimulation: {...scoring, isPreview: preview},
     seasonality: {
