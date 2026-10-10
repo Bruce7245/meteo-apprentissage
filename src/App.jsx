@@ -13,6 +13,7 @@ import AdminSectorDashboardPage from './pages/admin/AdminSectorDashboardPage.jsx
 import AdminCompaniesDashboardPage from './pages/admin/AdminCompaniesDashboardPage.jsx';
 import AdminSettingsPage from './pages/admin/AdminSettingsPage.jsx';
 import AdminSimulationPage from './pages/admin/AdminSimulationPage.jsx';
+import AdminModelValidationPage from './pages/admin/AdminModelValidationPage.jsx';
 import {
   isValidDepartmentCode,
   normalizeDepartmentCode,
@@ -73,6 +74,7 @@ function App() {
   if (path === '/admin/entreprises') return <AdminCompaniesDashboardPage />;
   if (path === '/admin/parametrage') return <AdminSettingsPage />;
   if (path === '/admin/simulation') return <AdminSimulationPage />;
+  if (path === '/admin/validation-modele') return <AdminModelValidationPage />;
 
   return <NotFoundPage />;
 }

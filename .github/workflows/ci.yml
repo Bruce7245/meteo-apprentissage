@@ -65,7 +65,7 @@ jobs:
         run: npm run test:ui:kpi
 
       - name: Test Admin simulation exploratory color bands and national map
-        run: node --test scripts/test-admin-simulation-colors.mjs scripts/test-admin-national-simulation-map.mjs scripts/test-admin-published-comparison-map.mjs
+        run: node --test scripts/test-admin-simulation-colors.mjs scripts/test-admin-national-simulation-map.mjs scripts/test-admin-published-comparison-map.mjs scripts/test-admin-model-validation-audit.mjs
 
       - name: Validate Canva editorial prompts
         run: npm run test:canva-prompt
