@@ -247,7 +247,7 @@ jobs:
       - name: Validate served JavaScript and stylesheet MIME
         if: ${{ inputs.mode == 'deploy' }}
         shell: bash
-        run: node scripts/check-hosting-assets.mjs
+        run: HOSTING_STRICT=1 node scripts/check-hosting-assets.mjs
 
       - name: Report scope
         if: always()
