@@ -52,12 +52,12 @@ export default function AdminOccupationOffersPage(){
     let active=true;
     setCatalogueBusy(true);
     setCatalogueError('');
-    getAdminEditorialOccupationCatalogue()
+    getAdminEditorialOccupationCatalogue({days})
       .then(data=>{if(active)setCatalogue(data)})
       .catch(err=>{if(active)setCatalogueError(err?.message||'Catalogue indisponible')})
       .finally(()=>{if(active)setCatalogueBusy(false)});
     return()=>{active=false};
-  },[catalogueRetry]);
+  },[catalogueRetry,days]);
   const catalogueRows=useMemo(()=>{
     const needle=catalogueQuery.trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('fr');
     const entries=(catalogue?.occupations||[]).filter(row=>{
@@ -80,6 +80,14 @@ export default function AdminOccupationOffersPage(){
     getAdminOccupationOffers(rome,{days}).then(result=>{if(active){setResponse(result);setSelectedDate(result.latestDate||'');}}).catch(e=>{if(active)setError(e.message)}).finally(()=>{if(active)setBusy(false)});
     return()=>{active=false};
   },[rome,days,retryCount]);
+  // A listed occupation may have disappeared from the newest snapshot.
+  // Start with its last positive observation, not a later empty day.
+  useEffect(()=>{
+    if(!response || response.romeCode!==rome || catalogue?.days!==days) return;
+    const recommended=catalogue?.occupations?.find(item=>item.romeCode===rome)?.lastObservedDate;
+    if(!recommended || !response.history?.some(point=>point.date===recommended)) return;
+    setSelectedDate(current=>!current || current===response.latestDate ? recommended : current);
+  },[catalogue,days,response,rome]);
   const history=useMemo(()=>response?.history||[],[response]);
   const dateRows=useMemo(()=>{
     const date=selectedDate||response?.latestDate;
@@ -177,7 +185,7 @@ export default function AdminOccupationOffersPage(){
     <div className="editorial-shell">
       <aside className="panel editorial-catalogue" aria-label="Métiers avec offres observées">
         <div className="editorial-catalogue-heading"><p className="kicker">Catalogue dynamique</p><h2>Métiers disponibles</h2><strong>{catalogue?.count??'—'} métiers</strong></div>
-        <p className="editorial-catalogue-date">Métiers observés du {catalogue?.periodStart?formatFrenchPublicationDate(catalogue.periodStart,'short'):'—'} au {catalogue?.periodEnd?formatFrenchPublicationDate(catalogue.periodEnd,'short'):'—'} · relevé de référence {catalogue?.date?formatFrenchPublicationDate(catalogue.date,'short'):'—'} ({catalogue?.coveredDepartments??0}/{catalogue?.totalDepartments??101} dép.)</p>
+        <p className="editorial-catalogue-date">Métiers observés sur {days} jours · du {catalogue?.periodStart?formatFrenchPublicationDate(catalogue.periodStart,'short'):'—'} au {catalogue?.periodEnd?formatFrenchPublicationDate(catalogue.periodEnd,'short'):'—'} · relevé de référence {catalogue?.date?formatFrenchPublicationDate(catalogue.date,'short'):'—'} ({catalogue?.coveredDepartments??0}/{catalogue?.totalDepartments??101} dép.)</p>
         <label htmlFor="editorial-catalogue-search" className="editorial-catalogue-label">Rechercher un métier</label>
         <input id="editorial-catalogue-search" className="editorial-catalogue-input" type="search" placeholder="Métier ou code ROME" value={catalogueQuery} onChange={e=>setCatalogueQuery(e.target.value)}/>
         <label htmlFor="editorial-catalogue-sort" className="editorial-catalogue-label">Trier les métiers</label>
@@ -196,7 +204,7 @@ export default function AdminOccupationOffersPage(){
         <div className="editorial-picker-row"><OccupationSearch key={rome || "initial"} onOccupationSelect={choose} initialRomeCode={rome} initialLabel={label}/><div className="editorial-field"><label htmlFor="editorial-rome">Ou saisir un code ROME</label><input id="editorial-rome" placeholder="D1102" maxLength={5} onKeyDown={e=>{if(e.key==='Enter')choose({romeCode:e.currentTarget.value,label:e.currentTarget.value.toUpperCase()})}}/><small>Entrée pour valider</small></div></div>
         <div className="editorial-switch"><span>Période de recherche</span>{[7,30,60].map(n=><button type="button" key={n} className={days===n?'is-active':''} onClick={()=>setDays(n)}>{n} jours</button>)}</div>
       </section>
-    {!rome&&<section className="panel"><h2>Sélectionne un métier pour commencer.</h2><p>Tu peux utiliser les raccourcis ou la recherche.</p></section>}
+    {!rome&&<section className="panel"><h2>Sélectionne un métier pour commencer.</h2><p>Utilise la liste de gauche ou la recherche pour choisir un métier.</p></section>}
     {busy&&<section className="panel" role="status">Chargement du classement métier et vérification des données…</section>}
     {error&&<section className="admin-console-alert admin-console-alert-error" role="alert"><strong>Données indisponibles</strong><p>{error}</p><button onClick={()=>setRetryCount(n=>n+1)}>Réessayer</button></section>}
     {!busy&&!error&&response&& !response.latest&&<section className="panel"><h2>Aucun relevé disponible</h2><p>Le métier sélectionné ne possède pas encore d’instantané sur la période demandée.</p></section>}
