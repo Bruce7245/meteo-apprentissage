@@ -1,10 +1,9 @@
 import {
   collection,
   getDocs,
-  getDoc,
-  doc,
 } from 'firebase/firestore';
 import { db } from '../firebase.js';
+import { getReadyAdminUser } from './adminSessionService.js';
 import { normalizeDepartmentCode } from '../utils/departmentUtils.js';
 
 function timestampToIso(value) {
@@ -19,6 +18,30 @@ function finiteNumber(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
+const JOB_STATUS_ENDPOINT =
+  'https://europe-west1-meteo-apprentissage.cloudfunctions.net/getInseeCollectionStatusHttp';
+
+async function getInseeJobStatus() {
+  const user = await getReadyAdminUser();
+  if (!user) throw new Error('Session administrateur absente.');
+  const token = await user.getIdToken();
+  const response = await fetch(JOB_STATUS_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + token,
+    },
+    cache: 'no-store',
+    body: '{}',
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result?.ok) {
+    throw new Error(result?.error || 'Statut de collecte indisponible.');
+  }
+  return result.job || null;
+}
+
 export async function getAdminCompaniesDashboard() {
   const [departmentsSnapshot, statsSnapshot, importSnapshot, nafIndexSnapshot, jobResult] =
     await Promise.all([
@@ -26,9 +49,9 @@ export async function getAdminCompaniesDashboard() {
       getDocs(collection(db, 'inseeDepartmentStats')),
       getDocs(collection(db, 'inseeDepartmentImportIndex')),
       getDocs(collection(db, 'inseeDepartmentNafStatsIndex')),
-      getDoc(doc(db, 'adminJobs', 'inseeNationalBackgroundJob'))
-        .then((snapshot) => ({ snapshot, error: null }))
-        .catch((error) => ({ snapshot: null, error: error?.code || 'unavailable' })),
+      getInseeJobStatus()
+        .then((job) => ({ job, error: null }))
+        .catch((error) => ({ job: null, error: error?.message || 'indisponible' })),
     ]);
 
   const statsByDepartment = new Map(
@@ -144,7 +167,7 @@ export async function getAdminCompaniesDashboard() {
       department.nafStatsAvailable
   );
 
-  const job = jobResult.snapshot?.exists() ? jobResult.snapshot.data() : null;
+  const job = jobResult.job;
 
   return {
     departments,
@@ -163,7 +186,7 @@ export async function getAdminCompaniesDashboard() {
       lastRunReceived: finiteNumber(job.lastRunReceived),
       lastHeartbeatAt: timestampToIso(job.lastHeartbeatAt),
       updatedAt: timestampToIso(job.updatedAt),
-      errorMessage: job.errorMessage || null,
+      hasError: job.hasError === true,
     } : null,
     totals: {
       departmentsCount: departments.length,
