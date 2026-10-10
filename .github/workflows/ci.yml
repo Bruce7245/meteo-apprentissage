@@ -42,11 +42,7 @@ jobs:
         run: npm ci --prefix functions
 
       - name: Lint source code
-        run: |
-          npm run lint -- --format json > /tmp/audit-oxlint.json 2>&1 || {
-            tail -c 18000 /tmp/audit-oxlint.json
-            exit 1
-          }
+        run: npm run lint
 
       - name: Build frontend
         run: npm run build
