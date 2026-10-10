@@ -83,6 +83,22 @@ jobs:
           }));
           console.log(JSON.stringify({departments:indices},null,2));
           NODE
+      - name: Inspect Scheduler and deployed Function metadata
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "=== Scheduler INSEE job (read-only) ==="
+          gcloud scheduler jobs describe firebase-schedule-resumeInseeNationalBackgroundJob-europe-west1 \
+            --location=europe-west1 --project=meteo-apprentissage \
+            --format='yaml(name,state,schedule,timeZone,lastAttemptTime,status,httpTarget.uri,httpTarget.oidcToken.serviceAccountEmail)' || true
+          echo "=== Scheduler matching jobs ==="
+          gcloud scheduler jobs list --location=europe-west1 --project=meteo-apprentissage \
+            --format='table(name,state,schedule,lastAttemptTime,status)' | grep -Ei 'NAME|insee|resume|JOB' || true
+          echo "=== Gen2 Function deployment metadata ==="
+          gcloud functions describe resumeInseeNationalBackgroundJob \
+            --gen2 --region=europe-west1 --project=meteo-apprentissage \
+            --format='yaml(name,state,updateTime,serviceConfig.uri,serviceConfig.serviceAccountEmail,eventTrigger.eventType)' || true
       - name: Inspect scheduler errors where IAM permits
         continue-on-error: true
         shell: bash
