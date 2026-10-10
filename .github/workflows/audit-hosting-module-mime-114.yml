@@ -3,10 +3,13 @@ name: Audit Hosting JavaScript MIME (#114)
 on:
   push:
     branches:
+      - main
       - fix/hosting-module-mime-114
     paths:
       - scripts/check-hosting-assets.mjs
       - scripts/test-hosting-assets.mjs
+      - scripts/verify-hosting-build.mjs
+      - firebase.json
       - .github/workflows/audit-hosting-module-mime-114.yml
   pull_request:
     paths:
