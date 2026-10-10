@@ -28,6 +28,10 @@
     ],
     "rewrites": [
       {
+        "source": "/metiers",
+        "destination": "/metiers.html"
+      },
+      {
         "source": "!/@(assets|src)/**",
         "destination": "/index.html"
       }
@@ -68,6 +72,18 @@
             "value": "noindex, nofollow"
           }
         ]
+      }
+    ],
+    "redirects": [
+      {
+        "source": "/metiers.html",
+        "destination": "/metiers",
+        "type": 301
+      },
+      {
+        "source": "/metiers/",
+        "destination": "/metiers",
+        "type": 301
       }
     ]
   }

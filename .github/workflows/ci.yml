@@ -47,6 +47,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Verify SEO HTML, canonicals and Hosting routes
+        run: node --test scripts/test-seo-pages.mjs
+
       - name: Verify scrollable occupation catalogue layout
         run: node --test scripts/test-editorial-catalogue-scroll.mjs
 

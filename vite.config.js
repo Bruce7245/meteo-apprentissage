@@ -10,5 +10,15 @@ export default defineConfig({
     },
     tsconfigPaths: true,
   },
+  // Vite 8 builds two independent HTML responses for SEO while keeping
+  // one React application. Use rolldownOptions for Vite 8.1 build compatibility.
+  build: {
+    rolldownOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        metiers: fileURLToPath(new URL('./metiers.html', import.meta.url)),
+      },
+    },
+  },
   plugins: [react()],
 })
