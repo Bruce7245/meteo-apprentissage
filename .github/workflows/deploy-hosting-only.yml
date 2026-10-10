@@ -59,6 +59,8 @@ jobs:
           npm run test:canva-prompt
           npm run build
           test -s dist/index.html
+          node --test scripts/test-hosting-assets.mjs
+          node scripts/verify-hosting-build.mjs
 
       - name: Authenticate for Firebase Hosting
         uses: google-github-actions/auth@v2
@@ -89,6 +91,10 @@ jobs:
             test -s "$body"
             grep -q '<div id="root"></div>' "$body"
           done
+
+      - name: Validate served JavaScript and stylesheet MIME
+        shell: bash
+        run: HOSTING_STRICT=1 node scripts/check-hosting-assets.mjs
 
       - name: Record production scope
         if: always()
