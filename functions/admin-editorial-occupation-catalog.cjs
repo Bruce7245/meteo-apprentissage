@@ -68,11 +68,11 @@ async function loadReferenceLabels(db) {
   }).filter(([code, label]) => ROME_CODE.test(code) && label));
 }
 
-function mergeOccupationCatalogues(dailyCatalogues, labels = new Map()) {
+function mergeOccupationCatalogues(dailyCatalogues, labels = new Map(), windowDays = 7) {
   const available = dailyCatalogues.filter(item => item.coveredDepartments > 0);
   if (!available.length) {
     return {
-      ok: true, date: null, periodStart: null, periodEnd: null,
+      ok: true, days: windowDays, date: null, periodStart: null, periodEnd: null,
       coveredDepartments: 0, totalDepartments: DEPARTMENT_CODES.length,
       occupations: [], count: 0,
     };
@@ -102,6 +102,7 @@ function mergeOccupationCatalogues(dailyCatalogues, labels = new Map()) {
   const dates = available.map(item => item.date).sort();
   return {
     ok: true,
+    days: windowDays,
     date: reference.date,
     periodStart: dates[0],
     periodEnd: dates[dates.length - 1],
@@ -109,22 +110,29 @@ function mergeOccupationCatalogues(dailyCatalogues, labels = new Map()) {
     totalDepartments: reference.totalDepartments,
     occupations,
     count: occupations.length,
-    coverageNote: 'Catalogue des métiers avec offres positivement observées sur les sept derniers jours. Volume par métier pris sur sa dernière date observée, sans addition de journées. Données non exhaustives et non certifiées ; une annonce peut relever de plusieurs codes ROME.',
+    coverageNote: 'Catalogue des métiers avec offres positivement observées sur les '+windowDays+' derniers jours. Volume par métier pris sur sa dernière date observée, sans addition de journées. Données non exhaustives et non certifiées ; une annonce peut relever de plusieurs codes ROME.',
   };
 }
 
-async function loadEditorialOccupationCatalogue(db, { today = parisDate() } = {}) {
-  const dates = Array.from({ length: 7 }, (_, offset) => previousDate(today, offset));
-  const snapshots = await Promise.all(dates.map(async date => ({
-    date,
-    docs: (await db.collection('dailyOfferSnapshots').doc(date).collection('departments').get()).docs,
-  })));
-  const dailyCatalogues = snapshots.map(({ date, docs }) => catalogueFromSnapshots(date, docs));
+async function loadEditorialOccupationCatalogue(db, { today = parisDate(), days = 7 } = {}) {
+  const windowDays = [7, 30, 60].includes(Number(days)) ? Number(days) : 7;
+  const dates = Array.from({ length: windowDays }, (_, offset) => previousDate(today, offset));
+  const dailyCatalogues = new Array(dates.length);
+  let cursor = 0;
+  // Limit concurrent Firestore queries and retain the association with each date.
+  await Promise.all(Array.from({ length: Math.min(5, dates.length) }, async () => {
+    while (cursor < dates.length) {
+      const index = cursor++;
+      const date = dates[index];
+      const snapshot = await db.collection('dailyOfferSnapshots').doc(date).collection('departments').get();
+      dailyCatalogues[index] = catalogueFromSnapshots(date, snapshot.docs);
+    }
+  }));
   if (!dailyCatalogues.some(item => item.coveredDepartments > 0)) {
-    return mergeOccupationCatalogues(dailyCatalogues);
+    return mergeOccupationCatalogues(dailyCatalogues, new Map(), windowDays);
   }
   const labels = await loadReferenceLabels(db).catch(() => new Map());
-  return mergeOccupationCatalogues(dailyCatalogues, labels);
+  return mergeOccupationCatalogues(dailyCatalogues, labels, windowDays);
 }
 
 async function handleEditorialOccupationCatalogue({ request, response, auth, db } = {}) {
@@ -136,7 +144,7 @@ async function handleEditorialOccupationCatalogue({ request, response, auth, db 
   const account = await authenticateAdminRequest({ request, response, auth, db });
   if (!account) return;
   try {
-    const result = await loadEditorialOccupationCatalogue(db);
+    const result = await loadEditorialOccupationCatalogue(db, { days: request?.body?.days });
     response.set?.('Cache-Control', 'private, no-store');
     response.status(200).json(result);
   } catch (error) {
