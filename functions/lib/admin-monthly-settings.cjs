@@ -92,6 +92,7 @@ function calculateMonth(month, daily, populations = new Map(), employers = new M
     let capMissing = false;
     let breakDetected = false;
     const methods = new Set();
+    const dailySamples = [];
 
     for (const date of dates) {
       // The running day is not finalized.
@@ -110,6 +111,12 @@ function calculateMonth(month, daily, populations = new Map(), employers = new M
       capMissing ||= row.possiblySaturated !== true && row.possiblySaturated !== false;
       breakDetected ||= row.methodologyBreak === true;
       methods.add(row.qualityMethod || 'unknown');
+      dailySamples.push({
+        date, offers: row.offers, openings: row.openings,
+        method: row.qualityMethod || 'unknown',
+        possiblySaturated: row.possiblySaturated,
+        methodologyBreak: row.methodologyBreak === true,
+      });
     }
 
     const population = nonNegative(populations.get(code));
@@ -141,6 +148,7 @@ function calculateMonth(month, daily, populations = new Map(), employers = new M
       comparisonReady,
       method,
       capAssessed: !capMissing && complete,
+      dailySamples,
     });
   }
   return rows;
