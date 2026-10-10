@@ -177,6 +177,105 @@ test('missing population blocks normalized comparisons rather than creating a fa
   assert.equal(compare(row, result('2026-03', 40)), null);
 });
 
+
+test('ROME scope extracts the same trade from strict daily offers without duplicating total offers', () => {
+  const raw = rawSnapshot('2026-04-01', '72', 50, {
+    strictSummary: {
+      totalOffers: 50,
+      totalOpenings: 100,
+      isPossiblySaturated: false,
+      byRome: [
+        {code: 'D1108', offers: 12, openings: 20},
+        {code: 'G1803', offers: 18, openings: 35},
+      ],
+    },
+  });
+  const scoped = normalizeDailyDepartment(raw, 'D1108');
+  const global = normalizeDailyDepartment(raw);
+  assert.equal(scoped.offers, 12);
+  assert.equal(scoped.openings, 20);
+  assert.equal(global.offers, 50);
+  assert.equal(global.openings, 100);
+  assert.equal(normalizeDailyDepartment(raw, 'F1703').offers, 0);
+});
+
+test('unknown ROME beyond 120 capped distribution must not become a false zero', () => {
+  const capped = rawSnapshot('2026-04-01', '72', 180, {
+    strictSummary: {
+      totalOffers: 180,
+      totalOpenings: 300,
+      isPossiblySaturated: false,
+      byRome: Array.from({length: 120}, (_, i) => ({
+        code: 'A' + String(i).padStart(4, '0'),
+        offers: 1,
+        openings: 1,
+      })),
+    },
+  });
+  assert.equal(normalizeDailyDepartment(capped, 'G1803'), null);
+  const known = normalizeDailyDepartment(capped, 'A0000');
+  assert.equal(known.offers, 1);
+  const plain = normalizeDailyDepartment(capped);
+  assert.equal(plain.offers, 180);
+});
+
+test('missing ROME summary or out-of-range ROME result is not comparable', () => {
+  const row = rawSnapshot('2026-04-01', '72', 3);
+  assert.equal(normalizeDailyDepartment(row, 'D1108'), null);
+  const invalid = {
+    ...row,
+    strictSummary: {
+      totalOffers: 3, totalOpenings: 4,
+      byRome: [{code: 'D1108', offers: 4, openings: 5}],
+    },
+  };
+  assert.equal(normalizeDailyDepartment(invalid, 'D1108'), null);
+});
+
+test('monthly ROME averages use matching occupation counts rather than global daily totals', () => {
+  const entries = new Map();
+  for (const date of monthDays('2026-04')) {
+    entries.set(date, new Map([['72', rawSnapshot(date, '72', 100, {
+      strictSummary: {
+        totalOffers: 100,
+        totalOpenings: 150,
+        isPossiblySaturated: false,
+        byRome: [{code: 'G1803', offers: 5, openings: 7}],
+      },
+    })]]));
+  }
+  const row = calculateMonth('2026-04', entries,
+    new Map([['72', 20000]]), new Map([['72', 500]]),
+    '2026-06-01', 'G1803').find(item => item.departmentCode === '72');
+  assert.equal(row.averageOffers, 5);
+  assert.equal(row.averageOpenings, 7);
+  assert.equal(row.offersPer10000Young, 2.5);
+  assert.equal(row.offersPer100Employers, 1);
+  assert.equal(row.quality, 'comparable');
+});
+
+test('capped daily ROME breakdown blocks full-month comparability', () => {
+  const entries = new Map();
+  for (const date of monthDays('2026-04')) {
+    entries.set(date, new Map([['72', rawSnapshot(date, '72', 200, {
+      strictSummary: {
+        totalOffers: 200, totalOpenings: 200,
+        isPossiblySaturated: false,
+        byRome: date === '2026-04-12'
+          ? Array.from({length: 120}, (_, i) =>
+              ({code:'A' + String(i).padStart(4, '0'),offers:1,openings:1}))
+          : [{code:'G1803',offers:5,openings:5}],
+      },
+    })]]));
+  }
+  const row = calculateMonth('2026-04', entries,
+    new Map([['72', 20000]]), new Map(), '2026-06-01', 'G1803')
+    .find(item => item.departmentCode === '72');
+  assert.equal(row.daysObserved, 29);
+  assert.equal(row.quality, 'incomplete');
+  assert.equal(row.comparisonReady, false);
+});
+
 test('seasonality requires 12 known levels and reason; never mutates inputs', () => {
   assert.throws(() => checkSeasonality({months: [], reason: 'A detailed rationale'}));
   assert.throws(() => checkSeasonality({months, reason: 'short'}));
