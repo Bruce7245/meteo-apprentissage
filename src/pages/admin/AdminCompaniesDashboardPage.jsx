@@ -220,6 +220,7 @@ export default function AdminCompaniesDashboardPage() {
                 {job?.status || 'indisponible'}
               </span>
             </div>
+            {data?.jobReadError ? <p className="admin-console-alert admin-console-alert-warning">Le suivi du traitement est momentanément indisponible (accès serveur non activé). Les chiffres de couverture ci-dessous restent consultables.</p> : null}
             <div className="admin-insee-job-grid">
               <div><span>Couverture complète</span><strong>{formatNumber(totals.fullyReadyCount)} / {formatNumber(totals.departmentsCount)}</strong></div>
               <div><span>Départements partiels</span><strong>{formatNumber(totals.partialCount)}</strong></div>

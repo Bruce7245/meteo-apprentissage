@@ -1,0 +1,56 @@
+name: Publier Admin Entreprises - Hosting #113
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/release-insee-admin-hosting-113.yml
+permissions:
+  contents: read
+concurrency:
+  group: apprentices-frontend-production
+  cancel-in-progress: false
+jobs:
+  release:
+    name: Hosting-only admin Entreprises
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Build and test
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run lint
+          npm run build
+          npm run test:ui:kpi
+          npm run test:canva-prompt
+          test -s dist/index.html
+      - name: Authenticate
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+      - name: Deploy Hosting only
+        run: npx --yes firebase-tools@latest deploy --project meteo-apprentissage --only hosting --non-interactive
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --location --output /tmp/admin-entreprises.html --write-out "%{http_code}" --max-time 40 https://meteo-apprentissage.web.app/admin/entreprises)"
+          test "$status" = "200"
+          grep -q '<div id="root"></div>' /tmp/admin-entreprises.html
+          echo "OK /admin/entreprises HTTP $status"
+      - name: Report
+        if: always()
+        run: |
+          {
+            echo "## Admin Entreprises Hosting-only"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Firestore rules unchanged in production"
+            echo "- Firebase Functions unchanged"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -20,13 +20,15 @@ function finiteNumber(value) {
 }
 
 export async function getAdminCompaniesDashboard() {
-  const [departmentsSnapshot, statsSnapshot, importSnapshot, nafIndexSnapshot, jobSnapshot] =
+  const [departmentsSnapshot, statsSnapshot, importSnapshot, nafIndexSnapshot, jobResult] =
     await Promise.all([
       getDocs(collection(db, 'departments')),
       getDocs(collection(db, 'inseeDepartmentStats')),
       getDocs(collection(db, 'inseeDepartmentImportIndex')),
       getDocs(collection(db, 'inseeDepartmentNafStatsIndex')),
-      getDoc(doc(db, 'adminJobs', 'inseeNationalBackgroundJob')),
+      getDoc(doc(db, 'adminJobs', 'inseeNationalBackgroundJob'))
+        .then((snapshot) => ({ snapshot, error: null }))
+        .catch((error) => ({ snapshot: null, error: error?.code || 'unavailable' })),
     ]);
 
   const statsByDepartment = new Map(
@@ -142,10 +144,11 @@ export async function getAdminCompaniesDashboard() {
       department.nafStatsAvailable
   );
 
-  const job = jobSnapshot.exists() ? jobSnapshot.data() : null;
+  const job = jobResult.snapshot?.exists() ? jobResult.snapshot.data() : null;
 
   return {
     departments,
+    jobReadError: jobResult.error,
     job: job ? {
       status: job.status || 'unknown',
       currentDepartmentCode: job.currentDepartmentCode || null,
