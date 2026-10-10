@@ -56,7 +56,7 @@ jobs:
           npm ci
           npm run lint
           npm run test:ui:kpi
-          node --test scripts/test-admin-simulation-colors.mjs scripts/test-admin-national-simulation-map.mjs
+          node --test scripts/test-admin-simulation-colors.mjs scripts/test-admin-national-simulation-map.mjs scripts/test-admin-published-comparison-map.mjs
           npm run test:canva-prompt
           node --test scripts/test-editorial-catalogue-scroll.mjs
           npm run build
