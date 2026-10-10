@@ -1,0 +1,187 @@
+name: Release editorial occupation catalogue (#108)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Audit without changes, or explicitly deploy the protected Function and Hosting"
+        required: true
+        type: choice
+        default: validate
+        options: [validate, deploy]
+      confirm_deploy:
+        description: "For production deployment, enter DEPLOY"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: editorial-catalogue-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Validate and release editorial occupations
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+
+    steps:
+      - name: Require merged main and explicit production confirmation
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRM: ${{ inputs.confirm_deploy }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REF_NAME" = "main"
+          case "$MODE" in
+            validate) ;;
+            deploy) test "$CONFIRM" = "DEPLOY" ;;
+            *) exit 1 ;;
+          esac
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix functions
+
+      - name: Check frontend, Functions, and publication tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run test:ui:kpi
+          npm run test:canva-prompt
+          npm run build
+          node --check functions/admin-editorial-occupation-catalog.cjs
+          node --check functions/index.js
+          npm run test:unit --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Audit current catalogue in Firestore (read-only)
+        working-directory: functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { initializeApp, getApps } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
+          const { loadEditorialOccupationCatalogue } = require('./admin-editorial-occupation-catalog.cjs');
+
+          if (!getApps().length) initializeApp({ projectId: 'meteo-apprentissage' });
+          (async () => {
+            const result = await loadEditorialOccupationCatalogue(getFirestore(), { days: 7 });
+            if (!result.ok || result.count < 1 ||
+                result.coveredDepartments < 1 || result.coveredDepartments > 101 ||
+                result.occupations.some(row => !/^[A-Z][0-9]{4}$/.test(row.romeCode) ||
+                  row.observedOffers <= 0 || !row.lastObservedDate)) {
+              throw new Error('No valid recent occupation catalogue, or incoherent data.');
+            }
+            console.log(JSON.stringify({
+              periodStart: result.periodStart,
+              periodEnd: result.periodEnd,
+              referenceDate: result.date,
+              coveredDepartments: result.coveredDepartments,
+              occupationsAvailable: result.count,
+              sampleCodes: result.occupations.slice(0, 3).map(item => item.romeCode),
+              warning: result.coverageNote,
+            }, null, 2));
+          })().catch(error => {
+            console.error('Read-only audit failed: ' + error.message);
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Deploy only the new authenticated catalogue Function
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy \
+            --project meteo-apprentissage \
+            --only "functions:getAdminEditorialOccupationCatalogueHttp" \
+            --non-interactive
+
+      - name: Reject anonymous callers before deploying Hosting
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          file="$(mktemp)"
+          status="$(curl --silent --show-error \
+            --output "$file" --write-out '%{http_code}' \
+            --max-time 45 --request POST \
+            --header 'Content-Type: application/json' \
+            --data '{"days":7}' \
+            'https://europe-west1-meteo-apprentissage.cloudfunctions.net/getAdminEditorialOccupationCatalogueHttp')"
+          echo "Catalogue anonymous POST: HTTP $status"
+          if [ "$status" != "401" ]; then
+            echo "Expected a protected admin endpoint (HTTP 401)." >&2
+            cat "$file" >&2
+            exit 1
+          fi
+
+      - name: Deploy Hosting only after authorization check
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy \
+            --project meteo-apprentissage \
+            --only hosting \
+            --non-interactive
+
+      - name: Check production page delivery
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in /admin/stats /admin/stats/metiers; do
+            file="$(mktemp)"
+            status="$(curl --silent --show-error --location \
+              --output "$file" --write-out '%{http_code}' \
+              --max-time 45 "https://meteo-apprentissage.web.app$path")"
+            echo "$path: HTTP $status"
+            test "$status" = "200"
+            test -s "$file"
+            grep -q '<div id="root"></div>' "$file"
+          done
+
+      - name: Report scope
+        if: always()
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          {
+            echo "## Editorial occupations catalogue release"
+            echo
+            echo "- Branch: $GITHUB_REF_NAME"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Mode: $MODE"
+            echo "- Firestore audit read-only."
+            echo "- Deploy scope: new getAdminEditorialOccupationCatalogueHttp Function and Hosting only."
+            echo "- Existing Functions, ingestion, schedules and Firestore rules unchanged."
+            echo "- A 200 for static Hosting does not replace a real authenticated UI check."
+          } >> "$GITHUB_STEP_SUMMARY"
