@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { catalogueFromSnapshots, handleEditorialOccupationCatalogue } = require('../admin-editorial-occupation-catalog.cjs');
+const { catalogueFromSnapshots, mergeOccupationCatalogues, handleEditorialOccupationCatalogue } = require('../admin-editorial-occupation-catalog.cjs');
 const date = '2026-10-09';
 function doc(id, rows, extra = {}) {
   return { id, data: () => ({
@@ -43,4 +43,25 @@ test('anonymous admin endpoint is rejected', async () => {
   const response = { status(code) { this.code = code; return this; }, json(data) { this.payload = data; }, set() {} };
   await handleEditorialOccupationCatalogue({ request: { method: 'POST', get: () => '' }, response, auth: {}, db: {} });
   assert.equal(response.code, 401);
+});
+
+test('retains occupations seen on different days without adding daily totals', () => {
+  const recent = catalogueFromSnapshots('2026-10-10', [
+    doc('72', [{ code: 'G1803', offers: 3, openings: 4 }], { date: '2026-10-10' }),
+  ]);
+  const older = catalogueFromSnapshots(date, [
+    doc('72', [{ code: 'D1102', offers: 4, openings: 5 }, { code: 'G1803', offers: 9, openings: 10 }]),
+  ]);
+  const result = mergeOccupationCatalogues([recent, older], new Map([['D1102', 'Boulanger']]));
+  assert.equal(result.count, 2);
+  assert.equal(result.periodStart, '2026-10-09');
+  assert.equal(result.periodEnd, '2026-10-10');
+  assert.equal(result.occupations.find(item => item.romeCode === 'G1803').observedOffers, 3);
+  assert.equal(result.occupations.find(item => item.romeCode === 'G1803').lastObservedDate, '2026-10-10');
+  assert.equal(result.occupations.find(item => item.romeCode === 'D1102').label, 'Boulanger');
+});
+test('empty recent observations yield an empty catalogue and no invented zero', () => {
+  const result = mergeOccupationCatalogues([catalogueFromSnapshots(date, [])]);
+  assert.equal(result.count, 0);
+  assert.equal(result.date, null);
 });
