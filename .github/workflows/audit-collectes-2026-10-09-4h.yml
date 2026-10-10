@@ -1,4 +1,4 @@
-name: Audit read-only collectes 23h59 et 04h - 10 octobre
+name: Audit read-only collectes 23h59 et 04h - volumes reels
 
 on:
   push:
@@ -6,6 +6,7 @@ on:
       - audit/collectes-2026-10-09-4h
     paths:
       - .github/workflows/audit-collectes-2026-10-09-4h.yml
+      - functions/scripts/audit-collectes-2026-10-10.cjs
   workflow_dispatch:
 
 permissions:
@@ -40,46 +41,3 @@ jobs:
       - name: Inspecter Firestore en lecture seule
         run: node functions/scripts/audit-collectes-2026-10-10.cjs
 
-      - uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: meteo-apprentissage
-
-      - name: Confirmer l'execution des fonctions depuis Cloud Logging
-        shell: bash
-        run: |
-          set -euo pipefail
-          FILTER='timestamp>="2026-10-09T20:45:00Z" AND timestamp<="2026-10-10T05:30:00Z" AND ((resource.type="cloud_run_revision" AND (resource.labels.service_name="importdailyoffers" OR resource.labels.service_name="complementpreviousdaylbaoffers")) OR (resource.type="cloud_function" AND (resource.labels.function_name="importDailyOffers" OR resource.labels.function_name="complementPreviousDayLbaOffers")))'
-          if ! gcloud logging read "$FILTER" \
-            --project meteo-apprentissage --limit=500 \
-            --format=json > "$RUNNER_TEMP/apprentifr-collect-log.json" 2>/dev/null; then
-            echo "Cloud Logging indisponible pour ce compte ; Firestore reste la source."
-            exit 0
-          fi
-          node - <<'NODE'
-          const fs=require('node:fs');
-          const data=JSON.parse(fs.readFileSync(
-            process.env.RUNNER_TEMP+'/apprentifr-collect-log.json','utf8'));
-          const byFn={};
-          const recognized=[];
-          for(const item of data){
-            const name=item.resource?.labels?.service_name ||
-              item.resource?.labels?.function_name || 'unknown';
-            byFn[name]=(byFn[name]||0)+1;
-            const message=String(
-              item.textPayload||item.jsonPayload?.message||'');
-            let kind=null;
-            if(/Import quotidien planifi/i.test(message))kind='collect_started';
-            else if(/Import quotidien termin/i.test(message))kind='collect_finished';
-            else if(/LBA complement 04h/i.test(message))kind='complement_result';
-            else if(/Generation export protegee/i.test(message))kind='snapshot_protected';
-            else if(/skipped_baseline_is_full_export/i.test(message))kind='export_skip';
-            if(kind){
-              // Les messages peuvent contenir des donnees arbitraires :
-              // ne sortir que des marqueurs controles et les heures.
-              recognized.push({timestamp:item.timestamp,function:name,kind});
-            }
-          }
-          console.log('=== LOGS CLOUD FUNCTIONS (SANS DONNEES PERSONNELLES) ===');
-          console.log(JSON.stringify({records:data.length,byFunction:byFn,
-            recognized:recognized.slice(0,100)},null,2));
-          NODE
