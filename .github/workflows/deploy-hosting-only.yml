@@ -59,6 +59,8 @@ jobs:
           npm run test:canva-prompt
           npm run build
           test -s dist/index.html
+          node --test scripts/test-hosting-assets.mjs
+          node scripts/verify-hosting-build.mjs
 
       - name: Authenticate for Firebase Hosting
         uses: google-github-actions/auth@v2
