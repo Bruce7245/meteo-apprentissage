@@ -95,3 +95,32 @@ test('firebase.json never rewrites absent /assets JS to the HTML SPA', async () 
   assert.match(assets?.headers?.find(item => item.key === 'Cache-Control')?.value || '', /immutable/);
   assert.ok(policies.indexOf(all) < policies.indexOf(assets));
 });
+
+test('post-deployment strict audit rejects stale HTML cache and fallback assets', async () => {
+  const report = await auditHostingAssets({
+    site: 'https://example.test',
+    routes: ['/'],
+    request: requestWith(),
+    strictHostingConfig: true,
+  });
+  assert.equal(report.ok, false);
+  assert.ok(report.errors.some(line => line.includes('HTML encore cache')));
+  assert.ok(report.errors.some(line => line.includes('au lieu de 404')));
+});
+
+test('post-deployment strict audit accepts no-store HTML and 404 for absent assets', async () => {
+  const good = requestWith();
+  const request = async url => {
+    if (new URL(url).pathname.includes('__apprentifr_missing_module_probe__')) {
+      return fakeResponse(404, 'text/html', 'Not found');
+    }
+    const response = await good(url);
+    response.headers.set('Cache-Control', 'no-store');
+    return response;
+  };
+  const report = await auditHostingAssets({
+    site: 'https://example.test', routes: ['/admin/stats/metiers'],
+    request, strictHostingConfig: true,
+  });
+  assert.equal(report.ok, true);
+});
