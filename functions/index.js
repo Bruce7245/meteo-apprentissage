@@ -14835,6 +14835,12 @@ exports.activateOccupationVigilanceConfigHttp = onRequest(
 );
 
 const occupationOffersEditorial = require('./admin-occupation-offers.cjs');
+const editorialOccupationCatalog = require('./admin-editorial-occupation-catalog.cjs');
+
+exports.getAdminEditorialOccupationCatalogueHttp = onRequest(
+  { region: 'europe-west1', timeoutSeconds: 90, memory: '512MiB', cors: true },
+  async (request, response) => editorialOccupationCatalog.handleEditorialOccupationCatalogue({ request, response, auth: admin.auth(), db })
+);
 
 exports.getAdminOccupationOffersHttp = onRequest(
   { region: 'europe-west1', timeoutSeconds: 180, memory: '512MiB', cors: true },
