@@ -1,7 +1,7 @@
 import React,{useEffect,useMemo,useState} from 'react';
 import AdminLayout from '../../layouts/AdminLayout.jsx';
 import OccupationSearch from '../../components/occupation/OccupationSearch.jsx';
-import {getAdminOccupationOffers} from '../../services/adminStatsService.js';
+import {getAdminOccupationOffers,getAdminEditorialOccupationCatalogue} from '../../services/adminStatsService.js';
 import {getPublicDepartmentOffers} from '../../services/publicOffersService.js';
 import {
   buildOccupationInstagramPrompt,
@@ -11,13 +11,6 @@ import {
 import {normalizeRomeCode} from '../../utils/occupationUtils.js';
 import './AdminOccupationOffersPage.css';
 
-const PICKS=[
-  {rome:'D1102',name:'Boulanger / Boulangère'},
-  {rome:'G1803',name:'Serveur / Serveuse'},
-  {rome:'N1103',name:'Préparateur / Préparatrice de commandes'},
-  {rome:'D1214',name:'Vendeur / Vendeuse'},
-  {rome:'D1202',name:'Coiffeur / Coiffeuse'},
-];
 const fmt=(v)=>v===null||v===undefined?'Non établi':new Intl.NumberFormat('fr-FR').format(v);
 const signed=(v)=>v===null?'—':(v>0?'+':'')+new Intl.NumberFormat('fr-FR',{style:'percent',maximumFractionDigits:1}).format(v);
 const slug=(s)=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
@@ -32,7 +25,7 @@ function metric(row,key){return row?.[key]??null;}
 export default function AdminOccupationOffersPage(){
   const params=new URLSearchParams(window.location.search);
   const [rome,setRome]=useState(normalizeRomeCode(params.get('rome'))||'');
-  const [label,setLabel]=useState(PICKS.find(x=>x.rome===rome)?.name||rome);
+  const [label,setLabel]=useState(rome);
   const [days,setDays]=useState(7);
   const [response,setResponse]=useState(null);
   const [busy,setBusy]=useState(false);
@@ -49,6 +42,37 @@ export default function AdminOccupationOffersPage(){
   const [examplesLoading,setExamplesLoading]=useState(false);
   const [includeExamples,setIncludeExamples]=useState(true);
   const [retryCount,setRetryCount]=useState(0);
+  const [catalogue,setCatalogue]=useState(null);
+  const [catalogueBusy,setCatalogueBusy]=useState(true);
+  const [catalogueError,setCatalogueError]=useState('');
+  const [catalogueQuery,setCatalogueQuery]=useState('');
+  const [catalogueSort,setCatalogueSort]=useState('offers');
+  const [catalogueRetry,setCatalogueRetry]=useState(0);
+  useEffect(()=>{
+    let active=true;
+    setCatalogueBusy(true);
+    setCatalogueError('');
+    getAdminEditorialOccupationCatalogue()
+      .then(data=>{if(active)setCatalogue(data)})
+      .catch(err=>{if(active)setCatalogueError(err?.message||'Catalogue indisponible')})
+      .finally(()=>{if(active)setCatalogueBusy(false)});
+    return()=>{active=false};
+  },[catalogueRetry]);
+  const catalogueRows=useMemo(()=>{
+    const needle=catalogueQuery.trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('fr');
+    const entries=(catalogue?.occupations||[]).filter(row=>{
+      const haystack=(row.label+' '+row.romeCode).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('fr');
+      return haystack.includes(needle);
+    });
+    return entries.sort((a,b)=>catalogueSort==='alphabetical'
+      ? a.label.localeCompare(b.label,'fr')||a.romeCode.localeCompare(b.romeCode)
+      : b.observedOffers-a.observedOffers||a.label.localeCompare(b.label,'fr'));
+  },[catalogue?.occupations,catalogueQuery,catalogueSort]);
+  useEffect(()=>{
+    const current=(catalogue?.occupations||[]).find(row=>row.romeCode===rome);
+    if(current&&(!label||label===rome))setLabel(current.label);
+  },[catalogue,rome,label]);
+
   useEffect(()=>{
     if(!rome){setResponse(null);return undefined;}
     let active=true;
@@ -150,12 +174,28 @@ export default function AdminOccupationOffersPage(){
     <header className="admin-console-page-head"><div><p className="admin-console-eyebrow">Statistiques & publications / Métiers</p><h1>Explorer les offres par métier</h1><p>Classements territoriaux, filtres et données prêtes pour Canva, à partir des relevés quotidiens.</p></div>
       <a className="admin-detail-button" href="/admin/stats/vigilance">Analyses de vigilance →</a>
     </header>
-    <section className="panel editorial-filters">
-      <div className="section-heading"><div><p className="kicker">01 / Métier</p><h2>Choisir un métier (ROME)</h2></div><span className="soft-pill">{rome||'Aucun métier'}</span></div>
-      <div className="editorial-picks">{PICKS.map(p=><button type="button" key={p.rome} className={rome===p.rome?'editorial-chip is-active':'editorial-chip'} onClick={()=>choose({romeCode:p.rome,label:p.name})}>{p.name} <small>{p.rome}</small></button>)}</div>
-      <div className="editorial-picker-row"><OccupationSearch key={rome || "initial"} onOccupationSelect={choose} initialRomeCode={rome} initialLabel={label}/><div className="editorial-field"><label htmlFor="editorial-rome">Ou saisir un code ROME</label><input id="editorial-rome" placeholder="D1102" maxLength={5} onKeyDown={e=>{if(e.key==='Enter')choose({romeCode:e.currentTarget.value,label:e.currentTarget.value.toUpperCase()})}}/><small>Entrée pour valider</small></div></div>
-      <div className="editorial-switch"><span>Période de recherche</span>{[7,30,60].map(n=><button type="button" key={n} className={days===n?'is-active':''} onClick={()=>setDays(n)}>{n} jours</button>)}</div>
-    </section>
+    <div className="editorial-shell">
+      <aside className="panel editorial-catalogue" aria-label="Métiers avec offres observées">
+        <div className="editorial-catalogue-heading"><p className="kicker">Catalogue dynamique</p><h2>Métiers disponibles</h2><strong>{catalogue?.count??'—'} métiers</strong></div>
+        <p className="editorial-catalogue-date">Relevé du {catalogue?.date?formatFrenchPublicationDate(catalogue.date,'short'):'—'} · {catalogue?.coveredDepartments??0}/{catalogue?.totalDepartments??101} départements couverts</p>
+        <label htmlFor="editorial-catalogue-search" className="editorial-catalogue-label">Rechercher un métier</label>
+        <input id="editorial-catalogue-search" className="editorial-catalogue-input" type="search" placeholder="Métier ou code ROME" value={catalogueQuery} onChange={e=>setCatalogueQuery(e.target.value)}/>
+        <label htmlFor="editorial-catalogue-sort" className="editorial-catalogue-label">Trier les métiers</label>
+        <select id="editorial-catalogue-sort" className="editorial-catalogue-input" value={catalogueSort} onChange={e=>setCatalogueSort(e.target.value)}><option value="offers">Plus d'offres observées</option><option value="alphabetical">Ordre alphabétique</option></select>
+        {catalogueBusy&&<p role="status">Chargement des métiers observés…</p>}
+        {catalogueError&&<div role="alert"><p>{catalogueError}</p><button type="button" onClick={()=>setCatalogueRetry(n=>n+1)}>Réessayer</button></div>}
+        {!catalogueBusy&&!catalogueError&&catalogueRows.length===0&&<p>Aucun métier ne correspond à la recherche sur ce relevé.</p>}
+        <div className="editorial-catalogue-list" role="group" aria-label="Choisir un métier">
+          {catalogueRows.map(item=><button type="button" key={item.romeCode} className={rome===item.romeCode?'editorial-catalogue-item is-active':'editorial-catalogue-item'} aria-pressed={rome===item.romeCode} onClick={()=>choose({romeCode:item.romeCode,label:item.label})}><span><strong>{item.label}</strong><small>{item.romeCode} · {item.departments} dép.</small></span><span className="editorial-catalogue-volume">{fmt(item.observedOffers)} <small>offres</small></span></button>)}
+        </div>
+        <p className="editorial-catalogue-note">Offres observées, non exhaustives. Plusieurs codes ROME peuvent concerner une même annonce.</p>
+      </aside>
+      <div className="editorial-main">
+      <section className="panel editorial-filters">
+        <div className="section-heading"><div><p className="kicker">01 / Métier</p><h2>Choisir un métier (ROME)</h2></div><span className="soft-pill">{rome||'Aucun métier'}</span></div>
+        <div className="editorial-picker-row"><OccupationSearch key={rome || "initial"} onOccupationSelect={choose} initialRomeCode={rome} initialLabel={label}/><div className="editorial-field"><label htmlFor="editorial-rome">Ou saisir un code ROME</label><input id="editorial-rome" placeholder="D1102" maxLength={5} onKeyDown={e=>{if(e.key==='Enter')choose({romeCode:e.currentTarget.value,label:e.currentTarget.value.toUpperCase()})}}/><small>Entrée pour valider</small></div></div>
+        <div className="editorial-switch"><span>Période de recherche</span>{[7,30,60].map(n=><button type="button" key={n} className={days===n?'is-active':''} onClick={()=>setDays(n)}>{n} jours</button>)}</div>
+      </section>
     {!rome&&<section className="panel"><h2>Sélectionne un métier pour commencer.</h2><p>Tu peux utiliser les raccourcis ou la recherche.</p></section>}
     {busy&&<section className="panel" role="status">Chargement du classement métier et vérification des données…</section>}
     {error&&<section className="admin-console-alert admin-console-alert-error" role="alert"><strong>Données indisponibles</strong><p>{error}</p><button onClick={()=>setRetryCount(n=>n+1)}>Réessayer</button></section>}
@@ -197,5 +237,7 @@ export default function AdminOccupationOffersPage(){
         <p className="editorial-notice">Les silhouettes <code>Numdep_nomdep_bleu.svg</code> sont dans Canva → Identité visuelle « Bruce DE LUCAS » → Illustrations. Aucun fond de carte n’est demandé. Les alertes de qualité restent dans l’administration ; le visuel indique seulement la source et la date du relevé. Ne publie pas un total national marqué « Non établi » comme exhaustif.</p>
       </section>
     </>}
+      </div>
+    </div>
   </AdminLayout>;
 }
