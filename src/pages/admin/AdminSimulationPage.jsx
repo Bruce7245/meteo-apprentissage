@@ -1,6 +1,7 @@
 import React, {useMemo, useRef, useState} from 'react';
 import {FiArrowRight, FiBarChart2, FiRepeat, FiShield, FiTrendingUp} from 'react-icons/fi';
 import AdminLayout from '../../layouts/AdminLayout.jsx';
+import AdminNationalSimulationMap from '../../components/admin/AdminNationalSimulationMap.jsx';
 import AdminSimulationColorBadge from '../../components/admin/AdminSimulationColorBadge.jsx';
 import {
   getAdminSimulationColor, ADMIN_SIMULATION_BAND_LEGEND,
@@ -281,18 +282,26 @@ export default function AdminSimulationPage() {
         <div>
           <p className="admin-console-eyebrow">Administration · Contrôle avant publication</p>
           <h1>Simulation</h1>
-          <p>Comparer les indicateurs du moteur actuel aux nouveaux critères, sans modifier la vigilance publiée.</p>
+          <p>Explorer la carte nationale expérimentale, puis comparer les deux méthodes par métier et département, sans modifier la vigilance publiée.</p>
         </div>
         <a className="admin-detail-button" href="/admin/parametrage">
           Paramétrage <FiArrowRight aria-hidden="true" />
         </a>
       </section>
 
+      <AdminNationalSimulationMap
+        month={month}
+        onMonthChange={nextMonth => {
+          invalidate();
+          setMonth(nextMonth);
+        }}
+      />
+
       <form className="panel admin-simulation-filters" onSubmit={runSimulation}>
         <div className="section-heading">
           <div>
             <p className="kicker">Périmètre de simulation</p>
-            <h2>Même métier, même département</h2>
+            <h2>Comparer deux modèles pour un métier et un département</h2>
           </div>
           <span className="soft-pill">Lecture seule</span>
         </div>
