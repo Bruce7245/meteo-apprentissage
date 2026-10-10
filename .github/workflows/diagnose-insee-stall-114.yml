@@ -107,3 +107,5 @@ jobs:
           gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="resumeinseenationalbackgroundjob"' \
             --project meteo-apprentissage --freshness=3h --limit=10 \
             --format='value(timestamp,severity,textPayload)' 2>&1 | head -n 60 || true
+
+# Verification read-only apres reprise du Scheduler INSEE (#115)
