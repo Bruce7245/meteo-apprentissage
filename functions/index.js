@@ -14681,6 +14681,25 @@ exports.recordAdminLogoutHttp = onRequest(
   }
 );
 
+const inseeAdminJobStatus = require('./lib/insee-admin-job-status.cjs');
+
+exports.getInseeCollectionStatusHttp = onRequest(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    cors: true,
+  },
+  async (request, response) => {
+    await inseeAdminJobStatus.handleInseeCollectionStatus({
+      request,
+      response,
+      auth: admin.auth(),
+      db,
+    });
+  }
+);
+
 const occupationVigilanceAdminConfig = require('./admin-occupation-vigilance-config.cjs');
 
 exports.getActiveOccupationVigilanceConfigHttp = onRequest(
