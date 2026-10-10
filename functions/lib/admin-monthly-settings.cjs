@@ -6,13 +6,13 @@ function monthDays(month){const [y,m]=month.split('-').map(Number);const count=n
 function num(v){if(v===null||v===undefined||v==='')return null;const n=Number(v);return Number.isFinite(n)&&n>=0?n:null}
 function calculateMonth(month, daily, populations=new Map(), employers=new Map(), now='2026-10-10'){
  const dates=monthDays(month);const today=now.slice(0,10);const out=[];
- for(const code of DEPS){let count=0,sum=0,openings=0,broken=false,saturated=false,capMissing=false,methods=new Set(),runIds=new Set();
+ for(const code of DEPS){let count=0,sum=0,openings=0,broken=false,saturated=false,capMissing=false,methods=new Set();
   for(const date of dates){if(date>=today)continue;const row=daily.get(date)?.get(code);if(!row||row.date!==date||!row.activeRunId||row.qualityStatus==='quarantined'||!row.strictSummary)continue;
    const n=num(row.strictSummary.totalOffers),o=num(row.strictSummary.totalOpenings);if(n===null||o===null)continue;
    count++;sum+=n;openings+=o;if(row.methodologyBreak===true)broken=true;
    if(row.strictSummary.isPossiblySaturated===true||row.isPossiblySaturated===true)saturated=true;
    if(typeof (row.strictSummary.isPossiblySaturated??row.isPossiblySaturated)!=='boolean')capMissing=true;
-   methods.add(row.qualityMethod||'unknown');runIds.add(row.activeRunId);
+   methods.add(row.qualityMethod||'unknown');
   }
   const pop=num(populations.get(code));const emp=num(employers.get(code));const expected=dates.filter(x=>x<today).length;
   const complete=expected===dates.length&&count===dates.length;
