@@ -18,11 +18,12 @@ function finiteNumber(value) {
 }
 
 export async function getAdminCompaniesDashboard() {
-  const [departmentsSnapshot, statsSnapshot, importSnapshot] =
+  const [departmentsSnapshot, statsSnapshot, importSnapshot, nafIndexSnapshot] =
     await Promise.all([
       getDocs(collection(db, 'departments')),
       getDocs(collection(db, 'inseeDepartmentStats')),
       getDocs(collection(db, 'inseeDepartmentImportIndex')),
+      getDocs(collection(db, 'inseeDepartmentNafStatsIndex')),
     ]);
 
   const statsByDepartment = new Map(
@@ -47,6 +48,12 @@ export async function getAdminCompaniesDashboard() {
     })
   );
 
+  const nafIndexCodes = new Set(
+    nafIndexSnapshot.docs.map((document) =>
+      normalizeDepartmentCode(document.data()?.departmentCode || document.id)
+    )
+  );
+
   const departments = departmentsSnapshot.docs
     .map((document) => {
       const data = document.data() || {};
@@ -68,6 +75,7 @@ export async function getAdminCompaniesDashboard() {
         regionName: data.regionName || null,
         enabled: data.enabled !== false,
         statsAvailable: Boolean(stats),
+        nafStatsAvailable: nafIndexCodes.has(departmentCode),
         establishmentsCount: finiteNumber(
           stats?.establishmentsCount
         ),
@@ -87,7 +95,12 @@ export async function getAdminCompaniesDashboard() {
         statsSchemaVersion: stats?.schemaVersion || null,
         statsComputedAt: timestampToIso(stats?.computedAt),
         importAvailable: Boolean(importState),
-        importComplete: importState?.complete === true,
+        // Dry-runs and old incomplete cursors never certify real coverage.
+        importComplete:
+          importState?.complete === true &&
+          importState?.write === true &&
+          importState?.employerOnly !== false &&
+          importState?.activeOnly !== true,
         importPagesRead: finiteNumber(importState?.pagesRead),
         importReceivedCount: finiteNumber(
           importState?.receivedCount
@@ -95,6 +108,12 @@ export async function getAdminCompaniesDashboard() {
         importWrittenCount: finiteNumber(
           importState?.writtenCount
         ),
+        importProcessedWrittenSinceV3:
+          importState?.processedWrittenSinceV3 === undefined
+            ? null
+            : finiteNumber(importState.processedWrittenSinceV3),
+        importCursorAvailable:
+          Boolean(importState?.nextCursor) && importState?.complete !== true,
         importUpdatedAt: timestampToIso(importState?.updatedAt),
       };
     })
@@ -113,6 +132,12 @@ export async function getAdminCompaniesDashboard() {
   const completedImports = departments.filter(
     (department) => department.importComplete
   );
+  const fullyReady = departments.filter(
+    (department) =>
+      department.importComplete &&
+      department.statsAvailable &&
+      department.nafStatsAvailable
+  );
 
   return {
     departments,
@@ -120,6 +145,7 @@ export async function getAdminCompaniesDashboard() {
       departmentsCount: departments.length,
       statsReadyCount: readyDepartments.length,
       completedImportsCount: completedImports.length,
+      fullyReadyCount: fullyReady.length,
       activeEmployerEstablishmentsCount:
         readyDepartments.reduce(
           (total, department) =>

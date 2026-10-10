@@ -4,6 +4,7 @@ import {
   FiDatabase,
   FiFilter,
   FiSearch,
+  FiRefreshCw,
 } from 'react-icons/fi';
 import AdminLayout from '../../layouts/AdminLayout.jsx';
 import MetricCard from '../../components/dashboard/MetricCard.jsx';
@@ -31,27 +32,31 @@ function formatDateTime(value) {
 }
 
 function statusLabel(department) {
-  if (department.statsAvailable && department.importComplete) {
-    return 'Prêt';
+  if (department.statsAvailable && department.nafStatsAvailable && department.importComplete) {
+    return 'Complet';
   }
 
-  if (department.statsAvailable) {
-    return 'Agrégats disponibles';
+  if (department.importComplete) {
+    return 'Agrégation à terminer';
   }
 
   if (department.importAvailable) {
-    return 'Import en cours';
+    return department.importCursorAvailable ? 'À reprendre' : 'Import partiel';
   }
 
-  return 'Non préparé';
+  if (department.statsAvailable || department.nafStatsAvailable) {
+    return 'Agrégats seuls';
+  }
+
+  return 'Non collecté';
 }
 
 function statusClass(department) {
-  if (department.statsAvailable && department.importComplete) {
+  if (department.statsAvailable && department.nafStatsAvailable && department.importComplete) {
     return 'is-ready';
   }
 
-  if (department.statsAvailable) {
+  if (department.statsAvailable || department.nafStatsAvailable || department.importAvailable) {
     return 'is-partial';
   }
 
@@ -64,6 +69,7 @@ export default function AdminCompaniesDashboardPage() {
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [coverage, setCoverage] = useState('all');
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -92,7 +98,7 @@ export default function AdminCompaniesDashboardPage() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   const filteredDepartments = useMemo(() => {
     const cleanQuery = query.trim().toLocaleLowerCase('fr-FR');
@@ -103,7 +109,7 @@ export default function AdminCompaniesDashboardPage() {
     return departments.filter((department) => {
       if (
         coverage === 'ready' &&
-        !department.statsAvailable
+        !(department.statsAvailable && department.nafStatsAvailable && department.importComplete)
       ) {
         return false;
       }
@@ -117,7 +123,7 @@ export default function AdminCompaniesDashboardPage() {
 
       if (
         coverage === 'missing' &&
-        (department.statsAvailable || department.importAvailable)
+        (department.statsAvailable || department.nafStatsAvailable || department.importAvailable)
       ) {
         return false;
       }
@@ -145,7 +151,7 @@ export default function AdminCompaniesDashboardPage() {
           <p className="admin-console-eyebrow">Données entreprises</p>
           <h1>Couverture INSEE</h1>
           <p>
-            Suivez les agrégats d’établissements utilisés par ApprentiFR sans
+            Suivez les imports Sirene et leurs agrégats utilisés par ApprentiFR sans
             charger la collection brute <code>inseeEstablishments</code>.
           </p>
         </div>
@@ -154,12 +160,21 @@ export default function AdminCompaniesDashboardPage() {
           <span className="admin-console-live-dot" />
           <span>
             <strong>
-              {formatNumber(totals.statsReadyCount)} /{' '}
+              {formatNumber(totals.fullyReadyCount)} /{' '}
               {formatNumber(totals.departmentsCount)}
             </strong>
-            <small>Départements avec agrégats</small>
+            <small>Collectes et agrégations complètes</small>
           </span>
         </div>
+        <button
+          type="button"
+          className="admin-console-chip"
+          onClick={() => setReloadKey((value) => value + 1)}
+          disabled={loading}
+          aria-label="Actualiser les données entreprises"
+        >
+          <FiRefreshCw aria-hidden="true" /> Actualiser
+        </button>
       </section>
 
       {error ? (
@@ -175,8 +190,8 @@ export default function AdminCompaniesDashboardPage() {
           <div>
             <strong>Chargement du contexte entreprises</strong>
             <p>
-              Lecture de inseeDepartmentStats et
-              inseeDepartmentImportIndex.
+              Lecture de inseeDepartmentStats,
+              inseeDepartmentNafStatsIndex et inseeDepartmentImportIndex.
             </p>
           </div>
         </section>
@@ -186,13 +201,13 @@ export default function AdminCompaniesDashboardPage() {
         <>
           <section className="admin-console-overview-grid">
             <MetricCard
-              label="Départements couverts"
+              label="Collectes complètes"
               value={
-                formatNumber(totals.statsReadyCount) +
+                formatNumber(totals.fullyReadyCount) +
                 ' / ' +
                 formatNumber(totals.departmentsCount)
               }
-              detail="Agrégats départementaux disponibles"
+              detail="Imports écrits et agrégats secteur/NAF disponibles"
             />
             <MetricCard
               label="Imports terminés"
@@ -247,7 +262,7 @@ export default function AdminCompaniesDashboardPage() {
                   onChange={(event) => setCoverage(event.target.value)}
                 >
                   <option value="all">Toute la couverture</option>
-                  <option value="ready">Agrégats disponibles</option>
+                  <option value="ready">Couverture complète</option>
                   <option value="complete">Imports terminés</option>
                   <option value="missing">Non préparés</option>
                 </select>
@@ -290,6 +305,7 @@ export default function AdminCompaniesDashboardPage() {
                           }
                         >
                           {department.statsAvailable &&
+                          department.nafStatsAvailable &&
                           department.importComplete ? (
                             <FiCheckCircle aria-hidden="true" />
                           ) : (
@@ -323,10 +339,8 @@ export default function AdminCompaniesDashboardPage() {
                         </strong>
                         {department.importAvailable ? (
                           <div className="date-line">
-                            {formatNumber(
-                              department.importWrittenCount
-                            )}{' '}
-                            écrits
+                            {formatNumber(department.importWrittenCount)} écritures
+                            sur la dernière requête
                           </div>
                         ) : null}
                       </td>
@@ -350,7 +364,8 @@ export default function AdminCompaniesDashboardPage() {
               <p>
                 Cette page repose sur les collections agrégées déjà calculées
                 par le backend. Elle évite volontairement un scan national des
-                établissements Sirene depuis le navigateur.
+                établissements Sirene depuis le navigateur. Un agrégat disponible
+                ne constitue pas, à lui seul, la preuve d’un import terminé.
               </p>
             </div>
           </section>

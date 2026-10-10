@@ -1,0 +1,128 @@
+name: INSEE entreprises - audit et reprise #106
+
+on:
+  push:
+    branches:
+      - feat/insee-collection-106
+    paths:
+      - .github/workflows/insee-companies-collection-106.yml
+      - functions/index.js
+      - functions/lib/insee-collection-state.cjs
+      - functions/scripts/insee-collection-control.cjs
+      - functions/test/insee-collection-state.test.cjs
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Audit en lecture seule ou deploiement et reprise nationale"
+        required: true
+        default: audit
+        type: choice
+        options:
+          - audit
+          - start
+      confirm_start:
+        description: "Pour start uniquement, saisir REPRENDRE"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: insee-companies-collection-production
+  cancel-in-progress: false
+
+jobs:
+  audit-or-resume:
+    name: Verifier et reprendre la collecte Sirene
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+
+    steps:
+      - name: Bloquer les lancements non autorises
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode || 'audit' }}
+          CONFIRM: ${{ inputs.confirm_start || '' }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = "start" ]; then
+            if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
+              echo "Un push ne peut pas lancer la collecte." >&2
+              exit 1
+            fi
+            if [ "$GITHUB_REF_NAME" != "main" ]; then
+              echo "La reprise production requiert la branche main." >&2
+              exit 1
+            fi
+            if [ "$CONFIRM" != "REPRENDRE" ]; then
+              echo "La confirmation REPRENDRE est requise." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Installer et valider les Functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix functions
+          node --check functions/index.js
+          node --check functions/scripts/insee-collection-control.cjs
+          node --check functions/lib/insee-collection-state.cjs
+          node --test functions/test/insee-collection-state.test.cjs
+          npm run test:unit --prefix functions
+
+      - name: Authentifier Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Audit Firestore sans ecriture
+        env:
+          INSEE_COLLECTION_MODE: audit
+        run: node functions/scripts/insee-collection-control.cjs
+
+      - name: Deployer uniquement les Functions du module entreprises
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'start' && inputs.confirm_start == 'REPRENDRE' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy \
+            --project meteo-apprentissage \
+            --only "functions:importInseeDepartmentEstablishmentsHttp,functions:resumeInseeNationalBackgroundJob,functions:buildInseeDepartmentStatsLightHttp,functions:buildInseeDepartmentNafStatsHttp" \
+            --non-interactive
+
+      - name: Demarrer la reprise sans ecraser un job existant
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'start' && inputs.confirm_start == 'REPRENDRE' }}
+        env:
+          INSEE_COLLECTION_MODE: start
+          INSEE_COLLECTION_CONFIRM: ${{ inputs.confirm_start }}
+        run: node functions/scripts/insee-collection-control.cjs
+
+      - name: Bilan du workflow
+        if: always()
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode || 'audit' }}
+        run: |
+          {
+            echo "## Collecte INSEE entreprises"
+            echo ""
+            echo "- Branche : $GITHUB_REF_NAME"
+            echo "- Mode : $MODE"
+            echo "- Le push ne fait qu'un audit Firestore en lecture seule."
+            echo "- Le demarrage est reserve a un dispatch sur main avec REPRENDRE."
+            echo "- Les offres et les vigilances ne sont pas publiees ici."
+          } >> "$GITHUB_STEP_SUMMARY"

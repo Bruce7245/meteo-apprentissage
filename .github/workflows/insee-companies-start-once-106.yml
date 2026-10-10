@@ -1,0 +1,90 @@
+name: INSEE - premiere reprise controlee #106
+
+# Cette operation est declenchee UNIQUEMENT par l'ajout de ce fichier sur main.
+# L'enlever apres le lancement ; les reprises futures utilisent le workflow manuel.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/insee-companies-start-once-106.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: insee-companies-collection-production
+  cancel-in-progress: false
+
+jobs:
+  first-resume:
+    name: Deployer et reprendre les imports INSEE manquants
+    if: github.event_name == 'push' && github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout code valide sur main
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Verifier les Functions et tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix functions
+          node --check functions/index.js
+          node --check functions/scripts/insee-collection-control.cjs
+          npm run test:unit --prefix functions
+
+      - name: Authentification pour les actions production
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Audit initial et blocage si un autre job est actif
+        env:
+          INSEE_COLLECTION_MODE: audit
+          INSEE_COLLECTION_REQUIRE_IDLE: '1'
+        run: node functions/scripts/insee-collection-control.cjs
+
+      - name: Deployer uniquement le pipeline INSEE
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@latest deploy \
+            --project meteo-apprentissage \
+            --only "functions:importInseeDepartmentEstablishmentsHttp,functions:resumeInseeNationalBackgroundJob,functions:buildInseeDepartmentStatsLightHttp,functions:buildInseeDepartmentNafStatsHttp" \
+            --non-interactive
+
+      - name: Demarrer le job par transaction et reprendre les curseurs
+        env:
+          INSEE_COLLECTION_MODE: start
+          INSEE_COLLECTION_CONFIRM: REPRENDRE
+        run: node functions/scripts/insee-collection-control.cjs
+
+      - name: Lire le statut apres lancement
+        env:
+          INSEE_COLLECTION_MODE: audit
+        run: node functions/scripts/insee-collection-control.cjs
+
+      - name: Rappeler le perimetre
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Reprise nationale INSEE"
+            echo ""
+            echo "- Le declencheur est limite a l'ajout de ce workflow sur main."
+            echo "- Une collecte active empeche le redemarrage concurrent."
+            echo "- Les etablissements sont fusionnes par SIRET."
+            echo "- Aucun recalcul ni publication automatique de vigilance."
+            echo "- Le job continuera par scheduler Firebase toutes les 5 minutes."
+          } >> "$GITHUB_STEP_SUMMARY"
