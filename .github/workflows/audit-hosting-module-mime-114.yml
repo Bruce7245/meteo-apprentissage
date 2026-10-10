@@ -10,12 +10,24 @@ on:
       - scripts/test-hosting-assets.mjs
       - scripts/verify-hosting-build.mjs
       - firebase.json
+      - vite.config.js
+      - departement-unpublished.html
+      - scripts/generate-department-seo.mjs
+      - scripts/check-department-seo-live.mjs
+      - scripts/create-seo-hosting-fixture.mjs
+      - scripts/test-department-seo.mjs
       - .github/workflows/audit-hosting-module-mime-114.yml
   pull_request:
     paths:
       - scripts/check-hosting-assets.mjs
       - scripts/test-hosting-assets.mjs
       - firebase.json
+      - vite.config.js
+      - departement-unpublished.html
+      - scripts/generate-department-seo.mjs
+      - scripts/check-department-seo-live.mjs
+      - scripts/create-seo-hosting-fixture.mjs
+      - scripts/test-department-seo.mjs
       - .github/workflows/audit-hosting-module-mime-114.yml
   workflow_dispatch:
 
@@ -57,10 +69,12 @@ jobs:
         run: |
           npm ci
           npm run build
+          node --test scripts/test-department-seo.mjs
+          node scripts/create-seo-hosting-fixture.mjs
           node scripts/verify-hosting-build.mjs
       - name: Check Firebase rewrites and MIME locally without production credentials
         run: |
           npx --yes firebase-tools@latest emulators:exec \
             --project demo-apprentifr-hosting \
             --only hosting \
-            'HOSTING_URL=http://127.0.0.1:5000 HOSTING_STRICT=1 node scripts/check-hosting-assets.mjs'
+            'HOSTING_URL=http://127.0.0.1:5000 HOSTING_STRICT=1 node scripts/check-hosting-assets.mjs && HOSTING_URL=http://127.0.0.1:5000 node scripts/check-department-seo-live.mjs'
