@@ -1,0 +1,47 @@
+name: Audit territorial SEO public read-only (#127)
+
+on:
+  push:
+    branches:
+      - feat/seo-departments-127
+    paths:
+      - scripts/generate-department-seo.mjs
+      - .github/workflows/audit-seo-public-read-127.yml
+  pull_request:
+    paths:
+      - scripts/generate-department-seo.mjs
+      - .github/workflows/audit-seo-public-read-127.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Inspect published public bulletins (read only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install Firebase public client
+        run: npm ci
+      - name: Verify Firestore public publication reads without secrets
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { loadPublicVigilanceDocuments, selectSeoDepartments } from './scripts/generate-department-seo.mjs';
+          const { index, documents } = await loadPublicVigilanceDocuments();
+          const selected = selectSeoDepartments(index, documents);
+          console.log(JSON.stringify({
+            sourceDate: index.latestDate,
+            indexCount: index.departments?.length ?? 0,
+            dailyDocuments: documents.length,
+            seoEligible: selected.length,
+            eligibleCodes: selected.map(item => item.code),
+          }, null, 2));
+          NODE
