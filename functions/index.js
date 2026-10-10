@@ -10462,11 +10462,18 @@ exports.startInseeNationalBackgroundJobHttp = onRequest(
 
       const selected = departments.slice(startPosition - 1, endPosition);
 
-      await db
-        .collection(INSEE_BACKGROUND_JOB_COLLECTION)
-        .doc(INSEE_BACKGROUND_JOB_ID)
-        .set(
-          {
+      const jobRef = db.collection(INSEE_BACKGROUND_JOB_COLLECTION).doc(INSEE_BACKGROUND_JOB_ID);
+
+      try {
+        await db.runTransaction(async (transaction) => {
+          const existing = await transaction.get(jobRef);
+          if (existing.exists && existing.data()?.status === 'running') {
+            const activeJobError = new Error('Collecte INSEE deja active');
+            activeJobError.code = 'INSEE_JOB_ALREADY_RUNNING';
+            throw activeJobError;
+          }
+
+          transaction.set(jobRef, {
             status: 'running',
             startPosition,
             endPosition,
@@ -10491,9 +10498,15 @@ exports.startInseeNationalBackgroundJobHttp = onRequest(
             errorMessage: null,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          { merge: false }
-        );
+          });
+        });
+      } catch (error) {
+        if (error.code === 'INSEE_JOB_ALREADY_RUNNING') {
+          response.status(409).json({ ok: false, error: 'Collecte INSEE deja active' });
+          return;
+        }
+        throw error;
+      }
 
       response.json({
         ok: true,
