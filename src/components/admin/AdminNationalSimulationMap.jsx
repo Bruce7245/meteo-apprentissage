@@ -2,6 +2,8 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import franceDepartments from '@svg-maps/france.departments';
 import {FiInfo, FiRefreshCw, FiShield, FiTarget} from 'react-icons/fi';
 import {getAdminMonthlySettings} from '../../services/adminMonthlySettingsService.js';
+import {getLatestPublicVigilanceIndex} from '../../services/vigilanceService.js';
+import {buildAdminPublishedComparisonMap} from '../../utils/adminPublishedComparisonMap.mjs';
 import {
   ADMIN_SIMULATION_BANDS,
   ADMIN_SIMULATION_BAND_LEGEND,
@@ -141,8 +143,134 @@ function NationalMapInspector({department,model}) {
   );
 }
 
+
+/**
+ * The same metropolitan SVG, geographic extent and DROM list is drawn twice.
+ * Only the origin of the color differs. Department selection is synchronized.
+ */
+function ComparisonFranceMap({
+  kind,title,subtitle,period,byCode,available,summary,
+  selectedCode,onSelect,onHover,onLeave,footer,
+}) {
+  const getColor = department => kind === 'published'
+    ? department?.color || 'unknown'
+    : department?.color?.key || 'unknown';
+  const getLabel = (department,code) => {
+    const name = department?.name || 'Département ' + code;
+    if (kind === 'published') {
+      return name + ' (' + code + ') : ' + (department?.label || 'Indéterminé') +
+        (department?.defaultGreen ? ' — vert par défaut, aucune vigilance publiée.' : ' — niveau publié.');
+    }
+    return name + ' (' + code + ') : ' +
+      (department?.color?.label || 'Indéterminé') + ', ' +
+      scoreLabel(department) + ' — simulation non publiée.';
+  };
+
+  return (
+    <article className="admin-nmap-comparison-card"
+      aria-label={title}>
+      <header className="admin-nmap-comparison-heading">
+        <div>
+          <span className="admin-nmap-kicker">{kind === 'published'
+            ? 'Méthode actuelle · Publiée'
+            : 'Nouvelle méthode · Expérimentale'}</span>
+          <h3>{title}</h3>
+          <p>{subtitle}</p>
+        </div>
+        <span className={'admin-nmap-comparison-mode admin-nmap-comparison-mode--' + kind}>
+          {kind === 'published' ? 'En production' : 'Simulation'}
+        </span>
+      </header>
+      <p className="admin-nmap-comparison-date">{period}</p>
+      <svg className="admin-nmap-svg admin-nmap-comparison-svg"
+        viewBox={franceDepartments.viewBox} role="group"
+        aria-label={'Carte interactive : ' + title}>
+        <title>{title}</title>
+        <desc>Choisir un département sur l'une des deux cartes
+          met à jour leur comparaison commune.</desc>
+        {franceDepartments.locations.map(location => {
+          const code = String(location.id).toUpperCase();
+          const department = byCode.get(code);
+          const color = getColor(department);
+          const label = getLabel(department,code);
+          return (
+            <a key={code} href="#admin-nmap-inspector" aria-label={label}
+              aria-current={selectedCode === code ? 'true' : undefined}
+              onClick={event => {
+                event.preventDefault();
+                onSelect(code);
+              }}
+              onFocus={() => onHover(code)}
+              onBlur={onLeave}
+              onMouseEnter={() => onHover(code)}
+              onMouseLeave={onLeave}>
+              <path d={location.path}
+                className={'admin-nmap-path admin-nmap-path--' + color +
+                  (selectedCode === code ? ' admin-nmap-path--selected' : '')}>
+                <title>{label}</title>
+              </path>
+            </a>
+          );
+        })}
+      </svg>
+      <div className="admin-nmap-compact-drom">
+        <strong>Outre-mer</strong>
+        <div>
+          {OVERSEAS_CODES.map(code => {
+            const department = byCode.get(code);
+            const color = getColor(department);
+            return (
+              <button key={code} type="button"
+                className={'admin-nmap-compact-drom-item' +
+                  (selectedCode === code ? ' admin-nmap-compact-drom-item--selected' : '')}
+                onClick={() => onSelect(code)}
+                onFocus={() => onHover(code)}
+                onBlur={onLeave}
+                onMouseEnter={() => onHover(code)}
+                onMouseLeave={onLeave}
+                aria-label={getLabel(department,code)}>
+                <span className={'admin-nmap-level-dot admin-nmap-level-dot--' + color}
+                  aria-hidden="true" />
+                {code} · {department?.name || 'Département ' + code}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="admin-nmap-map-card-counts"
+        aria-label={'Répartition des couleurs : ' + title}>
+        {COLORS.map(color => (
+          <span key={color.key}>
+            <span className={'admin-nmap-level-dot admin-nmap-level-dot--' + color.key}
+              aria-hidden="true" />
+            {color.label} : <b>{available ? summary[color.key] : '—'}</b>
+          </span>
+        ))}
+      </div>
+      <p className="admin-nmap-comparison-footer">{footer}</p>
+    </article>
+  );
+}
+
+function PublishedLevelPill({department}) {
+  const key = department?.color || 'unknown';
+  return (
+    <span className={'admin-nmap-published-level admin-nmap-published-level--'+key}
+      title={department?.defaultGreen
+        ? 'Vert par défaut : aucune vigilance explicitement publiée'
+        : 'Niveau reproduit depuis la carte publique'}>
+      <span className={'admin-nmap-level-dot admin-nmap-level-dot--'+key}
+        aria-hidden="true" />
+      {department?.label || 'Indéterminé'}
+      {department?.defaultGreen ? ' (défaut)' : ''}
+    </span>
+  );
+}
+
 export default function AdminNationalSimulationMap({month,onMonthChange}) {
   const [payload,setPayload] = useState(null);
+  const [publishedIndex,setPublishedIndex] = useState(null);
+  const [publishedError,setPublishedError] = useState('');
   const [error,setError] = useState('');
   const [loading,setLoading] = useState(false);
   const [selectedCode,setSelectedCode] = useState('');
@@ -153,6 +281,8 @@ export default function AdminNationalSimulationMap({month,onMonthChange}) {
   useEffect(() => {
     generation.current += 1;
     setPayload(null);
+    setPublishedIndex(null);
+    setPublishedError('');
     setError('');
     setLoading(false);
     setSelectedCode('');
@@ -163,8 +293,11 @@ export default function AdminNationalSimulationMap({month,onMonthChange}) {
   const model = useMemo(() => buildAdminNationalSimulationMap(
     payload?.month === month ? payload : null,
   ),[payload,month]);
+  const publishedModel = useMemo(() =>
+    buildAdminPublishedComparisonMap(publishedIndex),[publishedIndex]);
   const activeCode = hoveredCode || selectedCode;
   const activeDepartment = model.byCode.get(activeCode) || null;
+  const activePublished = publishedModel.byCode.get(activeCode) || null;
   const previewBasis = model.previewBasis;
   const unavailableReason = previewBasis?.reason === 'NO_SHARED_REFERENCE_WINDOW'
     ? previewBasis.explanation
@@ -179,23 +312,35 @@ export default function AdminNationalSimulationMap({month,onMonthChange}) {
     const ticket = ++generation.current;
     setLoading(true);
     setError('');
+    setPublishedError('');
     setPayload(null);
+    setPublishedIndex(null);
     setHoveredCode('');
-    try {
-      // Intentionally no ROME or focused department: a genuinely national,
-      // all-occupation reference, unlike the individual profession cards below.
-      const response = await getAdminMonthlySettings(month);
-      if (response?.scope !== 'all_offers_department') {
-        throw new Error('Périmètre inattendu : la carte exige tous les métiers.');
-      }
-      if (ticket !== generation.current) return;
-      setPayload(response);
-    } catch (caught) {
-      if (ticket !== generation.current) return;
-      setError(caught?.message || 'Simulation nationale indisponible.');
-    } finally {
-      if (ticket === generation.current) setLoading(false);
+
+    // Two independent sources: a failure of one must not paint the other.
+    const [published,experimental] = await Promise.allSettled([
+      getLatestPublicVigilanceIndex(),
+      getAdminMonthlySettings(month),
+    ]);
+    if (ticket !== generation.current) return;
+
+    if (published.status === 'fulfilled' && published.value?.exists === true) {
+      setPublishedIndex(published.value);
+    } else {
+      setPublishedError(published.status === 'rejected'
+        ? published.reason?.message || 'Impossible de charger la carte actuelle.'
+        : 'Aucun index de vigilance actuellement publié.');
     }
+
+    if (experimental.status === 'fulfilled' &&
+        experimental.value?.scope === 'all_offers_department') {
+      setPayload(experimental.value);
+    } else {
+      setError(experimental.status === 'rejected'
+        ? experimental.reason?.message || 'Simulation nationale indisponible.'
+        : 'Périmètre inattendu : la simulation exige tous les métiers.');
+    }
+    setLoading(false);
   }
 
   const colorCounts = model.summary;
@@ -210,10 +355,10 @@ export default function AdminNationalSimulationMap({month,onMonthChange}) {
     <section className="panel admin-nmap-panel" aria-labelledby="admin-nmap-title">
       <header className="admin-nmap-header">
         <div>
-          <p className="admin-nmap-kicker">Administration · Nouveau moteur expérimental</p>
-          <h2 id="admin-nmap-title">Carte nationale simulée</h2>
-          <p>101 départements · Tous les métiers · Référence nationale du nouveau modèle.
-            Aucune incidence sur la carte publiée.</p>
+          <p className="admin-nmap-kicker">Administration · Comparaison des méthodes</p>
+          <h2 id="admin-nmap-title">Les deux cartes nationales, côte à côte</h2>
+          <p>À gauche, la vigilance actuellement publiée. À droite, la méthode
+            pondérée expérimentale. Même territoire, mais périodes et seuils différents.</p>
         </div>
         <span className="admin-nmap-label">Simulation non publiée</span>
       </header>
@@ -236,16 +381,20 @@ export default function AdminNationalSimulationMap({month,onMonthChange}) {
         <button type="button" className="primary-button admin-nmap-run"
           onClick={simulate} disabled={loading}>
           <FiRefreshCw aria-hidden="true" />
-          {loading ? 'Calcul en cours…' :
-            model.available ? 'Actualiser la carte' : 'Simuler la carte nationale'}
+          {loading ? 'Chargement en cours…' :
+            model.available || publishedModel.available
+              ? 'Actualiser la comparaison' : 'Simuler et comparer les cartes'}
         </button>
       </div>
 
       {loading && <p className="admin-nmap-message" role="status">
-        Analyse des relevés disponibles et de la référence nationale…
+        Chargement de la carte publiée et calcul de la nouvelle méthode…
+      </p>}
+      {publishedError && <p className="admin-nmap-message admin-nmap-message--error" role="alert">
+        Carte actuelle : {publishedError} Elle reste grise tant que la publication ne peut être vérifiée.
       </p>}
       {error && <p className="admin-nmap-message admin-nmap-message--error" role="alert">
-        {error} La carte ne reçoit aucune couleur par défaut.
+        Nouveau modèle : {error} La carte expérimentale reste grise.
       </p>}
 
       <div className="admin-nmap-reliability">
@@ -273,7 +422,7 @@ export default function AdminNationalSimulationMap({month,onMonthChange}) {
         </div>
       </div>
 
-      <div className="admin-nmap-summary" aria-label="Répartition des couleurs expérimentales">
+      <div className="admin-nmap-summary" aria-label="Répartition des couleurs du nouveau modèle">
         {COLORS.map(color => (
           <div className={'admin-nmap-summary-item admin-nmap-summary--' + color.key}
             key={color.key}>
@@ -285,86 +434,121 @@ export default function AdminNationalSimulationMap({month,onMonthChange}) {
         ))}
       </div>
 
-      <div className="admin-nmap-legend" aria-label="Seuils provisoires de la simulation">
+      <div className="admin-nmap-legend" aria-label="Légendes des deux méthodes">
+        <p><FiInfo aria-hidden="true"/> <strong>Carte actuelle :</strong> niveaux
+          de vigilance réellement publiés. Un département vert sans publication
+          explicite est affiché « vert par défaut », comme sur le site public.
+          {publishedModel.available && publishedModel.latestDate
+            ? ' Dernière publication : ' + publishedModel.latestDate + '.'
+            : ''}
+        </p>
         <p><FiInfo aria-hidden="true"/> <strong>Lecture des couleurs :</strong> {ADMIN_SIMULATION_BAND_LEGEND}</p>
         <p><strong>Gris :</strong> pas de résultat défendable. Une couleur « densité seule »
           ne signifie pas qu'un score pondéré complet existe. Un indice plus élevé
           indique une situation relativement plus favorable, pas une probabilité d'obtenir un contrat.</p>
       </div>
 
-      <div className="admin-nmap-layout">
-        <div className="admin-nmap-map-container">
-          <svg className="admin-nmap-svg" viewBox={franceDepartments.viewBox}
-            role="group" aria-label="Carte de France interactive des indices départementaux simulés">
-            <title>Carte nationale simulée de l'apprentissage — nouvelle méthode</title>
-            <desc>Les départements sans indice disponible sont gris.
-              Sélectionne un département pour connaître sa couleur et ses indicateurs.</desc>
-            {franceDepartments.locations.map(location => {
-              const code = String(location.id).toUpperCase();
-              const department = model.byCode.get(code);
-              const key = department?.color.key || 'unknown';
-              const label = (department?.name || location.name) + ' (' + code + ') : ' +
-                (department?.color.label || 'Indéterminé') + ', ' +
-                (department ? scoreLabel(department) : 'non calculé') +
-                ' — simulation uniquement';
-              return (
-                <a key={code} href="#admin-nmap-inspector" aria-label={label}
-                  aria-current={selectedCode === code ? 'true' : undefined}
-                  onClick={event => {
-                    event.preventDefault();
-                    setSelectedCode(code);
-                    setHoveredCode('');
-                  }}
-                  onFocus={() => setHoveredCode(code)}
-                  onBlur={() => setHoveredCode('')}
-                  onMouseEnter={() => setHoveredCode(code)}
-                  onMouseLeave={() => setHoveredCode('')}>
-                  <path d={location.path}
-                    className={'admin-nmap-path admin-nmap-path--' + key +
-                      (selectedCode === code ? ' admin-nmap-path--selected' : '')}>
-                    <title>{label}</title>
-                  </path>
-                </a>
-              );
-            })}
-          </svg>
-          <p className="admin-nmap-map-caption">{statusNote}</p>
 
-          <div className="admin-nmap-overseas" aria-label="Départements d'outre-mer">
-            <h3>Outre-mer</h3>
-            <div>
-              {OVERSEAS_CODES.map(code => {
-                const department = model.byCode.get(code);
-                return (
-                  <button type="button" key={code}
-                    className={'admin-nmap-overseas-button' +
-                      (selectedCode === code ? ' admin-nmap-overseas-button--selected' : '')}
-                    onClick={() => {setSelectedCode(code);setHoveredCode('');}}>
-                    <span>{code} · {department?.name}</span>
-                    <AdminSimulationColorBadge score={department?.scoreRecord} compact />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+      <div className="admin-nmap-comparison-grid"
+        aria-label="Comparaison de la carte actuelle et du nouveau modèle">
+        <ComparisonFranceMap
+          kind="published"
+          title="Carte nationale actuelle"
+          subtitle="Vigilances du moteur actuellement utilisé sur le site public"
+          period={publishedModel.latestDate
+            ? 'Publication du ' + publishedModel.latestDate
+            : 'Publication non chargée'}
+          available={publishedModel.available}
+          byCode={publishedModel.byCode}
+          summary={publishedModel.summary}
+          selectedCode={selectedCode}
+          onSelect={code => {setSelectedCode(code);setHoveredCode('');}}
+          onHover={setHoveredCode}
+          onLeave={() => setHoveredCode('')}
+          footer={publishedModel.available
+            ? publishedModel.summary.defaultGreen +
+                ' département(s) verts par défaut faute de vigilance explicite. ' +
+                'Couleurs officielles inchangées.'
+            : 'Les couleurs restent grises avant lecture de la publication.'}
+        />
+        <ComparisonFranceMap
+          kind="experimental"
+          title="Nouvelle carte nationale simulée"
+          subtitle="Indice pondéré, ou provisoire sur journées communes"
+          period={model.available
+            ? 'Mois étudié : ' + model.month +
+              (model.isProvisional ? ' · Provisoire' : ' · Expérimental')
+            : 'Simulation non chargée'}
+          available={model.available}
+          byCode={model.byCode}
+          summary={model.summary}
+          selectedCode={selectedCode}
+          onSelect={code => {setSelectedCode(code);setHoveredCode('');}}
+          onHover={setHoveredCode}
+          onLeave={() => setHoveredCode('')}
+          footer={statusNote}
+        />
+      </div>
+      <p className="admin-nmap-comparison-caveat">
+        <FiInfo aria-hidden="true"/>
+        Les couleurs des deux cartes ne reposent pas sur les mêmes seuils ni
+        nécessairement sur les mêmes dates. Toute différence est une piste
+        d'analyse, pas une modification de vigilance publiée.
+      </p>
 
-        <aside className="admin-nmap-inspector" id="admin-nmap-inspector" aria-live="polite">
-          <label htmlFor="admin-nmap-department">Département à examiner
+      <div className="admin-nmap-inspector-layout" id="admin-nmap-inspector">
+        <section className="admin-nmap-compare-inspector"
+          aria-label="Niveaux comparés pour le département choisi" aria-live="polite">
+          <label htmlFor="admin-nmap-department">Département à comparer
             <select id="admin-nmap-department" value={selectedCode}
               onChange={event => {
                 setSelectedCode(event.target.value);
                 setHoveredCode('');
               }}>
-              <option value="">Sélectionner</option>
+              <option value="">Sélectionner un département</option>
               {DEPARTMENT_CODES.map(code => {
                 const department = model.byCode.get(code);
+                const published = publishedModel.byCode.get(code);
                 return <option key={code} value={code}>
-                  {code} — {department?.name}
+                  {code} — {department?.name || published?.name}
                 </option>;
               })}
             </select>
           </label>
+          {!activeCode ? (
+            <div className="admin-nmap-inspector-placeholder">
+              <FiTarget aria-hidden="true" />
+              <strong>Sélectionner un département</strong>
+              <p>Survolez ou cliquez sur l'une des cartes : la sélection
+                sera identique sur les deux cartes.</p>
+            </div>
+          ) : (
+            <>
+              <p className="admin-nmap-comparison-selected-name">
+                {activeCode} · {activeDepartment?.name || activePublished?.name}
+              </p>
+              <div className="admin-nmap-paired-levels">
+                <div>
+                  <span>Carte actuelle</span>
+                  <PublishedLevelPill department={activePublished} />
+                  <small>{activePublished?.defaultGreen
+                    ? 'Vert par défaut, pas de vigilance explicitement publiée.'
+                    : publishedModel.latestDate
+                      ? 'État publié le ' + publishedModel.latestDate
+                      : 'Source non chargée.'}</small>
+                </div>
+                <div>
+                  <span>Nouvelle carte</span>
+                  <AdminSimulationColorBadge score={activeDepartment?.scoreRecord} />
+                  <strong>{scoreLabel(activeDepartment)}</strong>
+                  <small>{activeDepartment?.color.detail ||
+                    'Aucun score encore disponible.'}</small>
+                </div>
+              </div>
+            </>
+          )}
+        </section>
+        <aside className="admin-nmap-inspector" aria-live="polite">
           <NationalMapInspector department={activeDepartment} model={model} />
         </aside>
       </div>
@@ -389,7 +573,8 @@ export default function AdminNationalSimulationMap({month,onMonthChange}) {
             <thead>
               <tr>
                 <th scope="col">Département</th>
-                <th scope="col">Couleur simulée</th>
+                <th scope="col">Carte actuelle</th>
+                <th scope="col">Nouvelle carte simulée</th>
                 <th scope="col">Score ou indice</th>
                 <th scope="col">Qualité</th>
                 <th scope="col">Jours relevés</th>
@@ -407,6 +592,10 @@ export default function AdminNationalSimulationMap({month,onMonthChange}) {
                       {department.code} · {department.name}
                     </button>
                   </th>
+                  <td>
+                    <PublishedLevelPill department={
+                      publishedModel.byCode.get(department.code)} />
+                  </td>
                   <td><AdminSimulationColorBadge
                     score={department.scoreRecord} compact /></td>
                   <td>{scoreLabel(department)}</td>
@@ -421,7 +610,8 @@ export default function AdminNationalSimulationMap({month,onMonthChange}) {
       </details>
 
       <p className="admin-nmap-disclaimer">
-        <strong>Simulation interne.</strong> La carte représente une estimation
+        <strong>Comparaison interne.</strong> La carte de gauche reprend
+        la publication actuelle, celle de droite représente une estimation
         statistique susceptible d'évoluer avec la collecte, la complétude des
         dénominateurs et la calibration des seuils. Les coefficients actuels
         viennent du brouillon Admin ; le correcteur saisonnier reste neutre
