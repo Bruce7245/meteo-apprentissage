@@ -1126,3 +1126,28 @@
     width: 100%;
   }
 }
+
+/* Pilotage de la collecte INSEE */
+.admin-insee-job-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+.admin-insee-job-grid > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  background: var(--admin-surface-soft, #f4f7fa);
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+.admin-insee-job-grid span { font-size: .8rem; color: #526579; }
+.admin-insee-job-grid strong { font-size: 1.25rem; color: #102b4c; overflow-wrap: anywhere; }
+.admin-insee-progress { height: 11px; border-radius: 999px; overflow: hidden; background: #e4eaf1; }
+.admin-insee-progress > div { height: 100%; background: #287ca7; transition: width .3s ease; }
+.admin-insee-job-footnote { margin: 12px 0 0; font-size: .85rem; color: #53657a; line-height: 1.6; }
+@media (max-width: 760px) { .admin-insee-job-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .admin-insee-job-grid { grid-template-columns: 1fr; } }
