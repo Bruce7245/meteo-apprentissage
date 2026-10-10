@@ -47,6 +47,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Verify scrollable occupation catalogue layout
+        run: node --test scripts/test-editorial-catalogue-scroll.mjs
+
       - name: Verify Vite modules and Hosting safeguards
         run: |
           node --test scripts/test-hosting-assets.mjs
