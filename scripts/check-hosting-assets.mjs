@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
 const DEFAULT_SITE = 'https://meteo-apprentissage.web.app';
 const DEFAULT_ROUTES = ['/', '/admin/entreprises', '/admin/stats/metiers'];
@@ -112,7 +113,7 @@ async function main() {
   if (!report.ok) process.exitCode = 1;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === fileURLToPath(new URL('file://' + process.argv[1].replace(/\\/g, '/')))) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   main().catch(error => {
     console.error('Audit Hosting impossible:', error.message);
     process.exitCode = 1;
