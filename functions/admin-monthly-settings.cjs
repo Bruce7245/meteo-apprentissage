@@ -3,7 +3,7 @@
 const {authenticateAdminRequest} = require('./lib/admin-auth.cjs');
 const {isWrittenCompleteImport} = require('./lib/insee-collection-state.cjs');
 const {
-  MONTH_RE, DEPS, monthShift, monthDays, nonNegative, normalizeDailyDepartment,
+  MONTH_RE, ROME_RE, DEPS, monthShift, monthDays, nonNegative, normalizeDailyDepartment,
   calculateMonth, compare, checkSeasonality,
 } = require('./lib/admin-monthly-settings.cjs');
 
@@ -190,9 +190,10 @@ async function saveScoreWeights({input, db, admin, response, FieldValue}) {
 // Do not scan 90 calendar days if Firestore has only a week of snapshots.
 // A small, bounded in-memory cache avoids repeating thousands of reads when
 // an administrator switches tabs or refreshes a month.
-async function readMonth(db, month, availableDates, today) {
+async function readMonth(db, month, availableDates, today, romeCode = null) {
   const now = Date.now();
-  const cached = MONTH_CACHE.get(month);
+  const cacheKey = month + ':' + (romeCode || 'all');
+  const cached = MONTH_CACHE.get(cacheKey);
   if (cached && cached.expiresAt > now) return cached.rows;
 
   const dates = monthDays(month).filter(date =>
@@ -207,7 +208,7 @@ async function readMonth(db, month, availableDates, today) {
       const departments = new Map();
       for (const doc of snapshot.docs) {
         if (!DEPS.includes(doc.id)) continue;
-        const row = normalizeDailyDepartment(doc.data());
+        const row = normalizeDailyDepartment(doc.data(), romeCode);
         if (row) departments.set(doc.id, row);
       }
       rows.set(date, departments);
@@ -215,7 +216,7 @@ async function readMonth(db, month, availableDates, today) {
   });
   await Promise.all(workers);
   const expiresAt = now + (month === today.slice(0, 7) ? 5 : 30) * 60_000;
-  MONTH_CACHE.set(month, {rows, expiresAt});
+  MONTH_CACHE.set(cacheKey, {rows, expiresAt});
   while (MONTH_CACHE.size > CACHE_LIMIT) MONTH_CACHE.delete(MONTH_CACHE.keys().next().value);
   return rows;
 }
@@ -256,6 +257,11 @@ function employerMap(importSnap, statsSnap, nafIndexSnap) {
 async function handleRead({input, ref, db, response, preview = false}) {
   const month = typeof input.month === 'string' ? input.month : '';
   const today = parisToday();
+  const romeCode = typeof input.romeCode === 'string' ? input.romeCode.trim().toUpperCase() : '';
+  if (romeCode && !ROME_RE.test(romeCode)) {
+    response.status(400).json({ok: false, error: 'Code métier ROME invalide'});
+    return;
+  }
   if (!validMonth(month, today)) {
     response.status(400).json({ok: false, error: 'Mois invalide'});
     return;
@@ -286,9 +292,9 @@ async function handleRead({input, ref, db, response, preview = false}) {
   }));
 
   const daily = await Promise.all(months.map(value =>
-    readMonth(db, value, availableDates, today)));
+    readMonth(db, value, availableDates, today, romeCode || null)));
   const results = months.map((value, index) =>
-    calculateMonth(value, daily[index], populations, employers, today));
+    calculateMonth(value, daily[index], populations, employers, today, romeCode || null));
 
   const byCode = rows => new Map(rows.map(row => [row.departmentCode, row]));
   const monthPrev = byCode(results[1]);
@@ -337,6 +343,8 @@ async function handleRead({input, ref, db, response, preview = false}) {
 
   response.status(200).json({
     ok: true, month, previousMonth, previousYear,
+    scope: romeCode ? 'rome_department' : 'all_offers_department',
+    romeCode: romeCode || null,
     departments, summary, populationReferenceYear: referenceYear,
     scoreConfig,
     scoreSimulation: {...scoring, isPreview: preview},
@@ -346,7 +354,11 @@ async function handleRead({input, ref, db, response, preview = false}) {
       reason: config.reason || '',
       version: Number(config.version || 0),
     },
-    methodology: 'Stock journalier strict moyen sur les journées validées. Comparaison mensuelle uniquement entre mois clôturés à méthodologie homogène. Comparaison indicative si la vérification du plafonnement est inconnue. Population INSEE de référence fixe.',
+    methodology: (romeCode
+      ? 'Stock moyen quotidien strict du métier ROME ' + romeCode +
+        '. Une annonce peut relever de plusieurs codes ROME. La répartition top-120 ne peut prouver une absence au-delà des 120 entrées.'
+      : 'Stock journalier strict moyen sur les journées validées.') +
+      ' Comparaison mensuelle uniquement entre mois clôturés à méthodologie homogène. Comparaison indicative si la vérification du plafonnement est inconnue. Population INSEE de référence fixe.',
   });
 }
 
