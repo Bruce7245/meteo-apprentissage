@@ -10,5 +10,11 @@ export default defineConfig({
     },
     tsconfigPaths: true,
   },
+  // Each public landing page gets its own crawlers-readable HTML document.
+  // Both pages still mount the same React application and hashed JS/CSS bundle.
+  input: {
+    main: fileURLToPath(new URL('./index.html', import.meta.url)),
+    metiers: fileURLToPath(new URL('./metiers.html', import.meta.url)),
+  },
   plugins: [react()],
 })
