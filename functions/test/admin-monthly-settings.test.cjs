@@ -1,0 +1,5 @@
+const test=require('node:test');const assert=require('node:assert/strict');const {monthShift,monthDays,calculateMonth,compare,checkSeasonality}=require('../lib/admin-monthly-settings.cjs');
+test('previous month and twelve month compare calendar',()=>{assert.equal(monthShift('2026-01',-1),'2025-12');assert.equal(monthShift('2026-03',-12),'2025-03');assert.equal(monthDays('2024-02').length,29)});
+test('partial period unavailable',()=>{const rows=calculateMonth('2026-10',new Map(),new Map(),new Map(),'2026-10-10');assert.equal(rows[0].quality,'incomplete');assert.equal(rows[0].offersPer10000Young,null)});
+test('missing and zero baseline are not percentage increases',()=>{assert.equal(compare({comparable:true,offersPer10000Young:5,population15To29:100},{comparable:true,offersPer10000Young:0,population15To29:100}),null);assert.equal(compare({comparable:false,offersPer10000Young:5},{comparable:true,offersPer10000Young:2}),null)});
+test('reject incomplete seasonality',()=>{assert.throws(()=>checkSeasonality({months:[],reason:'A detailed rationale'}))});
