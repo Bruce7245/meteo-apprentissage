@@ -1,0 +1,46 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { catalogueFromSnapshots, handleEditorialOccupationCatalogue } = require('../admin-editorial-occupation-catalog.cjs');
+const date = '2026-10-09';
+function doc(id, rows, extra = {}) {
+  return { id, data: () => ({
+    departmentCode: id, date, activeRunId: 'run', storedOffersCount: 100,
+    strictSummary: { totalOffers: 25, byRome: rows },
+    ...extra,
+  }) };
+}
+test('catalogue all positively observed codes, not five hardcoded picks', () => {
+  const result = catalogueFromSnapshots(date, [
+    doc('72', [{ code: 'D1102', offers: 4, openings: 6 }, { code: 'G1803', offers: 2, openings: 2 }]),
+    doc('59', [{ code: 'D1102', offers: 5, openings: 5 }, { code: 'A1203', offers: 1, openings: 1 }]),
+  ], new Map([['D1102', 'Boulangerie']]));
+  assert.deepEqual(result.occupations.map(x => x.romeCode), ['D1102', 'G1803', 'A1203']);
+  assert.equal(result.occupations[0].label, 'Boulangerie');
+  assert.equal(result.occupations[0].observedOffers, 9);
+  assert.equal(result.occupations[0].departments, 2);
+  assert.equal(result.coveredDepartments, 2);
+});
+test('quarantine and malformed or incoherent snapshots do not contribute', () => {
+  const result = catalogueFromSnapshots(date, [
+    doc('72', [{ code: 'D1102', offers: 10, openings: 11 }], { qualityStatus: 'quarantined' }),
+    doc('59', [{ code: 'G1803', offers: 3, openings: 3 }], { storedOffersCount: 1 }),
+    doc('75', [{ code: 'D1202', offers: 2, openings: 2 }], { date: '2026-10-08' }),
+    doc('69', [{ code: 'N1103', offers: 2, openings: 2 }]),
+  ]);
+  assert.deepEqual(result.occupations.map(x => x.romeCode), ['N1103']);
+});
+test('missing code or zero offers do not count as availability', () => {
+  const result = catalogueFromSnapshots(date, [doc('72', [
+    { code: 'D1102', offers: 0, openings: 0 },
+    { code: '<script>', offers: 2, openings: 2 },
+    { code: 'G1803', offers: 1, openings: 2 },
+    { code: 'G1803', offers: 1, openings: 2 },
+  ])]);
+  assert.equal(result.occupations.length, 1);
+  assert.equal(result.occupations[0].observedOffers, 1);
+});
+test('anonymous admin endpoint is rejected', async () => {
+  const response = { status(code) { this.code = code; return this; }, json(data) { this.payload = data; }, set() {} };
+  await handleEditorialOccupationCatalogue({ request: { method: 'POST', get: () => '' }, response, auth: {}, db: {} });
+  assert.equal(response.code, 401);
+});
