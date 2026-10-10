@@ -60,6 +60,8 @@ jobs:
           node --test scripts/test-editorial-catalogue-scroll.mjs
           npm run build
           test -s dist/index.html
+          test -s dist/metiers.html
+          node --test scripts/test-seo-pages.mjs
           node --test scripts/test-hosting-assets.mjs
           node scripts/verify-hosting-build.mjs
 
@@ -96,6 +98,22 @@ jobs:
       - name: Validate served JavaScript and stylesheet MIME
         shell: bash
         run: HOSTING_STRICT=1 node scripts/check-hosting-assets.mjs
+
+      - name: Check published SEO pages and admin robots policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          site="https://meteo-apprentissage.web.app"
+          curl --fail --silent --show-error --location --max-time 30 "$site/sitemap.xml" |
+            grep -Fq '<loc>https://apprentifr.fr/metiers</loc>'
+          curl --fail --silent --show-error --location --max-time 30 "$site/robots.txt" |
+            grep -Fq 'Sitemap: https://apprentifr.fr/sitemap.xml'
+          curl --fail --silent --show-error --location --max-time 30 "$site/" |
+            grep -Fq '<link rel="canonical" href="https://apprentifr.fr/"'
+          curl --fail --silent --show-error --location --max-time 30 "$site/metiers" |
+            grep -Fq '<link rel="canonical" href="https://apprentifr.fr/metiers"'
+          curl --fail --silent --show-error --location --max-time 30 "$site/admin" --head |
+            grep -iq '^x-robots-tag: noindex, nofollow'
 
       - name: Record production scope
         if: always()
