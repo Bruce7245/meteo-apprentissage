@@ -59,6 +59,7 @@ jobs:
           npm run test:canva-prompt
           node --test scripts/test-editorial-catalogue-scroll.mjs
           npm run build
+          node --test scripts/test-route-code-splitting.mjs
           test -s dist/index.html
           test -s dist/metiers.html
           node --test scripts/test-seo-pages.mjs

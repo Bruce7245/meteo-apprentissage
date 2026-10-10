@@ -3,9 +3,6 @@ import ReactDOM from 'react-dom/client';
 import { ChakraProvider, defaultSystem } from '@chakra-ui/react';
 import App from './App.jsx';
 import './App.css';
-import './admin-console.css';
-import './admin-console-mobile.css';
-import './admin-console-pages.css';
 
 // Faceted ROME and sector URLs are useful for visitors but do not yet have
 // dedicated, stable SEO content. Keep the base pages as canonical targets.

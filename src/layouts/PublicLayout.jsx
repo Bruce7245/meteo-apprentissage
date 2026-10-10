@@ -79,6 +79,10 @@ export default function PublicLayout({ children }) {
               className="public-footer-brand-image"
               src="/apprenti_fr_BP.png"
               alt="ApprentiFR"
+              width={1366}
+              height={768}
+              loading="lazy"
+              decoding="async"
             />
           </div>
           <p className="public-footer-note">
