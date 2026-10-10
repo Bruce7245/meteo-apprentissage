@@ -243,6 +243,16 @@ export function buildAdminModelValidationAudit(experimentalPayload, publishedInd
   if (valid && duplicateRows.size + duplicateScores.size > 0) {
     guardrails.push('Doublons détectés dans la réponse statistique.');
   }
+  if (valid && scoreSimulation?.scores?.some(score =>
+    score.seasonalityFactorApplied !== undefined &&
+    score.seasonalityFactorApplied !== 1)) {
+    guardrails.push('Au moins un score utilise un correcteur saisonnier non neutre : vérifier la méthode.');
+  }
+  if (valid && counts.weighted > 0 &&
+    numeric(reference?.eligibleDepartments) &&
+    reference.eligibleDepartments < 75) {
+    guardrails.push('Moins de 75 départements dans la référence nationale de scores pondérés.');
+  }
 
   return {
     version: AUDIT_VERSION,
