@@ -35,9 +35,9 @@ jobs:
       - name: Read job and department progress
         working-directory: functions
         run: |
-          node <<'NODE'
-          const { getApps, initializeApp } = require('firebase-admin/app');
-          const { getFirestore } = require('firebase-admin/firestore');
+          node --input-type=module <<'NODE'
+          import { getApps, initializeApp } from 'firebase-admin/app';
+          import { getFirestore } from 'firebase-admin/firestore';
           if (!getApps().length) initializeApp({projectId:'meteo-apprentissage'});
           const db = getFirestore();
           const now = new Date();
