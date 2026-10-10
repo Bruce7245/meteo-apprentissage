@@ -153,6 +153,7 @@ export default function AdminSettingsPage() {
           <h1>Paramétrage</h1>
           <p>Indicateurs territoriaux, saisonnalité et évolutions mensuelles.</p>
         </div>
+        <a className="admin-detail-button" href="/admin/simulation">Simulation →</a>
       </section>
 
       <nav className="settings-tabs" aria-label="Sections du paramétrage">
