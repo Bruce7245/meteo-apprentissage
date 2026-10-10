@@ -1,0 +1,93 @@
+name: Diagnostic INSEE national lecture seule #114
+
+on:
+  push:
+    branches:
+      - fix/insee-scheduler-stall-114
+    paths:
+      - .github/workflows/diagnose-insee-stall-114.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    name: Inspecter le job INSEE en production sans ecriture
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+      - name: Install functions dependencies
+        run: npm ci --prefix functions
+      - name: Authenticate Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+      - name: Read job and department progress
+        working-directory: functions
+        run: |
+          node <<'NODE'
+          const { getApps, initializeApp } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
+          if (!getApps().length) initializeApp({projectId:'meteo-apprentissage'});
+          const db = getFirestore();
+          const now = new Date();
+          const toIso = value => value && typeof value.toDate === 'function' ? value.toDate().toISOString() : null;
+          const jobSnap = await db.collection('adminJobs').doc('inseeNationalBackgroundJob').get();
+          const job = jobSnap.exists ? jobSnap.data() : null;
+          const summary = job ? {
+            status:job.status, currentPosition:job.currentPosition,
+            endPosition:job.endPosition, currentDepartmentCode:job.currentDepartmentCode,
+            lastCompletedDepartmentCode:job.lastCompletedDepartmentCode,
+            cursorPresent:Boolean(job.cursor), currentDepartmentPages:job.currentDepartmentPages,
+            totalPages:job.totalPages,totalReceived:job.totalReceived,
+            completedDepartmentsCount:job.completedDepartmentsCount,
+            lastRunSource:job.lastRunSource,lastRunPages:job.lastRunPages,
+            lastRunReceived:job.lastRunReceived,
+            lastRunDurationMs:job.lastRunDurationMs,
+            lastEvent:job.lastEvent,
+            lastEvents:job.lastEvents,
+            errorMessage:job.errorMessage?.slice(0,1800) || null,
+            retryableRateLimit:job.retryableRateLimit,
+            leaseOwnerPresent:Boolean(job.leaseOwner),
+            leaseUntilMs:job.leaseUntilMs || 0,
+            leaseExpired:job.leaseUntilMs ? job.leaseUntilMs < Date.now() : null,
+            createdAt:toIso(job.createdAt),
+            updatedAt:toIso(job.updatedAt),
+            lastHeartbeatAt:toIso(job.lastHeartbeatAt),
+            lastLeaseAt:toIso(job.lastLeaseAt),
+            errorAt:toIso(job.errorAt),
+            finishedAt:toIso(job.finishedAt),
+          } : null;
+          console.log(JSON.stringify({timeUTC:now.toISOString(),job:summary},null,2));
+          const codes = ['01','02','24','25','26','65','66','67','72','75','971'];
+          const indices = await Promise.all(codes.map(async code => {
+            const d=await db.collection('inseeDepartmentImportIndex').doc(code).get();
+            const s=await db.collection('inseeDepartmentStats').doc(code).get();
+            const n=await db.collection('inseeDepartmentNafStatsIndex').doc(code).get();
+            const x = d.exists ? d.data() : null;
+            return {code,index:d.exists,complete:x?.complete??null,write:x?.write??null,
+              cursorAvailable:Boolean(x?.nextCursor),receivedLastPage:x?.receivedCount??null,
+              processedPagesSinceV3:x?.processedPagesSinceV3??null,
+              processedWrittenSinceV3:x?.processedWrittenSinceV3??null,
+              updatedAt:toIso(x?.updatedAt),stats:s.exists,naf:n.exists};
+          }));
+          console.log(JSON.stringify({departments:indices},null,2));
+          NODE
+      - name: Inspect scheduler errors where IAM permits
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="resumeinseenationalbackgroundjob"' \
+            --project meteo-apprentissage --freshness=3h --limit=10 \
+            --format='value(timestamp,severity,textPayload)' 2>&1 | head -n 60 || true
