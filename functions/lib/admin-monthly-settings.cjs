@@ -95,11 +95,12 @@ function calculateMonth(month, daily, populations = new Map(), employers = new M
     const complete = monthComplete && daysObserved === dates.length;
     const method = methods.size === 1 ? [...methods][0] : null;
     const homogeneous = method !== null && method !== 'unknown' && !breakDetected;
-    const comparisonReady = complete && homogeneous && !saturated;
+    const comparisonReady = complete && homogeneous && !saturated && population > 0;
     const quality = !complete ? 'incomplete'
       : !homogeneous ? 'method_change'
         : saturated ? 'saturated'
-          : capMissing ? 'indicative' : 'comparable';
+          : !(population > 0) ? 'missing_population'
+            : capMissing ? 'indicative' : 'comparable';
 
     rows.push({
       departmentCode: code,
