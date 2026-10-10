@@ -21,6 +21,7 @@ const QUALITY_LABELS = {
   incomplete: 'Mois incomplet',
   saturated: 'Plafonnement suspecté',
   method_change: 'Méthode non comparable',
+  missing_population: 'Population indisponible',
 };
 const numberFormatter = new Intl.NumberFormat('fr-FR', {maximumFractionDigits: 1});
 const percentFormatter = new Intl.NumberFormat('fr-FR', {
