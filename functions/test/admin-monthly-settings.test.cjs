@@ -168,6 +168,15 @@ test('Sirene denominator excludes dry-runs and incomplete imports', () => {
   assert.equal(map.has('73'), false);
 });
 
+test('missing population blocks normalized comparisons rather than creating a false zero', () => {
+  const row = calculateMonth('2026-04', monthInput('2026-04', 50),
+    new Map(), new Map(), '2027-05-10')
+    .find(item => item.departmentCode === '72');
+  assert.equal(row.quality, 'missing_population');
+  assert.equal(row.offersPer10000Young, null);
+  assert.equal(compare(row, result('2026-03', 40)), null);
+});
+
 test('seasonality requires 12 known levels and reason; never mutates inputs', () => {
   assert.throws(() => checkSeasonality({months: [], reason: 'A detailed rationale'}));
   assert.throws(() => checkSeasonality({months, reason: 'short'}));
