@@ -148,6 +148,13 @@ async function main() {
   const coverage = await readCoverage();
   const pending = coverage.rows.filter((row) => row.status !== 'ready');
 
+  if (
+    process.env.INSEE_COLLECTION_REQUIRE_IDLE === '1' &&
+    coverage.currentJob?.status === 'running'
+  ) {
+    throw new Error('Un job national INSEE est deja actif : preflight bloque.');
+  }
+
   const report = {
     mode: MODE,
     expectedDepartments: coverage.departments.length,
