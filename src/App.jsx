@@ -1,21 +1,28 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import PublicMapPage from './pages/public/PublicMapPage.jsx';
-import PublicDepartmentPage from './pages/public/PublicDepartmentPage.jsx';
-import PublicOccupationMapPage from './pages/public/PublicOccupationMapPage.jsx';
-import AdminHomePage from './pages/admin/AdminHomePage.jsx';
-import AdminBulletinsPage from './pages/admin/AdminBulletinsPage.jsx';
-import AdminStatsPage from './pages/admin/AdminStatsPage.jsx';
-import AdminOccupationOffersPage from './pages/admin/AdminOccupationOffersPage.jsx';
-import AdminNationalStatsPage from './pages/admin/AdminNationalStatsPage.jsx';
-import AdminPublishedMapPage from './pages/admin/AdminPublishedMapPage.jsx';
-import AdminDraftMapPage from './pages/admin/AdminDraftMapPage.jsx';
-import AdminSectorDashboardPage from './pages/admin/AdminSectorDashboardPage.jsx';
-import AdminCompaniesDashboardPage from './pages/admin/AdminCompaniesDashboardPage.jsx';
 import {
   isValidDepartmentCode,
   normalizeDepartmentCode,
 } from './utils/departmentUtils.js';
 import './App.css';
+
+// The national homepage remains eager to preserve its initial content.
+// Other routes load their code and CSS only when the visitor opens them.
+const PublicDepartmentPage = lazy(() => import('./pages/public/PublicDepartmentPage.jsx'));
+const PublicOccupationMapPage = lazy(() => import('./pages/public/PublicOccupationMapPage.jsx'));
+const AdminRoutes = lazy(() => import('./AdminRoutes.jsx'));
+
+function DeferredPage({ children }) {
+  return (
+    <Suspense fallback={
+      <main className="site-main" role="status" aria-live="polite">
+        Chargement de la page…
+      </main>
+    }>
+      {children}
+    </Suspense>
+  );
+}
 
 function normalizePath(pathname) {
   return pathname.replace(/\/{2,}/g, '/').replace(/\/+$/, '') || '/';
@@ -38,7 +45,7 @@ function App() {
   const path = normalizePath(window.location.pathname);
 
   if (path === '/') return <PublicMapPage />;
-  if (path === '/metiers') return <PublicOccupationMapPage />;
+  if (path === '/metiers') return <DeferredPage><PublicOccupationMapPage /></DeferredPage>;
 
   const departmentMatch = path.match(/^\/departement\/([^/]+)$/);
 
@@ -57,18 +64,12 @@ function App() {
       return <NotFoundPage />;
     }
 
-    return <PublicDepartmentPage departmentCode={departmentCode} />;
+    return <DeferredPage><PublicDepartmentPage departmentCode={departmentCode} /></DeferredPage>;
   }
 
-  if (path === '/admin') return <AdminHomePage />;
-  if (path === '/admin/bulletins') return <AdminBulletinsPage />;
-  if (path === '/admin/stats') return <AdminNationalStatsPage />;
-  if (path === '/admin/stats/metiers') return <AdminOccupationOffersPage />;
-  if (path === '/admin/stats/vigilance') return <AdminStatsPage />;
-  if (path === '/admin/carte-publiee') return <AdminPublishedMapPage />;
-  if (path === '/admin/carte-a-publier') return <AdminDraftMapPage />;
-  if (path === '/admin/secteurs') return <AdminSectorDashboardPage />;
-  if (path === '/admin/entreprises') return <AdminCompaniesDashboardPage />;
+  if (path === '/admin' || path.startsWith('/admin/')) {
+    return <DeferredPage><AdminRoutes path={path} /></DeferredPage>;
+  }
 
   return <NotFoundPage />;
 }
