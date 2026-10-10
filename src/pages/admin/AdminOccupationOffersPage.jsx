@@ -52,6 +52,7 @@ export default function AdminOccupationOffersPage(){
     let active=true;
     setCatalogueBusy(true);
     setCatalogueError('');
+    setCatalogue(null);
     getAdminEditorialOccupationCatalogue({days})
       .then(data=>{if(active)setCatalogue(data)})
       .catch(err=>{if(active)setCatalogueError(err?.message||'Catalogue indisponible')})
