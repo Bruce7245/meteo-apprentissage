@@ -68,23 +68,63 @@ async function loadReferenceLabels(db) {
   }).filter(([code, label]) => ROME_CODE.test(code) && label));
 }
 
+function mergeOccupationCatalogues(dailyCatalogues, labels = new Map()) {
+  const available = dailyCatalogues.filter(item => item.coveredDepartments > 0);
+  if (!available.length) {
+    return {
+      ok: true, date: null, periodStart: null, periodEnd: null,
+      coveredDepartments: 0, totalDepartments: DEPARTMENT_CODES.length,
+      occupations: [], count: 0,
+    };
+  }
+  const byCoverage = [...available].sort((a, b) =>
+    b.coveredDepartments - a.coveredDepartments || b.date.localeCompare(a.date));
+  const reference = byCoverage[0];
+  const byCode = new Map();
+
+  // One row per ROME code, using its most recent positive observation.
+  // Do not add offer totals from different dates: those are repeated snapshots.
+  for (const day of [...available].sort((a, b) => b.date.localeCompare(a.date))) {
+    for (const occupation of day.occupations) {
+      if (byCode.has(occupation.romeCode)) continue;
+      byCode.set(occupation.romeCode, {
+        ...occupation,
+        label: labels.get(occupation.romeCode) || occupation.label,
+        lastObservedDate: day.date,
+      });
+    }
+  }
+
+  const occupations = [...byCode.values()].sort((a, b) =>
+    b.observedOffers - a.observedOffers ||
+    a.label.localeCompare(b.label, 'fr') ||
+    a.romeCode.localeCompare(b.romeCode));
+  const dates = available.map(item => item.date).sort();
+  return {
+    ok: true,
+    date: reference.date,
+    periodStart: dates[0],
+    periodEnd: dates[dates.length - 1],
+    coveredDepartments: reference.coveredDepartments,
+    totalDepartments: reference.totalDepartments,
+    occupations,
+    count: occupations.length,
+    coverageNote: 'Catalogue des métiers avec offres positivement observées sur les sept derniers jours. Volume par métier pris sur sa dernière date observée, sans addition de journées. Données non exhaustives et non certifiées ; une annonce peut relever de plusieurs codes ROME.',
+  };
+}
+
 async function loadEditorialOccupationCatalogue(db, { today = parisDate() } = {}) {
   const dates = Array.from({ length: 7 }, (_, offset) => previousDate(today, offset));
   const snapshots = await Promise.all(dates.map(async date => ({
     date,
     docs: (await db.collection('dailyOfferSnapshots').doc(date).collection('departments').get()).docs,
   })));
-  const candidates = snapshots.map(({ date, docs }) => catalogueFromSnapshots(date, docs));
-  // Prefer broad territorial coverage; the latest date wins a tie.
-  candidates.sort((a, b) => b.coveredDepartments - a.coveredDepartments || b.date.localeCompare(a.date));
-  const best = candidates[0];
-  if (!best || best.coveredDepartments === 0) {
-    return { ok: true, date: null, coveredDepartments: 0, totalDepartments: DEPARTMENT_CODES.length, occupations: [], count: 0 };
+  const dailyCatalogues = snapshots.map(({ date, docs }) => catalogueFromSnapshots(date, docs));
+  if (!dailyCatalogues.some(item => item.coveredDepartments > 0)) {
+    return mergeOccupationCatalogues(dailyCatalogues);
   }
   const labels = await loadReferenceLabels(db).catch(() => new Map());
-  const source = snapshots.find(item => item.date === best.date);
-  const result = catalogueFromSnapshots(best.date, source.docs, labels);
-  return { ok: true, ...result, count: result.occupations.length, coverageNote: 'Volumes observés non exhaustifs ; une annonce peut relever de plusieurs codes ROME. Aucun total national certifié.' };
+  return mergeOccupationCatalogues(dailyCatalogues, labels);
 }
 
 async function handleEditorialOccupationCatalogue({ request, response, auth, db } = {}) {
@@ -105,4 +145,4 @@ async function handleEditorialOccupationCatalogue({ request, response, auth, db 
   }
 }
 
-module.exports = { catalogueFromSnapshots, loadEditorialOccupationCatalogue, handleEditorialOccupationCatalogue };
+module.exports = { catalogueFromSnapshots, mergeOccupationCatalogues, loadEditorialOccupationCatalogue, handleEditorialOccupationCatalogue };
