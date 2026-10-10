@@ -72,8 +72,8 @@ function computeWeights(weights) {
   return {
     density: weights.offersFoundation / 5 * weights.density,
     employers: weights.employers,
-    employerPotential: weights.employers * EMPLOYER_POTENTIAL_SHARE,
-    employerIntensity: weights.employers * EMPLOYER_INTENSITY_SHARE,
+    employerPotential: round(weights.employers * EMPLOYER_POTENTIAL_SHARE, 3),
+    employerIntensity: round(weights.employers * EMPLOYER_INTENSITY_SHARE, 3),
     trend: weights.trend,
     seasonalityReserved: weights.seasonality,
     seasonalityFactor: SEASONALITY_NEUTRAL_FACTOR,
