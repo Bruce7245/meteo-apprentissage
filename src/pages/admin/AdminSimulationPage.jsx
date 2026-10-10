@@ -2,7 +2,7 @@ import React, {useMemo, useRef, useState} from 'react';
 import {FiArrowRight, FiBarChart2, FiRepeat, FiShield, FiTrendingUp} from 'react-icons/fi';
 import AdminLayout from '../../layouts/AdminLayout.jsx';
 import OccupationSearch from '../../components/occupation/OccupationSearch.jsx';
-import {getOccupationAnalysisForRome} from '../../services/adminVigilanceModelService.js';
+import {getOccupationPublicationStats} from '../../services/adminStatsService.js';
 import {getAdminMonthlySettings} from '../../services/adminMonthlySettingsService.js';
 import {DEPARTMENT_CODES} from '../../utils/departmentUtils.js';
 import {normalizeRomeCode} from '../../utils/occupationUtils.js';
@@ -99,10 +99,11 @@ function CurrentModelCard({payload, row, error, departmentName, romeCode, hasRun
           note="Niveau de référence calculé par le moteur métier" />
         <Metric label="Observées / attendues" value={percent(ratio)}
           note="Ratio de vigilance actuelle, pas un pourcentage de candidatures" />
-        <Metric label="Confiance du modèle" value={
-          row?.confidenceScore === null || row?.confidenceScore === undefined
-            ? '—' : num(row.confidenceScore, 0) + ' / 100'
-        } note={row?.confidenceLevel || 'Non évaluée'} />
+        <Metric label="Niveau de confiance" value={
+          row?.confidenceLevel === 'high' ? 'Élevé'
+            : row?.confidenceLevel === 'medium' ? 'Modéré'
+              : row?.confidenceLevel === 'low' ? 'Faible' : '—'
+        } note="Niveau du run publié, sans score numérique inventé" />
       </div>
       <p className="admin-simulation-card-footer">
         Niveau publié : <b>{row?.publishedLevel ? getLevelLabel(row.publishedLevel) : 'non disponible'}</b>.
@@ -204,7 +205,7 @@ export default function AdminSimulationPage() {
     setError('');
     setSimulation(null);
     const results = await Promise.allSettled([
-      getOccupationAnalysisForRome(romeCode),
+      getOccupationPublicationStats(romeCode, {historyLimit: 7}),
       getAdminMonthlySettings(month, romeCode),
     ]);
     if (ticket !== version.current) return;
@@ -221,7 +222,7 @@ export default function AdminSimulationPage() {
     setRunning(false);
   }
 
-  const currentRow = simulation?.previous?.rows?.find(row =>
+  const currentRow = simulation?.previous?.ranking?.find(row =>
     row.departmentCode === simulation.selected.departmentCode) || null;
   const modernRow = simulation?.modern?.departments?.find(row =>
     row.departmentCode === simulation.selected.departmentCode) || null;
