@@ -56,7 +56,10 @@ function Indicator({label,value,note}) {
 
 function csvCell(value) {
   const str = value === null || value === undefined ? '' : String(value);
-  return /[;"\n\r]/.test(str) ? '"'+str.replace(/"/g,'""')+'"' : str;
+  // Prevent untrusted text from being interpreted as a spreadsheet formula.
+  const safe = typeof value === 'string' && /^[\s]*[=+@-]/.test(str)
+    ? "'"+str : str;
+  return /[;"\n\r]/.test(safe) ? '"'+safe.replace(/"/g,'""')+'"' : safe;
 }
 
 function exportAudit(audit) {
