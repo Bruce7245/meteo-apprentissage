@@ -115,7 +115,9 @@ test('post-deployment strict audit accepts no-store HTML and 404 for absent asse
       return fakeResponse(404, 'text/html', 'Not found');
     }
     const response = await good(url);
-    response.headers.set('Cache-Control', 'no-store');
+    response.headers.set('Cache-Control', new URL(url).pathname.startsWith('/assets/')
+      ? 'public, max-age=31536000, immutable'
+      : 'no-store');
     return response;
   };
   const report = await auditHostingAssets({
