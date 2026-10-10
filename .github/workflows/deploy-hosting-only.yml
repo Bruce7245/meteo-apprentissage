@@ -94,7 +94,7 @@ jobs:
 
       - name: Validate served JavaScript and stylesheet MIME
         shell: bash
-        run: node scripts/check-hosting-assets.mjs
+        run: HOSTING_STRICT=1 node scripts/check-hosting-assets.mjs
 
       - name: Record production scope
         if: always()
