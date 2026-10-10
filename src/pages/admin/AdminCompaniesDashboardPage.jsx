@@ -100,6 +100,12 @@ export default function AdminCompaniesDashboardPage() {
     };
   }, [reloadKey]);
 
+  useEffect(() => {
+    if (data?.job?.status !== 'running') return undefined;
+    const interval = window.setInterval(() => setReloadKey((value) => value + 1), 60000);
+    return () => window.clearInterval(interval);
+  }, [data?.job?.status]);
+
   const filteredDepartments = useMemo(() => {
     const cleanQuery = query.trim().toLocaleLowerCase('fr-FR');
     const departments = Array.isArray(data?.departments)
@@ -120,6 +126,8 @@ export default function AdminCompaniesDashboardPage() {
       ) {
         return false;
       }
+
+      if (coverage === 'pending' && department.statsAvailable && department.nafStatsAvailable && department.importComplete) return false;
 
       if (
         coverage === 'missing' &&
@@ -143,6 +151,9 @@ export default function AdminCompaniesDashboardPage() {
   }, [coverage, data?.departments, query]);
 
   const totals = data?.totals || {};
+  const job = data?.job;
+  const statusLabels = { running: 'Collecte en cours', done: 'Terminée', paused: 'En pause', error: 'Erreur', unknown: 'Indéterminé' };
+  const completion = totals.departmentsCount ? Math.round(100 * (totals.fullyReadyCount || 0) / totals.departmentsCount) : 0;
 
   return (
     <AdminLayout>
@@ -199,6 +210,38 @@ export default function AdminCompaniesDashboardPage() {
 
       {!loading && !error ? (
         <>
+          <section className="admin-console-card" aria-label="Suivi de la récolte INSEE">
+            <div className="admin-console-card-head">
+              <div>
+                <p className="admin-console-eyebrow">Collecte Sirene · Suivi national</p>
+                <h2>{job ? statusLabels[job.status] || 'Statut inconnu' : 'Aucun job national enregistré'}</h2>
+              </div>
+              <span className={'admin-console-data-status ' + (job?.status === 'running' || job?.status === 'done' ? 'is-ready' : 'is-partial')}>
+                {job?.status || 'indisponible'}
+              </span>
+            </div>
+            <div className="admin-insee-job-grid">
+              <div><span>Couverture complète</span><strong>{formatNumber(totals.fullyReadyCount)} / {formatNumber(totals.departmentsCount)}</strong></div>
+              <div><span>Départements partiels</span><strong>{formatNumber(totals.partialCount)}</strong></div>
+              <div><span>Non commencés</span><strong>{formatNumber(totals.missingCount)}</strong></div>
+              <div><span>Département traité</span><strong>{job?.currentDepartmentName || job?.currentDepartmentCode || '—'}</strong></div>
+              <div><span>Pages traitées par le job</span><strong>{job ? formatNumber(job.totalPages) : '—'}</strong></div>
+              <div><span>Enregistrements reçus</span><strong>{job ? formatNumber(job.totalReceived) : '—'}</strong></div>
+            </div>
+            <div className="admin-insee-progress" role="progressbar" aria-label="Couverture INSEE complète" aria-valuemin="0" aria-valuemax="100" aria-valuenow={completion}>
+              <div style={{ width: completion + '%' }} />
+            </div>
+            <p className="admin-insee-job-footnote">
+              {completion}% des départements prêts · Dernière activité : {formatDateTime(job?.lastHeartbeatAt || job?.updatedAt)}
+              {job?.status === 'running' ? ' · Actualisation automatique toutes les 60 secondes' : ''}
+            </p>
+            {job?.errorMessage ? <p className="admin-console-alert admin-console-alert-error">Erreur du traitement : {job.errorMessage}</p> : null}
+            <p className="admin-insee-job-footnote">
+              Les pages et enregistrements reçus mesurent l'activité du traitement et non des établissements SIRET uniques.
+              Aucune publication des vigilances n'est déclenchée ici.
+            </p>
+          </section>
+
           <section className="admin-console-overview-grid">
             <MetricCard
               label="Collectes complètes"
@@ -264,6 +307,7 @@ export default function AdminCompaniesDashboardPage() {
                   <option value="all">Toute la couverture</option>
                   <option value="ready">Couverture complète</option>
                   <option value="complete">Imports terminés</option>
+                  <option value="pending">À compléter</option>
                   <option value="missing">Non préparés</option>
                 </select>
               </label>
