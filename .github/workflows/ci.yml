@@ -50,6 +50,9 @@ jobs:
       - name: Verify SEO HTML, canonicals and Hosting routes
         run: node --test scripts/test-seo-pages.mjs
 
+      - name: Verify departmental SEO eligibility and static rendering
+        run: node --test scripts/test-department-seo.mjs
+
       - name: Verify scrollable occupation catalogue layout
         run: node --test scripts/test-editorial-catalogue-scroll.mjs
 
