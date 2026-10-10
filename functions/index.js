@@ -3,6 +3,7 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const OpenAI = require('openai');
+const { chooseDepartmentAction } = require('./lib/insee-collection-state.cjs');
 const {
   DEFAULT_FORMATION_CAPACITY,
   FORMATION_NEED_METHOD_VERSION,
@@ -10067,13 +10068,18 @@ async function inseeBackgroundUpdateJob(update) {
     );
 }
 
-async function inseeBackgroundDepartmentHasStats(departmentCode) {
-  const snapshot = await db.collection('inseeDepartmentStats').doc(departmentCode).get();
+async function inseeBackgroundGetDepartmentCoverage(departmentCode) {
+  const [importSnapshot, statsSnapshot, nafSnapshot] = await Promise.all([
+    db.collection('inseeDepartmentImportIndex').doc(departmentCode).get(),
+    db.collection('inseeDepartmentStats').doc(departmentCode).get(),
+    db.collection('inseeDepartmentNafStatsIndex').doc(departmentCode).get(),
+  ]);
 
-  if (!snapshot.exists) return false;
-
-  const data = snapshot.data() || {};
-  return Number(data.activeEmployerEstablishmentsCount || 0) > 0;
+  return {
+    importRecord: importSnapshot.exists ? importSnapshot.data() : null,
+    statsAvailable: statsSnapshot.exists,
+    nafStatsAvailable: nafSnapshot.exists,
+  };
 }
 
 async function inseeBackgroundPostDepartment({ job, departmentCode }) {
@@ -10091,6 +10097,17 @@ async function inseeBackgroundPostDepartment({ job, departmentCode }) {
       stats?.totals?.activeEmployerEstablishmentsCount ??
       stats?.activeEmployerEstablishmentsCount ??
       null,
+  });
+
+  const naf = await inseeBackgroundAdminFetch('buildInseeDepartmentNafStatsHttp', {
+    department: departmentCode,
+    write: 1,
+  });
+
+  actions.push({
+    action: 'buildInseeDepartmentNafStatsHttp',
+    ok: true,
+    nafCount: naf?.nafCount ?? null,
   });
 
   if (job.runSnapshots) {
@@ -10208,21 +10225,23 @@ async function inseeBackgroundRunOnce({ source = 'manual' } = {}) {
         lastHeartbeatAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      if (!cursor && skipExistingStats) {
-        const alreadyAggregated = await inseeBackgroundDepartmentHasStats(departmentCode);
+      if (!cursor) {
+        const coverage = await inseeBackgroundGetDepartmentCoverage(departmentCode);
+        const decision = chooseDepartmentAction({
+          ...coverage,
+          currentCursor: cursor,
+          skipExistingStats,
+        });
 
-        if (alreadyAggregated) {
-          let postActions = [];
-
-          if (job.runSnapshots || job.runCommentary) {
-            postActions = await inseeBackgroundPostDepartment({
-              job,
-              departmentCode,
-            });
-          }
+        if (decision.action === 'skip' || decision.action === 'aggregate') {
+          const postActions = decision.action === 'aggregate'
+            ? await inseeBackgroundPostDepartment({ job, departmentCode })
+            : [];
 
           events.push({
-            type: 'skip_existing_stats',
+            type: decision.action === 'skip'
+              ? 'skip_completed_import'
+              : 'aggregate_completed_import',
             position: currentPosition,
             departmentCode,
             actions: postActions,
@@ -10244,14 +10263,25 @@ async function inseeBackgroundRunOnce({ source = 'manual' } = {}) {
 
           continue;
         }
+
+        cursor = decision.cursor;
+        if (decision.resumed) {
+          events.push({
+            type: 'resume_from_import_index',
+            position: currentPosition,
+            departmentCode,
+          });
+        }
       }
 
-      const page = await inseeBackgroundAdminFetch('importInseeDepartmentPage', {
+      const page = await inseeBackgroundAdminFetch('importInseeDepartmentEstablishmentsHttp', {
         department: departmentCode,
-        nombre,
+        pageSize: nombre,
+        maxPages: 1,
+        activeOnly: 0,
         employerOnly: 1,
         write: 1,
-        cursor,
+        cursor: cursor || '*',
       });
 
       pagesThisRun += 1;
@@ -13791,34 +13821,41 @@ exports.importInseeDepartmentEstablishmentsHttp = onRequest(
         }
       }
 
-      await db.collection('inseeDepartmentImportIndex').doc(departmentCode).set(
-        {
-          departmentCode,
-          cursor: initialCursor,
-          nextCursor,
-          complete,
-          write,
-          pageSize,
-          pagesRead,
-          maxPages,
-          receivedCount,
-          keptCount,
-          writtenCount,
-          skippedCount,
-          skippedReasons,
-          employerOnly,
-          activeOnly,
-          rawIncluded: includeRaw,
-          nafCounter,
-          sectorCounter,
-          departmentCounter,
-          header: lastHeader,
-          source: IID_SOURCE,
-          schemaVersion: 'inseeDepartmentImportIndex.v2',
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
+      // A dry-run must never change the authoritative import cursor or completeness.
+      if (write) {
+        await db.collection('inseeDepartmentImportIndex').doc(departmentCode).set(
+          {
+            departmentCode,
+            cursor: initialCursor,
+            nextCursor,
+            complete,
+            write: true,
+            pageSize,
+            pagesRead,
+            maxPages,
+            receivedCount,
+            keptCount,
+            writtenCount,
+            skippedCount,
+            skippedReasons,
+            employerOnly,
+            activeOnly,
+            rawIncluded: includeRaw,
+            nafCounter,
+            sectorCounter,
+            departmentCounter,
+            header: lastHeader,
+            // These are processed operations (including retries), not distinct SIRET.
+            processedPagesSinceV3: admin.firestore.FieldValue.increment(pagesRead),
+            processedReceivedSinceV3: admin.firestore.FieldValue.increment(receivedCount),
+            processedWrittenSinceV3: admin.firestore.FieldValue.increment(writtenCount),
+            source: IID_SOURCE,
+            schemaVersion: 'inseeDepartmentImportIndex.v3',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
 
       response.json({
         ok: true,
