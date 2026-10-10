@@ -97,6 +97,7 @@ test('declines lower the trend score and missing annual series keeps score parti
   ).scores[0];
   assert.ok(declined.score < base.score);
   assert.equal(declined.components.trend, 30);
+  assert.equal(declined.activeWeights.trend, 2);
   assert.equal(declined.quality, 'partial');
 });
 
@@ -110,6 +111,22 @@ test('a changed seasonality importance does not distort results while factor is 
     one.scores.map(row => row.score),
     another.scores.map(row => row.score)
   );
+});
+
+
+test('changing the foundational offer coefficient changes the density influence but adds no extra offer subscore', () => {
+  const rows = departments();
+  rows[0].averageOffers = 200;
+  rows[0].offersPer10000Young = 20;
+  const original = simulateTerritorialScores(rows, DEFAULT_WEIGHTS).scores[0];
+  const reduced = simulateTerritorialScores(rows, {
+    ...DEFAULT_WEIGHTS,
+    offersFoundation: 2.5,
+  }).scores[0];
+  assert.ok(original.score > reduced.score);
+  assert.equal(original.activeWeights.density, 4);
+  assert.equal(reduced.activeWeights.density, 2);
+  assert.equal(original.components.density, reduced.components.density);
 });
 
 test('fewer than two distinct dimensions forbid an artificially overconfident score', () => {
