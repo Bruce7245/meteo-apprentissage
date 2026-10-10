@@ -11,6 +11,7 @@ import './AdminSimulationPage.css';
 
 const numberFormatter = new Intl.NumberFormat('fr-FR', {maximumFractionDigits: 1});
 const integerFormatter = new Intl.NumberFormat('fr-FR', {maximumFractionDigits: 0});
+const preciseFormatter = new Intl.NumberFormat('fr-FR', {maximumFractionDigits: 3});
 const percentFormatter = new Intl.NumberFormat('fr-FR', {
   style: 'percent', maximumFractionDigits: 1,
 });
@@ -24,6 +25,7 @@ const QUALITY_LABELS = {
   experimental: 'Expérimental',
   partial: 'Score partiel',
   unavailable: 'Score indisponible',
+  provisional: 'Score provisoire', 
 };
 
 function parisMonth() {
@@ -37,6 +39,14 @@ function num(value, digits = 1) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '—';
   return digits === 0 ? integerFormatter.format(n) : numberFormatter.format(n);
+}
+
+function smallRatio(value) {
+  if (value === null || value === undefined || value === '' ||
+      !Number.isFinite(Number(value))) return '—';
+  const n = Number(value);
+  if (n > 0 && n < 0.001) return '< 0,001';
+  return preciseFormatter.format(n);
 }
 
 function percent(value) {
@@ -120,6 +130,14 @@ function NewModelCard({payload, row, score, error, departmentName, romeCode, has
     population > 0 && employers !== null && employers !== undefined
   ) ? employers / population * 10000 : null;
   const weights = payload?.scoreConfig?.weights || {};
+  const preview = payload?.scoreSimulation;
+  const provisional = preview?.mode === 'provisional_admin_only';
+  const previewBasis = preview?.previewBasis;
+  const scoreReady = typeof score?.score === 'number' && Number.isFinite(score.score);
+  const previewDates = previewBasis?.sharedDays?.length || 0;
+  const scoreStatus = scoreReady && provisional
+    ? score?.quality === 'indicative' ? 'Provisoire et indicatif' : 'Score provisoire'
+    : QUALITY_LABELS[score?.quality] || 'Score indisponible';
   return (
     <article className="panel admin-simulation-card" aria-label="Nouveaux indicateurs pondérés">
       <div className="admin-simulation-card-heading">
@@ -128,12 +146,15 @@ function NewModelCard({payload, row, score, error, departmentName, romeCode, has
           <h2>Indicateurs pondérés</h2>
           <p>Lecture territoriale expérimentale à partir des stocks quotidiens moyens.</p>
         </div>
-        <span className="admin-simulation-status">{QUALITY_LABELS[score?.quality] || 'À valider'}</span>
+        <span className="admin-simulation-status">{scoreStatus}</span>
       </div>
       <div className="admin-simulation-source">
         <span><b>Périmètre :</b> {departmentName} · ROME {romeCode}</span>
         <span><b>Période :</b> {payload?.month || 'indisponible'} · {row ? row.daysObserved + '/' + row.daysExpected + ' jours' : '—'}</span>
-        <span><b>Statut :</b> {QUALITY_LABELS[row?.quality] || 'Indisponible'}</span>
+        <span><b>Statut du mois :</b> {QUALITY_LABELS[row?.quality] || 'Indisponible'}</span>
+        {provisional && previewBasis?.firstDate && (
+          <span><b>Score provisoire :</b> {previewDates} jours communs du {previewBasis.firstDate} au {previewBasis.lastDate}, {previewBasis.referenceDepartments} départements de référence</span>
+        )}
       </div>
       {error && <p role="alert" className="admin-simulation-error">{error}</p>}
       {!hasRun && <p className="admin-simulation-absence">Le nouveau modèle sera calculé uniquement après lancement de « Simulation ».</p>}
@@ -144,9 +165,10 @@ function NewModelCard({payload, row, score, error, departmentName, romeCode, has
         <Metric label="Offres / 10 000 jeunes" value={num(row?.offersPer10000Young)}
           note={'Densité · poids ' + num(weights.density) + ' / 5'} />
         <Metric label="Établissements employeurs / 10 000 jeunes"
-          value={num(employerDensity)} note={'Établissements tous secteurs · poids ' + num(weights.employers) + ' / 5'} />
-        <Metric label="Offres / 100 employeurs" value={num(row?.offersPer100Employers)}
-          note="Indicateur descriptif indépendant du poids employeur" />
+          value={num(employerDensity)} note={'Potentiel : 60 % du poids employeurs ' + num(weights.employers) + '/5 · tous secteurs'} />
+        <Metric label="Offres / 100 employeurs" value={smallRatio(row?.offersPer100Employers)}
+          note={'Intensité : 40 % du poids employeurs ' + num(weights.employers) + '/5 · ' +
+            num(employers, 0) + ' établissements au dénominateur'} />
         <Metric label="Évolution mensuelle M−1" value={change(row?.changeMonth)}
           note={payload?.previousMonth || 'Mois précédent'} />
         <Metric label="Évolution annuelle M−12" value={change(row?.changeYear)}
@@ -154,9 +176,9 @@ function NewModelCard({payload, row, score, error, departmentName, romeCode, has
       </div>
       <div className="admin-simulation-score">
         <div>
-          <small>Score expérimental — pas un niveau de vigilance</small>
+          <small>{provisional ? 'Score provisoire — non consolidé, Admin uniquement' : 'Score expérimental — pas un niveau de vigilance'}</small>
           <strong>{score?.score !== null && score?.score !== undefined ? num(score.score) + ' / 100' : '—'}</strong>
-          <span>{QUALITY_LABELS[score?.quality] || 'Non calculable'}</span>
+          <span>{scoreStatus}</span>
         </div>
         <div>
           <small>Facteur saisonnier</small>
@@ -164,7 +186,16 @@ function NewModelCard({payload, row, score, error, departmentName, romeCode, has
           <span>Neutre · poids {num(weights.seasonality)} / 5</span>
         </div>
       </div>
+      {!scoreReady && row && (
+        <p className="admin-simulation-absence">
+          {previewBasis?.reason === 'NO_SHARED_REFERENCE_WINDOW'
+            ? previewBasis.explanation
+            : 'Aucune référence ou seconde composante suffisamment couverte pour calculer le score de façon défendable. Les valeurs affichées restent exploitables séparément.'}
+        </p>
+      )}
       <p className="admin-simulation-card-footer">
+        Les deux ratios employeurs participent ensemble au coefficient 3,5/5 ;
+        les offres ne sont pas additionnées comme un nouveau sous-score.
         Aucun seuil vert, jaune, orange ou rouge n'est déduit de ce nouveau score.
         Il ne modifie pas la carte publique.
       </p>
@@ -206,7 +237,7 @@ export default function AdminSimulationPage() {
     setSimulation(null);
     const results = await Promise.allSettled([
       getOccupationPublicationStats(romeCode, {historyLimit: 7}),
-      getAdminMonthlySettings(month, romeCode),
+      getAdminMonthlySettings(month, romeCode, departmentCode),
     ]);
     if (ticket !== version.current) return;
     const [previous, modern] = results;

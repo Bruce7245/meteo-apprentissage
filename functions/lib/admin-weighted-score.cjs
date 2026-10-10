@@ -12,7 +12,7 @@
  * or statistical threshold between public vigilance colors.
  */
 
-const MODEL_VERSION = 'adminTerritorialWeightedScore.experiment.v1';
+const MODEL_VERSION = 'adminTerritorialWeightedScore.experiment.v2';
 const DEFAULT_WEIGHTS = Object.freeze({
   offersFoundation: 5,
   density: 4,
@@ -22,6 +22,9 @@ const DEFAULT_WEIGHTS = Object.freeze({
 });
 const SEASONALITY_NEUTRAL_FACTOR = 1;
 const MIN_BENCHMARK_DEPARTMENTS = 75;
+const MIN_PROVISIONAL_EMPLOYER_DEPARTMENTS = 45;
+const EMPLOYER_POTENTIAL_SHARE = 0.6;
+const EMPLOYER_INTENSITY_SHARE = 0.4;
 
 function numberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -69,6 +72,8 @@ function computeWeights(weights) {
   return {
     density: weights.offersFoundation / 5 * weights.density,
     employers: weights.employers,
+    employerPotential: round(weights.employers * EMPLOYER_POTENTIAL_SHARE, 3),
+    employerIntensity: round(weights.employers * EMPLOYER_INTENSITY_SHARE, 3),
     trend: weights.trend,
     seasonalityReserved: weights.seasonality,
     seasonalityFactor: SEASONALITY_NEUTRAL_FACTOR,
@@ -81,9 +86,12 @@ function computeWeights(weights) {
  * Employer density = employers / young population * 10,000, independent of
  * the current volume of job advertisements.
  */
-function buildReference(rows = []) {
+function buildReference(rows = [], {provisional = false} = {}) {
+  const permittedQualities = provisional
+    ? ['comparable', 'indicative', 'provisional']
+    : ['comparable', 'indicative'];
   const eligible = rows.filter(row =>
-    (row.quality === 'comparable' || row.quality === 'indicative') &&
+    permittedQualities.includes(row.quality) &&
     row.comparisonReady === true &&
     positive(row.population15To29) &&
     numberOrNull(row.averageOffers) !== null &&
@@ -101,16 +109,25 @@ function buildReference(rows = []) {
   });
   const employerPopulation = employers.reduce((sum, row) => sum + row.population15To29, 0);
   const employerSum = employers.reduce((sum, row) => sum + row.activeEmployerEstablishmentsCount, 0);
-  const employerDensity = employers.length >= MIN_BENCHMARK_DEPARTMENTS &&
+  const minimumEmployerDepartments = provisional
+    ? MIN_PROVISIONAL_EMPLOYER_DEPARTMENTS : MIN_BENCHMARK_DEPARTMENTS;
+  const employerDensity = employers.length >= minimumEmployerDepartments &&
     employerPopulation > 0 && employerSum > 0
     ? employerSum / employerPopulation * 10000 : null;
+  const offersFromEmployerGroup = employers.reduce((sum, row) => sum + row.averageOffers, 0);
+  const offerIntensity = employers.length >= minimumEmployerDepartments &&
+    employerSum > 0 && offersFromEmployerGroup > 0
+    ? offersFromEmployerGroup / employerSum * 100 : null;
 
   return {
     referenceOffersPer10000Young: density,
     referenceEmployersPer10000Young: employerDensity,
+    referenceOffersPer100Employers: offerIntensity,
     eligibleDepartments: eligible.length,
     employerCoverageDepartments: employers.length,
     minimumReferenceDepartments: MIN_BENCHMARK_DEPARTMENTS,
+    minimumEmployerReferenceDepartments: minimumEmployerDepartments,
+    isProvisionalReference: provisional,
     referenceScope: 'observed departments of requested calendar month',
     methodVersion: MODEL_VERSION,
   };
@@ -136,8 +153,11 @@ function averageTrend(changeMonth, changeYear) {
   };
 }
 
-function simulateOne(row, reference, weights) {
-  const unusable = !row || !['comparable', 'indicative'].includes(row.quality) ||
+function simulateOne(row, reference, weights, {provisional = false} = {}) {
+  const allowed = provisional
+    ? ['comparable', 'indicative', 'provisional']
+    : ['comparable', 'indicative'];
+  const unusable = !row || !allowed.includes(row.quality) ||
     row.comparisonReady !== true;
   const coefficients = computeWeights(weights);
 
@@ -162,14 +182,21 @@ function simulateOne(row, reference, weights) {
         row.activeEmployerEstablishmentsCount / row.population15To29 * 10000,
         reference.referenceEmployersPer10000Young)
     : null;
+  const employerCount = numberOrNull(row.activeEmployerEstablishmentsCount);
+  const employerIntensity = employerCount !== null && employerCount > 0
+    ? normalizedLevel(row.offersPer100Employers, reference.referenceOffersPer100Employers)
+    : null;
   const trend = averageTrend(row.changeMonth, row.changeYear);
   const components = {
     density,
     employers,
+    employerIntensity,
     trend: trend?.score ?? null,
   };
   const applicableWeights = {
     ...coefficients,
+    employers: coefficients.employerPotential,
+    employerIntensity: coefficients.employerIntensity,
     // M−1 and M−12 share a single 4/5 weight. One valid
     // comparator carries only half the maximum trend influence.
     trend: trend ? coefficients.trend * trend.componentsUsed / 2 : 0,
@@ -208,10 +235,12 @@ function simulateOne(row, reference, weights) {
   const score = round(contributions.reduce((sum, [key, value]) =>
     sum + value * applicableWeights[key], 0) / totalWeight);
   const hasAllComponents = components.density !== null &&
-    (coefficients.employers === 0 || components.employers !== null) &&
+    (coefficients.employers === 0 ||
+      (components.employers !== null && components.employerIntensity !== null)) &&
     (coefficients.trend === 0 || (trend && trend.componentsUsed === 2));
   const quality = row.quality === 'indicative' || trend?.indicative
-    ? 'indicative' : hasAllComponents ? 'experimental' : 'partial';
+    ? 'indicative' : provisional ? 'provisional'
+      : hasAllComponents ? 'experimental' : 'partial';
 
   return {
     score,
@@ -224,22 +253,23 @@ function simulateOne(row, reference, weights) {
       [k, v === null ? null : round(v)])),
     activeWeights,
     availableWeight: round(totalWeight, 3),
+    isProvisional: provisional,
     seasonalityFactorApplied: SEASONALITY_NEUTRAL_FACTOR,
     calculationVersion: MODEL_VERSION,
   };
 }
 
-function simulateTerritorialScores(rows, candidateWeights = DEFAULT_WEIGHTS) {
+function simulateTerritorialScores(rows, candidateWeights = DEFAULT_WEIGHTS, {provisional = false} = {}) {
   const validation = validateWeights(candidateWeights);
   if (!validation.ok) throw new Error('INVALID_SCORE_WEIGHTS: ' + validation.errors.join(' '));
   const weights = validation.weights;
-  const reference = buildReference(rows);
+  const reference = buildReference(rows, {provisional});
   const scores = (Array.isArray(rows) ? rows : []).map(row => ({
     departmentCode: row.departmentCode,
-    ...simulateOne(row, reference, weights),
+    ...simulateOne(row, reference, weights, {provisional}),
   }));
   return {
-    mode: 'simulation_only',
+    mode: provisional ? 'provisional_admin_only' : 'simulation_only',
     calculationVersion: MODEL_VERSION,
     weights,
     effectiveWeights: computeWeights(weights),
@@ -251,15 +281,20 @@ function simulateTerritorialScores(rows, candidateWeights = DEFAULT_WEIGHTS) {
       experimental: scores.filter(s => s.quality === 'experimental').length,
       indicative: scores.filter(s => s.quality === 'indicative').length,
       partial: scores.filter(s => s.quality === 'partial').length,
+      provisional: scores.filter(s => s.quality === 'provisional').length,
       unavailable: scores.filter(s => s.score === null).length,
     },
-    warning: 'Indice exploratoire relatif non calibré pour publier des vigilances. Ne change aucune couleur.',
+    warning: provisional
+      ? 'Score provisoire sur une fenêtre de jours communs, non comparable à un mois clos et sans seuil de vigilance. Aucune couleur publiée modifiée.'
+      : 'Indice exploratoire relatif non calibré pour publier des vigilances. Ne change aucune couleur.',
   };
 }
 
 module.exports = {
   MODEL_VERSION, DEFAULT_WEIGHTS, SEASONALITY_NEUTRAL_FACTOR,
-  MIN_BENCHMARK_DEPARTMENTS, validateWeights, computeWeights,
+  MIN_BENCHMARK_DEPARTMENTS, MIN_PROVISIONAL_EMPLOYER_DEPARTMENTS,
+  EMPLOYER_POTENTIAL_SHARE, EMPLOYER_INTENSITY_SHARE,
+  validateWeights, computeWeights,
   buildReference, normalizedLevel, averageTrend,
   simulateOne, simulateTerritorialScores,
 };

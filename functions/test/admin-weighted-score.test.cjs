@@ -18,6 +18,7 @@ function departments(overrides = {}) {
     activeEmployerEstablishmentsCount: 1000,
     averageOffers: 100,
     offersPer10000Young: 10,
+    offersPer100Employers: 10,
     changeMonth: {value: 0, quality: 'comparable'},
     changeYear: {value: 0, quality: 'comparable'},
     ...overrides,
@@ -53,15 +54,17 @@ test('all valid national departments at reference level yield score 50, not five
   assert.equal(simulation.reference.eligibleDepartments, 101);
   assert.equal(simulation.reference.referenceOffersPer10000Young, 10);
   assert.equal(simulation.reference.referenceEmployersPer10000Young, 100);
+  assert.equal(simulation.reference.referenceOffersPer100Employers, 10);
   assert.equal(simulation.summary.scored, 101);
   const row = simulation.scores[0];
   assert.equal(row.score, 50);
   assert.equal(row.quality, 'experimental');
   assert.equal(row.activeWeights.density, 4);
-  assert.equal(row.activeWeights.employers, 3.5);
+  assert.equal(row.activeWeights.employers, 2.1);
+  assert.equal(row.activeWeights.employerIntensity, 1.4);
   assert.equal(row.activeWeights.trend, 4);
   assert.equal(row.seasonalityFactorApplied, 1);
-  assert.deepEqual(Object.keys(row.components).sort(), ['density', 'employers', 'trend']);
+  assert.deepEqual(Object.keys(row.components).sort(), ['density', 'employerIntensity', 'employers', 'trend']);
 });
 
 test('a missing national reference blocks all scores without fabricated normalization', () => {
@@ -78,6 +81,7 @@ test('missing employer values are not silently converted into zero companies', (
   );
   assert.equal(simulation.reference.referenceEmployersPer10000Young, null);
   assert.equal(simulation.scores[0].components.employers, null);
+  assert.equal(simulation.scores[0].components.employerIntensity, null);
   assert.equal(simulation.scores[0].quality, 'partial');
   assert.equal(simulation.scores[0].activeWeights.employers, 0);
 });
@@ -88,6 +92,23 @@ test('zero real employers is a valid observed employer-potential component', () 
   const simulation = simulateTerritorialScores(rows);
   assert.equal(simulation.reference.employerCoverageDepartments, 101);
   assert.equal(simulation.scores[0].components.employers, 0);
+  assert.equal(simulation.scores[0].components.employerIntensity, null);
+});
+
+test('employer ratio contributes under the same 3.5/5 employer coefficient', () => {
+  const rows = departments();
+  rows[0].averageOffers = 200;
+  rows[0].offersPer10000Young = 20;
+  rows[0].offersPer100Employers = 20;
+  const simulation = simulateTerritorialScores(rows);
+  const scored = simulation.scores[0];
+  assert.ok(scored.components.employerIntensity > 50);
+  assert.equal(scored.activeWeights.employers, 2.1);
+  assert.equal(scored.activeWeights.employerIntensity, 1.4);
+  assert.equal(scored.activeWeights.employers + scored.activeWeights.employerIntensity, 3.5);
+  const excluded = simulateTerritorialScores(rows, {...DEFAULT_WEIGHTS, employers: 0});
+  assert.notEqual(scored.score, excluded.scores[0].score);
+  assert.equal(excluded.scores[0].activeWeights.employerIntensity, 0);
 });
 
 test('declines lower the trend score and missing annual series keeps score partial', () => {

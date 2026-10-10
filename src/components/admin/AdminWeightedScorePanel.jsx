@@ -19,7 +19,7 @@ const FIELDS = [
   {
     key: 'employers',
     label: 'Potentiel employeur',
-    help: '3,5/5 : établissements employeurs pour 10 000 jeunes, indépendant du stock d’offres.',
+    help: '3,5/5 partagés : 60 % densité d’établissements pour 10 000 jeunes et 40 % offres pour 100 employeurs. Données corrélées, sans double pondération.',
   },
   {
     key: 'trend',
@@ -38,6 +38,7 @@ const levelLabels = {
   experimental: 'Expérimental',
   indicative: 'Indicatif',
   partial: 'Partiel',
+  provisional: 'Provisoire',
   unavailable: 'Non calculable',
 };
 function scoreText(value) {
@@ -167,7 +168,8 @@ export default function AdminWeightedScorePanel({month, data, onSaved}) {
             <span>Offres × densité : <b>{formatter.format(
               Number(weights.offersFoundation || 0) * Number(weights.density || 0) / 5
             )}</b></span>
-            <span>Employeurs : <b>{formatter.format(Number(weights.employers || 0))}</b></span>
+            <span>Potentiel employeur (60 %) : <b>{formatter.format(Number(weights.employers || 0) * 0.6)}</b></span>
+            <span>Offres / 100 employeurs (40 %) : <b>{formatter.format(Number(weights.employers || 0) * 0.4)}</b></span>
             <span>Évolutions : <b>{formatter.format(Number(weights.trend || 0))}</b></span>
             <span>Somme des poids actifs théoriques : <b>{formatter.format(importanceSum)}</b></span>
             <span>Saisonnalité : <b>{formatter.format(Number(weights.seasonality || 0))}/5 · facteur 1,00 neutre</b></span>
@@ -185,6 +187,9 @@ export default function AdminWeightedScorePanel({month, data, onSaved}) {
             <div><span>Référence nationale disponible</span><strong>{eligible} / 101</strong></div>
             <div><span>Minimum pour simulation</span><strong>{minimum} départements</strong></div>
             <div><span>Scores calculables</span><strong>{active?.summary?.scored || 0}</strong></div>
+            {active?.mode === 'provisional_admin_only' && (
+              <div><span>Mode</span><strong>Provisoire</strong></div>
+            )}
             <div><span>Scores non calculables</span><strong>{active?.summary?.unavailable ?? '—'}</strong></div>
           </div>
           <button type="button" className="admin-detail-button"
@@ -210,6 +215,17 @@ export default function AdminWeightedScorePanel({month, data, onSaved}) {
         </div>
       </div>
 
+      {active?.previewBasis?.firstDate && (
+        <p className="date-line">
+          Simulation provisoire sur {active.previewBasis.sharedDays.length} journées
+          communes ({active.previewBasis.firstDate} au {active.previewBasis.lastDate}),
+          avec {active.previewBasis.referenceDepartments} départements de référence.
+          Les mois M−1 et M−12 restent indisponibles s'ils ne sont pas complets.
+        </p>
+      )}
+      {active?.previewBasis?.reason === 'NO_SHARED_REFERENCE_WINDOW' && (
+        <p className="date-line">{active.previewBasis.explanation}</p>
+      )}
       <div className="section-heading">
         <div>
           <p className="kicker">Comparaison territoriale · {month}</p>
@@ -240,7 +256,8 @@ export default function AdminWeightedScorePanel({month, data, onSaved}) {
               <th scope="col">Score enregistré</th>
               <th scope="col">{preview ? 'Score proposé' : 'Score simulé'}</th>
               <th scope="col">Densité /100</th>
-              <th scope="col">Employeurs /100</th>
+              <th scope="col">Potentiel employeur /100</th>
+              <th scope="col">Offres /100 employeurs (score /100)</th>
               <th scope="col">Tendance /100</th>
               <th scope="col">Statut</th>
             </tr>
@@ -258,6 +275,7 @@ export default function AdminWeightedScorePanel({month, data, onSaved}) {
                   <td><strong>{scoreText(simulated?.score)}</strong></td>
                   <td>{simulated?.components?.density ?? '—'}</td>
                   <td>{simulated?.components?.employers ?? '—'}</td>
+                  <td>{simulated?.components?.employerIntensity ?? '—'}</td>
                   <td>{simulated?.components?.trend ?? '—'}</td>
                   <td>{levelLabels[simulated?.quality] || 'Indisponible'}</td>
                 </tr>
