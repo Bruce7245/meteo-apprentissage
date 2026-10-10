@@ -29,7 +29,7 @@ async function handler({request,response,auth,db,FieldValue}){
    return;
   }
   const month=String(input.month||'');
-  if(!MONTH_RE.test(month)||month>'2026-10'&&month>new Date().toISOString().slice(0,7)){response.status(400).json({ok:false,error:'Mois invalide'});return}
+  if(!MONTH_RE.test(month)||month>new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit'}).format(new Date())){response.status(400).json({ok:false,error:'Mois invalide'});return}
   const prev=monthShift(month,-1),year=monthShift(month,-12),months=[month,prev,year];
   const [config,popMeta,popSnap,inseeSnap,importSnap,nafIndexSnap,...snapshots]=await Promise.all([
    ref.get(),db.collection('departmentPopulationReferenceMeta').doc('current').get(),
