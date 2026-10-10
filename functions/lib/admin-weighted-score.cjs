@@ -95,8 +95,10 @@ function buildReference(rows = []) {
   const density = eligible.length >= MIN_BENCHMARK_DEPARTMENTS && populationSum > 0 && offerSum > 0
     ? offerSum / populationSum * 10000 : null;
 
-  const employers = eligible.filter(row =>
-    positive(row.activeEmployerEstablishmentsCount));
+  const employers = eligible.filter(row => {
+    const count = numberOrNull(row.activeEmployerEstablishmentsCount);
+    return count !== null && count >= 0;
+  });
   const employerPopulation = employers.reduce((sum, row) => sum + row.population15To29, 0);
   const employerSum = employers.reduce((sum, row) => sum + row.activeEmployerEstablishmentsCount, 0);
   const employerDensity = employers.length >= MIN_BENCHMARK_DEPARTMENTS &&
@@ -154,7 +156,8 @@ function simulateOne(row, reference, weights) {
 
   const density = normalizedLevel(
     row.offersPer10000Young, reference.referenceOffersPer10000Young);
-  const employers = positive(row.activeEmployerEstablishmentsCount) !== null
+  const employers = numberOrNull(row.activeEmployerEstablishmentsCount) !== null &&
+    row.activeEmployerEstablishmentsCount >= 0
     ? normalizedLevel(
         row.activeEmployerEstablishmentsCount / row.population15To29 * 10000,
         reference.referenceEmployersPer10000Young)
