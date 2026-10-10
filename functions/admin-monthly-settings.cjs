@@ -267,8 +267,8 @@ async function handleRead({input, ref, db, response, preview = false}) {
 
   const [configSnap, scoreDraftSnap, populationMeta, populationSnap, importSnap,
     statsSnap, nafIndexSnap, departmentSnap, allDateRefs] = await Promise.all([
-    db.collection('adminWeightedScoreDraft').doc('current').get(),
     ref.get(),
+    db.collection('adminWeightedScoreDraft').doc('current').get(),
     db.collection('departmentPopulationReferenceMeta').doc('current').get(),
     db.collection('departmentPopulationReference').get(),
     db.collection('inseeDepartmentImportIndex').get(),
