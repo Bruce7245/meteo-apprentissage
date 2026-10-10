@@ -32,6 +32,10 @@
         "destination": "/metiers.html"
       },
       {
+        "source": "/departement/**",
+        "destination": "/departement-unpublished.html"
+      },
+      {
         "source": "!/@(assets|src)/**",
         "destination": "/index.html"
       }
@@ -85,6 +89,8 @@
         "destination": "/metiers",
         "type": 301
       }
-    ]
+    ],
+    "cleanUrls": true,
+    "trailingSlash": false
   }
 }

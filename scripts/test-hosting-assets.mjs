@@ -87,6 +87,7 @@ test('firebase.json never rewrites absent /assets JS to the HTML SPA', async () 
   assert.equal(config.hosting.public, 'dist');
   assert.deepEqual(config.hosting.rewrites, [
     { source: '/metiers', destination: '/metiers.html' },
+    { source: '/departement/**', destination: '/departement-unpublished.html' },
     { source: '!/@(assets|src)/**', destination: '/index.html' },
   ]);
   const policies = config.hosting.headers || [];
