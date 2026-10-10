@@ -45,7 +45,7 @@ function scoreText(value) {
     ? formatter.format(value) + ' / 100' : '—';
 }
 
-export default function AdminWeightedScorePanel({month, data}) {
+export default function AdminWeightedScorePanel({month, data, onSaved}) {
   const config = data?.scoreConfig;
   const [weights, setWeights] = useState(config?.weights || {});
   const [reason, setReason] = useState('');
@@ -94,10 +94,10 @@ export default function AdminWeightedScorePanel({month, data}) {
     try {
       const result = await saveAdminWeightedScoreDraft(weights, reason, version);
       setVersion(result.version);
-      setPreview(null);
       setDirty(false);
       setNotice('Brouillon version ' + result.version +
         ' enregistré avec justification. Aucun seuil ni niveau publié modifié.');
+      onSaved?.(result.version);
     } catch (error) {
       setNotice(error.message || 'Enregistrement impossible');
     } finally {
@@ -152,11 +152,12 @@ export default function AdminWeightedScorePanel({month, data}) {
                 <strong>{label}</strong>
                 <output>{Number(weights[key] ?? 0).toLocaleString('fr-FR')} / 5</output>
               </span>
-              <input type="range" min="0" max="5" step="0.5"
+              <input type="range"
+                min={key === 'offersFoundation' || key === 'density' ? '0.5' : '0'}
+                max="5" step="0.5"
                 value={Number(weights[key] ?? 0)}
                 onChange={event => change(key, event.target.value)}
-                disabled={Boolean(busy) || ((key === 'offersFoundation' || key === 'density') &&
-                  weights[key] === undefined)}
+                disabled={Boolean(busy)}
                 aria-label={'Importance : ' + label} />
               <small>{help}</small>
             </label>
@@ -169,7 +170,7 @@ export default function AdminWeightedScorePanel({month, data}) {
             <span>Employeurs : <b>{formatter.format(Number(weights.employers || 0))}</b></span>
             <span>Évolutions : <b>{formatter.format(Number(weights.trend || 0))}</b></span>
             <span>Somme des poids actifs théoriques : <b>{formatter.format(importanceSum)}</b></span>
-            <span>Saisonnalité : <b>2,5/5 proposé · facteur 1,00 neutre</b></span>
+            <span>Saisonnalité : <b>{formatter.format(Number(weights.seasonality || 0))}/5 · facteur 1,00 neutre</b></span>
           </div>
         </div>
 
