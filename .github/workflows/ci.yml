@@ -47,6 +47,11 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Verify Vite modules and Hosting safeguards
+        run: |
+          node --test scripts/test-hosting-assets.mjs
+          node scripts/verify-hosting-build.mjs
+
       - name: Regressions KPI Chakra SSR
         run: npm run test:ui:kpi
 
