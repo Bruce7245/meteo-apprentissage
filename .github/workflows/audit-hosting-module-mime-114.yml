@@ -38,3 +38,26 @@ jobs:
         env:
           HOSTING_URL: https://meteo-apprentissage.web.app
         run: node scripts/check-hosting-assets.mjs
+
+  emulate:
+    name: Local Firebase Hosting rewrite verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Build Vite for offline Hosting
+        run: |
+          npm ci
+          npm run build
+          node scripts/verify-hosting-build.mjs
+      - name: Check Firebase rewrites and MIME locally without production credentials
+        run: |
+          npx --yes firebase-tools@latest emulators:exec \
+            --project demo-apprentifr-hosting \
+            --only hosting \
+            'HOSTING_URL=http://127.0.0.1:5000 HOSTING_STRICT=1 node scripts/check-hosting-assets.mjs'
