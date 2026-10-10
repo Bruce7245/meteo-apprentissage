@@ -236,7 +236,7 @@ export default function AdminCompaniesDashboardPage() {
               {completion}% des départements prêts · Dernière activité : {formatDateTime(job?.lastHeartbeatAt || job?.updatedAt)}
               {job?.status === 'running' ? ' · Actualisation automatique toutes les 60 secondes' : ''}
             </p>
-            {job?.errorMessage ? <p className="admin-console-alert admin-console-alert-error">Erreur du traitement : {job.errorMessage}</p> : null}
+            {job?.hasError ? <p className="admin-console-alert admin-console-alert-error">Le traitement signale une erreur. Consulter le suivi technique du job INSEE.</p> : null}
             <p className="admin-insee-job-footnote">
               Les pages et enregistrements reçus mesurent l'activité du traitement et non des établissements SIRET uniques.
               Aucune publication des vigilances n'est déclenchée ici.
