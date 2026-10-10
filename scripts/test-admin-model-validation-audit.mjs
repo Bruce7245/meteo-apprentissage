@@ -208,6 +208,16 @@ test('bad scope blocks statistics rather than mixing occupation with national',(
   assert.equal(r.counts.compared,0);
 });
 
+test('guards against non-neutral seasonality and insufficient weighted benchmark',()=>{
+  const p=experiment();
+  p.scoreSimulation.scores[0].seasonalityFactorApplied=1.2;
+  p.scoreSimulation.reference.eligibleDepartments=50;
+  const result=buildAdminModelValidationAudit(p,publication());
+  assert.equal(result.seasonalityNeutral,false);
+  assert.ok(result.guardrails.some(w=>w.includes('saisonnier non neutre')));
+  assert.ok(result.guardrails.some(w=>w.includes('Moins de 75')));
+});
+
 test('model inputs remain unchanged by auditing',()=>{
   const data=experiment();
   const published=publication();
