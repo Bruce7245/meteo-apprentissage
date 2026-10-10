@@ -11,6 +11,8 @@ import AdminPublishedMapPage from './pages/admin/AdminPublishedMapPage.jsx';
 import AdminDraftMapPage from './pages/admin/AdminDraftMapPage.jsx';
 import AdminSectorDashboardPage from './pages/admin/AdminSectorDashboardPage.jsx';
 import AdminCompaniesDashboardPage from './pages/admin/AdminCompaniesDashboardPage.jsx';
+import AdminSettingsPage from './pages/admin/AdminSettingsPage.jsx';
+import AdminSimulationPage from './pages/admin/AdminSimulationPage.jsx';
 import {
   isValidDepartmentCode,
   normalizeDepartmentCode,
@@ -69,6 +71,8 @@ function App() {
   if (path === '/admin/carte-a-publier') return <AdminDraftMapPage />;
   if (path === '/admin/secteurs') return <AdminSectorDashboardPage />;
   if (path === '/admin/entreprises') return <AdminCompaniesDashboardPage />;
+  if (path === '/admin/parametrage') return <AdminSettingsPage />;
+  if (path === '/admin/simulation') return <AdminSimulationPage />;
 
   return <NotFoundPage />;
 }

@@ -1,0 +1,195 @@
+name: Release admin Parametrage and Simulation (#135)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Read-only validation or deploy protected Function and Hosting"
+        required: true
+        type: choice
+        default: validate
+        options: [validate, deploy]
+      confirm_deploy:
+        description: "For deployment, type DEPLOY"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-simulation-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Validated admin-only release
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+
+    steps:
+      - name: Enforce main and explicit deployment confirmation
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRM: ${{ inputs.confirm_deploy }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REF_NAME" = "main"
+          if [ "$MODE" = "deploy" ]; then
+            test "$CONFIRM" = "DEPLOY"
+          else
+            test "$MODE" = "validate"
+          fi
+
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix functions
+
+      - name: Verify code and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run build
+          npm run test:ui:kpi
+          node --test scripts/test-hosting-assets.mjs scripts/test-seo-pages.mjs scripts/test-department-seo.mjs
+          node scripts/verify-hosting-build.mjs
+          node --check functions/index.js
+          node --check functions/admin-monthly-settings.cjs
+          node --test functions/test/admin-monthly-settings.test.cjs functions/test/admin-weighted-score.test.cjs
+          npm run test:unit --prefix functions
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_FIREBASE_DEPLOYER_KEY }}
+
+      - name: Audit production data in read-only mode
+        working-directory: functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const {initializeApp,getApps}=require('firebase-admin/app');
+          const {getFirestore}=require('firebase-admin/firestore');
+          const {isWrittenCompleteImport}=require('./lib/insee-collection-state.cjs');
+          if(!getApps().length) initializeApp({projectId:'meteo-apprentissage'});
+          const db=getFirestore();
+          (async()=>{
+            const [meta,pop,importIndex,stats,naf,...recent]=await Promise.all([
+              db.collection('departmentPopulationReferenceMeta').doc('current').get(),
+              db.collection('departmentPopulationReference').doc('72').get(),
+              db.collection('inseeDepartmentImportIndex').doc('72').get(),
+              db.collection('inseeDepartmentStats').doc('72').get(),
+              db.collection('inseeDepartmentNafStatsIndex').doc('72').get(),
+              ...Array.from({length:5},(_,i)=>{
+                const d=new Date();
+                d.setUTCDate(d.getUTCDate()-i-1);
+                const day=d.toISOString().slice(0,10);
+                return db.collection('dailyOfferSnapshots').doc(day).collection('departments').doc('72').get();
+              })
+            ]);
+            console.log(JSON.stringify({
+              mode:'read_only',
+              populationYear:meta.data()?.referenceYear||null,
+              referenceVersionExists:Boolean(meta.data()?.runId),
+              population72:pop.exists,
+              import72Complete:isWrittenCompleteImport(importIndex.data()),
+              stats72:stats.exists,
+              naf72:naf.exists,
+              recentSnapshotCoverage72:recent.filter(x=>x.exists).length,
+              strictRomeSummaryDays:recent.filter(x=>Array.isArray(x.data()?.strictSummary?.byRome)).length,
+              note:'Missing data must display —, never zero or a fabricated vigilance.',
+            },null,2));
+            if(!meta.exists||!meta.data()?.runId)throw Error('Population reference not published');
+          })().catch(error=>{console.error(error);process.exitCode=1});
+          NODE
+
+      - name: Verify existing published-model API requires login
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --output /tmp/admin-old-auth.json --write-out '%{http_code}' \
+            --max-time 45 --request POST --header 'Content-Type: application/json' \
+            --data '{"romeCode":"D1108","historyLimit":7}' \
+            'https://europe-west1-meteo-apprentissage.cloudfunctions.net/getOccupationVigilanceStatsHttp')"
+          echo "Old-model API anonymous HTTP $status"
+          test "$status" = "401"
+
+      - name: Deploy new admin Function only
+        if: ${{ inputs.mode == 'deploy' }}
+        run: |
+          npx --yes firebase-tools@latest deploy --project meteo-apprentissage \
+            --only "functions:getAdminMonthlySettingsHttp" --non-interactive
+
+      - name: Reject anonymous requests to newly deployed Function
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --output /tmp/admin-new-auth.json --write-out '%{http_code}' \
+            --max-time 45 --request POST --header 'Content-Type: application/json' \
+            --data '{"month":"2026-10","romeCode":"D1108"}' \
+            'https://europe-west1-meteo-apprentissage.cloudfunctions.net/getAdminMonthlySettingsHttp')"
+          echo "New-model API anonymous HTTP $status"
+          test "$status" = "401"
+
+      - name: Preserve territorial SEO from real published data
+        if: ${{ inputs.mode == 'deploy' }}
+        run: |
+          node scripts/generate-department-seo.mjs --live
+          test -s dist/seo-departments.json
+
+      - name: Deploy Hosting after backend security checks
+        if: ${{ inputs.mode == 'deploy' }}
+        run: |
+          npx --yes firebase-tools@latest deploy --project meteo-apprentissage \
+            --only hosting --non-interactive
+
+      - name: Smoke-test admin and public routes after release
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in /admin/parametrage /admin/simulation /admin/stats /; do
+            temp="$(mktemp)"
+            status="$(curl --silent --show-error --location --output "$temp" \
+              --write-out '%{http_code}' --max-time 40 \
+              "https://meteo-apprentissage.web.app$path")"
+            echo "$path -> HTTP $status"
+            test "$status" = "200"
+            grep -q '<div id="root"' "$temp"
+          done
+          HOSTING_STRICT=1 node scripts/check-hosting-assets.mjs
+
+      - name: Release summary
+        if: always()
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          {
+            echo "## Admin simulation release"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Mode: $MODE"
+            echo "- Scope: getAdminMonthlySettingsHttp + Hosting only (deploy mode)."
+            echo "- Source audit: Firestore read-only."
+            echo "- No vigilance thresholds, ingestion, schedules or rules changed."
+          } >> "$GITHUB_STEP_SUMMARY"
