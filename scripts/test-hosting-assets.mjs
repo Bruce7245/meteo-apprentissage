@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { auditHostingAssets, extractProductionAssets } from './check-hosting-assets.mjs';
+import { verifyBuiltAssets } from './verify-hosting-build.mjs';
+import { readFile } from 'node:fs/promises';
 
 const html = '<!doctype html><html><head><link rel="stylesheet" href="/assets/index-456.css"></head><body><div id="root"></div><script type="module" crossorigin src="/assets/index-123.js"></script></body></html>';
 
@@ -58,4 +60,38 @@ test('reject dev entrypoints and HTML without a production module', async () => 
   const report = await auditHostingAssets({ site: 'https://example.test', routes: ['/'], request: requestWith({ htmlBody: development }) });
   assert.equal(report.ok, false);
   assert.ok(report.errors.some(message => message.includes('Chemin de build Vite suspect')));
+});
+
+test('pre-deploy build manifest references real nonempty hashed JS/CSS', async () => {
+  const checked = await verifyBuiltAssets({
+    dist: '/opt/example/dist',
+    read: async () => html,
+    fileStat: async () => ({ isFile: () => true, size: 512 }),
+  });
+  assert.deepEqual(checked.assets, ['/assets/index-456.css', '/assets/index-123.js']);
+});
+
+test('pre-deploy verification stops when a bundle is absent', async () => {
+  await assert.rejects(verifyBuiltAssets({
+    dist: '/opt/example/dist',
+    read: async () => html,
+    fileStat: async path => {
+      if (path.endsWith('.js')) throw new Error('ENOENT');
+      return { isFile: () => true, size: 512 };
+    },
+  }));
+});
+
+test('firebase.json never rewrites absent /assets JS to the HTML SPA', async () => {
+  const config = JSON.parse(await readFile(new URL('../firebase.json', import.meta.url), 'utf8'));
+  assert.equal(config.hosting.public, 'dist');
+  assert.deepEqual(config.hosting.rewrites, [
+    { source: '!/@(assets|src)/**', destination: '/index.html' },
+  ]);
+  const policies = config.hosting.headers || [];
+  const all = policies.find(item => item.source === '**');
+  const assets = policies.find(item => item.source === '/assets/**');
+  assert.match(all?.headers?.find(item => item.key === 'Cache-Control')?.value || '', /no-store/);
+  assert.match(assets?.headers?.find(item => item.key === 'Cache-Control')?.value || '', /immutable/);
+  assert.ok(policies.indexOf(all) < policies.indexOf(assets));
 });
