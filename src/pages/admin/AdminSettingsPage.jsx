@@ -75,6 +75,8 @@ export default function AdminSettingsPage() {
   const [version, setVersion] = useState(0);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
+  const [scoreNotice, setScoreNotice] = useState('');
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -98,7 +100,7 @@ export default function AdminSettingsPage() {
         if (alive) setLoading(false);
       });
     return () => {alive = false;};
-  }, [month]);
+  }, [month, revision]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('fr-FR');
@@ -349,7 +351,18 @@ export default function AdminSettingsPage() {
       )}
 
       {data && tab === 'score' && (
-        <AdminWeightedScorePanel month={month} data={data} />
+        <>
+          {scoreNotice && (
+            <section className="panel" role="status">{scoreNotice}</section>
+          )}
+          <AdminWeightedScorePanel month={month} data={data}
+            onSaved={version => {
+              setScoreNotice('Brouillon de coefficients v' + version +
+                ' enregistré. Aucun niveau publié ne change.');
+              setRevision(value => value + 1);
+            }}
+          />
+        </>
       )}
 
       {tab === 'method' && (
