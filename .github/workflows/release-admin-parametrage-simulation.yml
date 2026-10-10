@@ -69,7 +69,7 @@ jobs:
           npm run lint
           npm run build
           npm run test:ui:kpi
-          node --test scripts/test-admin-simulation-colors.mjs scripts/test-admin-national-simulation-map.mjs scripts/test-admin-published-comparison-map.mjs
+          node --test scripts/test-admin-simulation-colors.mjs scripts/test-admin-national-simulation-map.mjs scripts/test-admin-published-comparison-map.mjs scripts/test-admin-model-validation-audit.mjs
           node --test scripts/test-hosting-assets.mjs scripts/test-seo-pages.mjs scripts/test-department-seo.mjs
           node scripts/verify-hosting-build.mjs
           node --check functions/index.js
