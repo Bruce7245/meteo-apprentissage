@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import AdminLayout from '../../layouts/AdminLayout.jsx';
+import AdminWeightedScorePanel from '../../components/admin/AdminWeightedScorePanel.jsx';
 import MetricCard from '../../components/dashboard/MetricCard.jsx';
 import {
   getAdminMonthlySettings,
@@ -156,6 +157,7 @@ export default function AdminSettingsPage() {
         {[
           ['results', 'Résultats mensuels'],
           ['seasonality', 'Saisonnalité'],
+          ['score', 'Pondérations & scores'],
           ['method', 'Critères & méthode'],
         ].map(([id, label]) => (
           <button
@@ -344,6 +346,10 @@ export default function AdminSettingsPage() {
             comparables. Aucun ajustement ne sera appliqué sans validation.
           </p>
         </section>
+      )}
+
+      {data && tab === 'score' && (
+        <AdminWeightedScorePanel month={month} data={data} />
       )}
 
       {tab === 'method' && (
