@@ -92,6 +92,10 @@ jobs:
             grep -q '<div id="root"></div>' "$body"
           done
 
+      - name: Validate served JavaScript and stylesheet MIME
+        shell: bash
+        run: node scripts/check-hosting-assets.mjs
+
       - name: Record production scope
         if: always()
         shell: bash
