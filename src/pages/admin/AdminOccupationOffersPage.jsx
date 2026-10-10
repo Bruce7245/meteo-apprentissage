@@ -194,7 +194,8 @@ export default function AdminOccupationOffersPage(){
         {catalogueBusy&&<p role="status">Chargement des métiers observés…</p>}
         {catalogueError&&<div role="alert"><p>{catalogueError}</p><button type="button" onClick={()=>setCatalogueRetry(n=>n+1)}>Réessayer</button></div>}
         {!catalogueBusy&&!catalogueError&&catalogueRows.length===0&&<p>Aucun métier ne correspond à la recherche sur ce relevé.</p>}
-        <div className="editorial-catalogue-list" role="group" aria-label="Choisir un métier">
+        {!catalogueBusy&&!catalogueError&&catalogueRows.length>6&&<p className="editorial-catalogue-scroll-hint">↕ Faites défiler la liste pour parcourir les {catalogueRows.length} métiers affichés.</p>}
+        <div className="editorial-catalogue-list" role="region" aria-label={'Liste des métiers ('+catalogueRows.length+' résultats)'} aria-busy={catalogueBusy} tabIndex={catalogueRows.length?0:-1}>
           {catalogueRows.map(item=><button type="button" key={item.romeCode} className={rome===item.romeCode?'editorial-catalogue-item is-active':'editorial-catalogue-item'} aria-pressed={rome===item.romeCode} onClick={()=>choose({romeCode:item.romeCode,label:item.label})}><span><strong>{item.label}</strong><small>{item.romeCode} · {item.departments} dép. · {item.lastObservedDate?formatFrenchPublicationDate(item.lastObservedDate,'short'):'Date inconnue'}</small></span><span className="editorial-catalogue-volume">{fmt(item.observedOffers)} <small>offres</small></span></button>)}
         </div>
         <p className="editorial-catalogue-note">Dernier volume quotidien observé par métier, sans addition entre journées. Données non exhaustives ; plusieurs ROME peuvent concerner une même annonce.</p>
