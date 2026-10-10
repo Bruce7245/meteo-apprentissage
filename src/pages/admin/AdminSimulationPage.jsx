@@ -287,6 +287,9 @@ export default function AdminSimulationPage() {
         <a className="admin-detail-button" href="/admin/parametrage">
           Paramétrage <FiArrowRight aria-hidden="true" />
         </a>
+        <a className="admin-detail-button" href="/admin/validation-modele">
+          Validation du modèle <FiArrowRight aria-hidden="true" />
+        </a>
       </section>
 
       <AdminNationalSimulationMap
