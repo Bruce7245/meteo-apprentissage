@@ -140,7 +140,7 @@ jobs:
             echo "- Commit: $GITHUB_SHA"
             echo "- Branch: $GITHUB_REF_NAME"
             echo "- Scope: Firebase Hosting static assets only."
-            if test -s dist/seo-departments.json; then echo "- SEO: $(node -p \"require('./dist/seo-departments.json').eligibleCount\") departements eligibles"; fi
+
             echo "- Tests: lint, KPI SSR regression, build, HTTP smoke checks."
             echo "- Excluded: Cloud Functions, Firestore, import jobs, schedulers and vigilance rules."
           } >> "$GITHUB_STEP_SUMMARY"
