@@ -34,3 +34,25 @@
 .editorial-example-list a:hover{background:#f8fafc;border-color:#457b9d}
 .editorial-example-list strong{font-size:13px;line-height:1.45}
 .editorial-example-list span{font-size:12px;color:#64748b;line-height:1.45}
+
+
+/* Editorial occupation catalogue (#108): side navigation, not the Canva output. */
+.editorial-shell{display:grid;grid-template-columns:minmax(250px,290px) minmax(0,1fr);align-items:start;gap:20px}
+.editorial-main{min-width:0}
+.editorial-catalogue{position:sticky;top:16px;display:grid;gap:12px;min-width:0;max-height:calc(100vh - 32px);overflow:hidden}
+.editorial-catalogue-heading{display:grid;gap:5px}
+.editorial-catalogue-heading h2{margin:0;font-size:1.1rem;color:#1d3557}
+.editorial-catalogue-heading>strong{font-size:.77rem;color:#457b9d}
+.editorial-catalogue-date,.editorial-catalogue-note{margin:0;color:#63758a;font-size:.73rem;line-height:1.5}
+.editorial-catalogue-label{font-size:.74rem;font-weight:750;color:#34465a}
+.editorial-catalogue-input{width:100%;min-width:0;border:1px solid #cbd5e1;border-radius:10px;padding:10px 12px;background:#fff;color:#1d3557}
+.editorial-catalogue-list{display:grid;align-content:start;gap:5px;overflow-y:auto;min-height:0;padding:3px 4px 4px 0}
+.editorial-catalogue-item{display:flex;justify-content:space-between;align-items:center;gap:9px;width:100%;min-height:58px;text-align:left;border:1px solid #e0e8f0;border-radius:10px;background:#fff;color:#1d3557;padding:9px 10px;cursor:pointer}
+.editorial-catalogue-item:hover{border-color:#9ebbd0;background:#f2f7fb}
+.editorial-catalogue-item.is-active{border-color:#457b9d;background:#e9f3f9;box-shadow:inset 3px 0 0 #457b9d}
+.editorial-catalogue-item>span:first-child{display:grid;gap:4px;min-width:0}
+.editorial-catalogue-item strong{font-size:.76rem;line-height:1.3;overflow-wrap:anywhere}
+.editorial-catalogue-item small{display:block;font-size:.65rem;color:#6d7d90}
+.editorial-catalogue-volume{flex-shrink:0;text-align:right;font-size:.82rem;font-weight:800;font-variant-numeric:tabular-nums}
+@media(max-width:1050px){.editorial-shell{grid-template-columns:1fr}.editorial-catalogue{position:static;max-height:none}.editorial-catalogue-list{max-height:310px}}
+@media(max-width:620px){.editorial-shell{gap:12px}.editorial-catalogue-list{max-height:270px}}
