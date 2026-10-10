@@ -31,14 +31,37 @@ function nonNegative(value) {
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
-function normalizeDailyDepartment(data) {
+const MAX_ROME_SUMMARY_ROWS = 120;
+const ROME_RE = /^[A-N][0-9]{4}$/;
+
+function normalizeDailyDepartment(data, romeCode = null) {
   if (!data || typeof data !== 'object') return null;
   const strict = data.strictSummary;
-  const offers = nonNegative(strict?.totalOffers);
-  const openings = nonNegative(strict?.totalOpenings);
+  let offers = nonNegative(strict?.totalOffers);
+  let openings = nonNegative(strict?.totalOpenings);
   const stored = nonNegative(data.storedOffersCount);
   if (!strict || offers === null || openings === null ||
       (stored !== null && offers > stored)) return null;
+
+  if (romeCode !== null) {
+    if (!ROME_RE.test(romeCode) || !Array.isArray(strict.byRome)) return null;
+    const row = strict.byRome.find(item => item?.code === romeCode);
+    if (row) {
+      // A single offer can reference several ROME codes. This is a scoped
+      // observation, not an assertion of unique offers across occupations.
+      offers = nonNegative(row.offers);
+      openings = nonNegative(row.openings);
+      if (offers === null || openings === null ||
+          offers > strict.totalOffers || openings > strict.totalOpenings) return null;
+    } else if (strict.byRome.length < MAX_ROME_SUMMARY_ROWS) {
+      // The code is truly absent only when the top-120 result is NOT full.
+      offers = 0;
+      openings = 0;
+    } else {
+      // It could exist beyond the capped top-120. Never substitute zero.
+      return null;
+    }
+  }
 
   // Same precedence as functions/admin-national-stats.cjs.
   const cap = strict.isPossiblySaturated ?? data.summary?.isPossiblySaturated;
@@ -55,7 +78,7 @@ function normalizeDailyDepartment(data) {
   };
 }
 
-function calculateMonth(month, daily, populations = new Map(), employers = new Map(), today = '2026-10-10') {
+function calculateMonth(month, daily, populations = new Map(), employers = new Map(), today = '2026-10-10', romeCode = null) {
   const dates = monthDays(month);
   const lastObservedDate = today.slice(0, 10);
   const monthComplete = dates.every(date => date < lastObservedDate);
@@ -74,7 +97,7 @@ function calculateMonth(month, daily, populations = new Map(), employers = new M
       // The running day is not finalized.
       if (date >= lastObservedDate) continue;
       const record = daily.get(date)?.get(code);
-      const row = record && Object.hasOwn(record, 'offers') ? record : normalizeDailyDepartment(record);
+      const row = record && Object.hasOwn(record, 'offers') ? record : normalizeDailyDepartment(record, romeCode);
       if (!row || row.date !== date || row.departmentCode !== code ||
           !row.activeRunId || row.qualityStatus === 'quarantined' ||
           !DEPARTMENT_SET.has(code) || nonNegative(row.offers) === null ||
@@ -147,6 +170,7 @@ function checkSeasonality(input) {
 }
 
 module.exports = {
-  DEPS, MONTH_RE, monthShift, monthDays, nonNegative, normalizeDailyDepartment,
+  DEPS, MONTH_RE, ROME_RE, MAX_ROME_SUMMARY_ROWS,
+  monthShift, monthDays, nonNegative, normalizeDailyDepartment,
   calculateMonth, compare, checkSeasonality,
 };
