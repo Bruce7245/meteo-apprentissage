@@ -79,7 +79,7 @@ export async function getAdminOccupationOffers(romeCode,{days=7}={}){
 const EDITORIAL_CATALOGUE_ENDPOINT =
   'https://europe-west1-meteo-apprentissage.cloudfunctions.net/getAdminEditorialOccupationCatalogueHttp';
 
-export async function getAdminEditorialOccupationCatalogue() {
+export async function getAdminEditorialOccupationCatalogue({ days = 7 } = {}) {
   const user = await getReadyAdminUser();
   if (!user) throw new Error('Session administrateur absente.');
   const response = await fetch(EDITORIAL_CATALOGUE_ENDPOINT, {
@@ -89,7 +89,7 @@ export async function getAdminEditorialOccupationCatalogue() {
       'Content-Type': 'application/json',
       Authorization: 'Bearer ' + await user.getIdToken(),
     },
-    body: '{}',
+    body: JSON.stringify({ days: [7, 30, 60].includes(Number(days)) ? Number(days) : 7 }),
   });
   const data = await response.json().catch(() => null);
   if (!response.ok || !data?.ok) {
