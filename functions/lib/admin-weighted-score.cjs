@@ -182,8 +182,10 @@ function simulateOne(row, reference, weights, {provisional = false} = {}) {
         row.activeEmployerEstablishmentsCount / row.population15To29 * 10000,
         reference.referenceEmployersPer10000Young)
     : null;
-  const employerIntensity = normalizedLevel(
-    row.offersPer100Employers, reference.referenceOffersPer100Employers);
+  const employerCount = numberOrNull(row.activeEmployerEstablishmentsCount);
+  const employerIntensity = employerCount !== null && employerCount > 0
+    ? normalizedLevel(row.offersPer100Employers, reference.referenceOffersPer100Employers)
+    : null;
   const trend = averageTrend(row.changeMonth, row.changeYear);
   const components = {
     density,
