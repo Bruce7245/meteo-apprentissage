@@ -1,0 +1,40 @@
+name: Audit Hosting JavaScript MIME (#114)
+
+on:
+  push:
+    branches:
+      - fix/hosting-module-mime-114
+    paths:
+      - scripts/check-hosting-assets.mjs
+      - scripts/test-hosting-assets.mjs
+      - .github/workflows/audit-hosting-module-mime-114.yml
+  pull_request:
+    paths:
+      - scripts/check-hosting-assets.mjs
+      - scripts/test-hosting-assets.mjs
+      - firebase.json
+      - .github/workflows/audit-hosting-module-mime-114.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    name: Read-only Hosting asset audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate audit script and failure cases
+        run: |
+          set -euo pipefail
+          node --check scripts/check-hosting-assets.mjs
+          node --test scripts/test-hosting-assets.mjs
+      - name: Check actual deployed JavaScript/CSS MIME types
+        env:
+          HOSTING_URL: https://meteo-apprentissage.web.app
+        run: node scripts/check-hosting-assets.mjs
