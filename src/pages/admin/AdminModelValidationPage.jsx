@@ -330,7 +330,7 @@ export default function AdminModelValidationPage() {
               <Indicator label="Anomalies critiques" value={counts.criticalDepartments}
                 note="Départements ayant un contrôle incohérent"/>
               <Indicator label="À proximité d’un seuil" value={counts.nearThreshold}
-                note="±"+audit.thresholdMargin+' points : contrôle indicatif, pas robustesse validée'/>
+                note={'±'+audit.thresholdMargin+' points : contrôle indicatif, pas robustesse validée'}/>
             </div>
             {audit.guardrails.length>0 && (
               <div className="admin-validation-issues">
