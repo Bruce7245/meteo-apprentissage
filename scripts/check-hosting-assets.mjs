@@ -86,9 +86,13 @@ export async function auditHostingAssets({
     try {
       const response = await request(url, { headers: { 'Cache-Control': 'no-cache' } });
       const type = String(response.headers.get('content-type') || '');
+      const cacheControl = String(response.headers.get('cache-control') || '');
       const body = await response.text();
       const looksLikeHtml = /^(?:\s*<!doctype html|\s*<html\b)/i.test(body.slice(0, 400));
-      assets.push({ path: filename, kind, status: response.status, contentType: type, bytes: Buffer.byteLength(body), looksLikeHtml });
+      assets.push({ path: filename, kind, status: response.status, contentType: type, cacheControl, bytes: Buffer.byteLength(body), looksLikeHtml });
+      if (strictHostingConfig && !/\bimmutable\b/i.test(cacheControl)) {
+        errors.push('Asset Vite non immutable: ' + filename + ' (Cache-Control: ' + cacheControl + ')');
+      }
       const validMime = kind === 'js' ? /(?:java|ecma)script/i.test(type) : /^text\/css\b/i.test(type);
       if (!response.ok || !validMime || looksLikeHtml || !body.length) {
         errors.push('Fichier ' + kind + ' invalide: ' + filename + ' (HTTP ' + response.status + ', ' + type + (looksLikeHtml ? ', HTML a la place du module' : '') + ')');
