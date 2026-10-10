@@ -1,6 +1,10 @@
 import React, {useMemo, useRef, useState} from 'react';
 import {FiArrowRight, FiBarChart2, FiRepeat, FiShield, FiTrendingUp} from 'react-icons/fi';
 import AdminLayout from '../../layouts/AdminLayout.jsx';
+import AdminSimulationColorBadge from '../../components/admin/AdminSimulationColorBadge.jsx';
+import {
+  getAdminSimulationColor, ADMIN_SIMULATION_BAND_LEGEND,
+} from '../../utils/adminSimulationColors.mjs';
 import OccupationSearch from '../../components/occupation/OccupationSearch.jsx';
 import {getOccupationPublicationStats} from '../../services/adminStatsService.js';
 import {getAdminMonthlySettings} from '../../services/adminMonthlySettingsService.js';
@@ -134,6 +138,7 @@ function NewModelCard({payload, row, score, error, departmentName, romeCode, has
   const provisional = preview?.mode === 'provisional_admin_only';
   const previewBasis = preview?.previewBasis;
   const scoreReady = typeof score?.score === 'number' && Number.isFinite(score.score);
+  const simulatedColor = getAdminSimulationColor(score);
   const previewDates = previewBasis?.sharedDays?.length || 0;
   const scoreStatus = scoreReady && provisional
     ? score?.quality === 'indicative' ? 'Provisoire et indicatif' : 'Score provisoire'
@@ -146,7 +151,10 @@ function NewModelCard({payload, row, score, error, departmentName, romeCode, has
           <h2>Indicateurs pondérés</h2>
           <p>Lecture territoriale expérimentale à partir des stocks quotidiens moyens.</p>
         </div>
-        <span className="admin-simulation-status">{scoreStatus}</span>
+        <div className="admin-simulation-color-group">
+          <AdminSimulationColorBadge score={score} />
+          <span className="admin-simulation-status">{scoreStatus}</span>
+        </div>
       </div>
       <div className="admin-simulation-source">
         <span><b>Périmètre :</b> {departmentName} · ROME {romeCode}</span>
@@ -186,6 +194,11 @@ function NewModelCard({payload, row, score, error, departmentName, romeCode, has
           <span>Neutre · poids {num(weights.seasonality)} / 5</span>
         </div>
       </div>
+      <div className="admin-simulation-color-guide">
+        <strong>Couleur exploratoire · {simulatedColor.label}</strong>
+        <p>{simulatedColor.detail}</p>
+        <small>{ADMIN_SIMULATION_BAND_LEGEND}</small>
+      </div>
       {!scoreReady && row && (
         <p className="admin-simulation-absence">
           {previewBasis?.reason === 'NO_SHARED_REFERENCE_WINDOW'
@@ -196,8 +209,9 @@ function NewModelCard({payload, row, score, error, departmentName, romeCode, has
       <p className="admin-simulation-card-footer">
         Les deux ratios employeurs participent ensemble au coefficient 3,5/5 ;
         les offres ne sont pas additionnées comme un nouveau sous-score.
-        Aucun seuil vert, jaune, orange ou rouge n'est déduit de ce nouveau score.
-        Il ne modifie pas la carte publique.
+        Les seuils colorés ne servent qu'à comparer les simulations
+        dans l'administration ; ils ne sont ni calibrés ni publiés comme
+        niveaux de vigilance. La carte publique reste inchangée.
       </p>
     </article>
   );

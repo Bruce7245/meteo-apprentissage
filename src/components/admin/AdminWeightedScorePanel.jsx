@@ -4,6 +4,8 @@ import {
   saveAdminWeightedScoreDraft,
 } from '../../services/adminMonthlySettingsService.js';
 import './AdminWeightedScorePanel.css';
+import AdminSimulationColorBadge from './AdminSimulationColorBadge.jsx';
+import {ADMIN_SIMULATION_BAND_LEGEND} from '../../utils/adminSimulationColors.mjs';
 
 const FIELDS = [
   {
@@ -259,6 +261,7 @@ export default function AdminWeightedScorePanel({month, data, onSaved}) {
               <th scope="col">Potentiel employeur /100</th>
               <th scope="col">Offres /100 employeurs (score /100)</th>
               <th scope="col">Tendance /100</th>
+              <th scope="col">Couleur simulée</th>
               <th scope="col">Statut</th>
             </tr>
           </thead>
@@ -277,6 +280,7 @@ export default function AdminWeightedScorePanel({month, data, onSaved}) {
                   <td>{simulated?.components?.employers ?? '—'}</td>
                   <td>{simulated?.components?.employerIntensity ?? '—'}</td>
                   <td>{simulated?.components?.trend ?? '—'}</td>
+                  <td><AdminSimulationColorBadge score={simulated} compact /></td>
                   <td>{levelLabels[simulated?.quality] || 'Indisponible'}</td>
                 </tr>
               );
@@ -291,7 +295,9 @@ export default function AdminWeightedScorePanel({month, data, onSaved}) {
         50 pour une évolution nulle. Le score n'est pas calculé si
         les données ne permettent pas une lecture suffisamment fiable.
         La saisonnalité reste neutre et aucune couleur publique n'est simulée
-        sans calibrage de seuils.
+        sans calibrage de seuils. La couleur affichée est
+        strictement exploratoire, sans incidence sur la carte publique.
+        {' '}{ADMIN_SIMULATION_BAND_LEGEND}
       </p>
     </section>
   );

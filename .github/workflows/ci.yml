@@ -64,6 +64,9 @@ jobs:
       - name: Regressions KPI Chakra SSR
         run: npm run test:ui:kpi
 
+      - name: Test Admin simulation exploratory color bands
+        run: node --test scripts/test-admin-simulation-colors.mjs
+
       - name: Validate Canva editorial prompts
         run: npm run test:canva-prompt
 
