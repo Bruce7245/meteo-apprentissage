@@ -77,9 +77,19 @@ async function main(){
         latest:dayRows.map(r=>iso(r.importedAt)).filter(Boolean).sort().at(-1)||null,
       },
       departmentDailyStatsCounts:{
+        returnedActiveJobsCount:aggregate(dayRows,'returnedActiveJobsCount'),
+        returnedActiveJobsDepartmentsWithCount:dayRows.filter(x=>
+          Number.isFinite(Number(x.returnedActiveJobsCount))).length,
+        activeOfferIdsRaw:dayRows.reduce((n,r)=>n+
+          (Array.isArray(r.activeOfferIds)?r.activeOfferIds.length:0),0),
+        activeOfferIdsDistinct:new Set(dayRows.flatMap(r=>
+          Array.isArray(r.activeOfferIds)?r.activeOfferIds:[])
+            .filter(x=>typeof x==='string'&&x)).size,
         jobsCount:aggregate(dayRows,'jobsCount'),
-        totalOffers:aggregate(dayRows,'totalOffers'),
-        totalOpenings:aggregate(dayRows,'totalOpenings'),
+        openingCount:aggregate(dayRows,'openingCount'),
+        recruitersCount:aggregate(dayRows,'recruitersCount'),
+        warningsCount:aggregate(dayRows,'warningsCount'),
+        notSeenSinceYesterdayCount:aggregate(dayRows,'notSeenSinceYesterdayCount'),
       },
       departmentsWithLastError:dayRows.filter(r=>r.lastError).length,
     },
