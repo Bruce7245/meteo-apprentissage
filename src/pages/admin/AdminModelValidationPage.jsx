@@ -13,9 +13,6 @@ import {
 import './AdminModelValidationPage.css';
 
 const fmt = new Intl.NumberFormat('fr-FR', {maximumFractionDigits:2});
-const percentFmt = new Intl.NumberFormat('fr-FR', {
-  style: 'percent',maximumFractionDigits:1,
-});
 const COLORS = {green:'Vert',yellow:'Jaune',orange:'Orange',red:'Rouge',unknown:'Indisponible'};
 const FILTERS = [
   ['all','101 départements'],['critical','Anomalies critiques'],
