@@ -83,7 +83,7 @@ function exportAudit(audit) {
     row.components.density,row.components.employers,row.components.employerIntensity,
     row.components.trend,row.changeMonth,row.changeYear,row.nearThreshold,
     row.flags.map(flag => flag.level+':'+flag.code).join(' | '),
-  ])));
+  ]));
   const csv = '\uFEFF'+lines.map(line => line.map(csvCell).join(';')).join('\r\n');
   const url = URL.createObjectURL(new Blob([csv],{
     type:'text/csv;charset=utf-8;',
