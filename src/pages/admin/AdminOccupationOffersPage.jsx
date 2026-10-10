@@ -177,7 +177,7 @@ export default function AdminOccupationOffersPage(){
     <div className="editorial-shell">
       <aside className="panel editorial-catalogue" aria-label="Métiers avec offres observées">
         <div className="editorial-catalogue-heading"><p className="kicker">Catalogue dynamique</p><h2>Métiers disponibles</h2><strong>{catalogue?.count??'—'} métiers</strong></div>
-        <p className="editorial-catalogue-date">Relevé du {catalogue?.date?formatFrenchPublicationDate(catalogue.date,'short'):'—'} · {catalogue?.coveredDepartments??0}/{catalogue?.totalDepartments??101} départements couverts</p>
+        <p className="editorial-catalogue-date">Métiers observés du {catalogue?.periodStart?formatFrenchPublicationDate(catalogue.periodStart,'short'):'—'} au {catalogue?.periodEnd?formatFrenchPublicationDate(catalogue.periodEnd,'short'):'—'} · relevé de référence {catalogue?.date?formatFrenchPublicationDate(catalogue.date,'short'):'—'} ({catalogue?.coveredDepartments??0}/{catalogue?.totalDepartments??101} dép.)</p>
         <label htmlFor="editorial-catalogue-search" className="editorial-catalogue-label">Rechercher un métier</label>
         <input id="editorial-catalogue-search" className="editorial-catalogue-input" type="search" placeholder="Métier ou code ROME" value={catalogueQuery} onChange={e=>setCatalogueQuery(e.target.value)}/>
         <label htmlFor="editorial-catalogue-sort" className="editorial-catalogue-label">Trier les métiers</label>
@@ -186,9 +186,9 @@ export default function AdminOccupationOffersPage(){
         {catalogueError&&<div role="alert"><p>{catalogueError}</p><button type="button" onClick={()=>setCatalogueRetry(n=>n+1)}>Réessayer</button></div>}
         {!catalogueBusy&&!catalogueError&&catalogueRows.length===0&&<p>Aucun métier ne correspond à la recherche sur ce relevé.</p>}
         <div className="editorial-catalogue-list" role="group" aria-label="Choisir un métier">
-          {catalogueRows.map(item=><button type="button" key={item.romeCode} className={rome===item.romeCode?'editorial-catalogue-item is-active':'editorial-catalogue-item'} aria-pressed={rome===item.romeCode} onClick={()=>choose({romeCode:item.romeCode,label:item.label})}><span><strong>{item.label}</strong><small>{item.romeCode} · {item.departments} dép.</small></span><span className="editorial-catalogue-volume">{fmt(item.observedOffers)} <small>offres</small></span></button>)}
+          {catalogueRows.map(item=><button type="button" key={item.romeCode} className={rome===item.romeCode?'editorial-catalogue-item is-active':'editorial-catalogue-item'} aria-pressed={rome===item.romeCode} onClick={()=>choose({romeCode:item.romeCode,label:item.label})}><span><strong>{item.label}</strong><small>{item.romeCode} · {item.departments} dép. · {item.lastObservedDate?formatFrenchPublicationDate(item.lastObservedDate,'short'):'Date inconnue'}</small></span><span className="editorial-catalogue-volume">{fmt(item.observedOffers)} <small>offres</small></span></button>)}
         </div>
-        <p className="editorial-catalogue-note">Offres observées, non exhaustives. Plusieurs codes ROME peuvent concerner une même annonce.</p>
+        <p className="editorial-catalogue-note">Dernier volume quotidien observé par métier, sans addition entre journées. Données non exhaustives ; plusieurs ROME peuvent concerner une même annonce.</p>
       </aside>
       <div className="editorial-main">
       <section className="panel editorial-filters">
