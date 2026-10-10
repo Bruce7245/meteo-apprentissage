@@ -71,7 +71,7 @@ test('monthly ratio uses daily active stock average and not sum of daily offers'
 test('MoM and YoY percentages use same-month baseline with zero safely blocked', () => {
   const march = result('2026-03', 40);
   const april = result('2026-04', 30);
-  assert.equal(compare(april, march).value, -0.25);
+  assert.ok(Math.abs(compare(april, march).value + 0.25) < 1e-12);
   assert.equal(compare(april, result('2025-04', 60)).value, -0.5);
   assert.equal(compare(april, result('2025-04', 0)), null);
 });
@@ -103,7 +103,7 @@ test('method change across months invalidates percentages', () => {
   assert.equal(latest.quality, 'comparable');
   assert.equal(compare(latest, old), null);
   const mixed = monthInput('2026-04', 30);
-  mixed.get('2026-04-17').qualityMethod = 'export_v2';
+  mixed.get('2026-04-17').get('72').qualityMethod = 'export_v2';
   const row = calculateMonth('2026-04', mixed, new Map([['72', 100000]]),
     new Map(), '2027-05-10').find(item => item.departmentCode === '72');
   assert.equal(row.quality, 'method_change');
