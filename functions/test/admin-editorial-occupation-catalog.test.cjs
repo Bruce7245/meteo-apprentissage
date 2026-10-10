@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { catalogueFromSnapshots, mergeOccupationCatalogues, handleEditorialOccupationCatalogue } = require('../admin-editorial-occupation-catalog.cjs');
+const { catalogueFromSnapshots, mergeOccupationCatalogues, loadEditorialOccupationCatalogue, handleEditorialOccupationCatalogue } = require('../admin-editorial-occupation-catalog.cjs');
 const date = '2026-10-09';
 function doc(id, rows, extra = {}) {
   return { id, data: () => ({
@@ -64,4 +64,46 @@ test('empty recent observations yield an empty catalogue and no invented zero', 
   const result = mergeOccupationCatalogues([catalogueFromSnapshots(date, [])]);
   assert.equal(result.count, 0);
   assert.equal(result.date, null);
+});
+
+test('catalogue period includes more eligible ROME codes at 30 and 60 days', async () => {
+  const today = '2026-10-10';
+  const dateDocs = {
+    '2026-10-10': [doc('72', [{ code: 'G1803', offers: 2, openings: 3 }], { date: '2026-10-10' })],
+    '2026-09-20': [doc('72', [{ code: 'D1102', offers: 4, openings: 4 }], { date: '2026-09-20' })],
+    '2026-08-15': [doc('72', [{ code: 'N1103', offers: 1, openings: 1 }], { date: '2026-08-15' })],
+  };
+  let readDates = [];
+  const db = { collection(name) {
+    if (name === 'dailyOfferSnapshots') return { doc(date) { return {
+      collection(segment) {
+        assert.equal(segment, 'departments');
+        return { async get() { readDates.push(date); return { docs: dateDocs[date] || [] }; } };
+      },
+    }; } };
+    if (name === 'occupationReferenceMeta') return { doc(id) {
+      assert.equal(id, 'current');
+      return { async get() { return { exists: false }; } };
+    } };
+    throw new Error('Unexpected collection: ' + name);
+  } };
+  const seven = await loadEditorialOccupationCatalogue(db, { days: 7, today });
+  assert.equal(readDates.length, 7);
+  assert.equal(seven.days, 7);
+  assert.deepEqual(seven.occupations.map(row=>row.romeCode), ['G1803']);
+  readDates = [];
+  const thirty = await loadEditorialOccupationCatalogue(db, { days: 30, today });
+  assert.equal(readDates.length, 30);
+  assert.deepEqual(new Set(thirty.occupations.map(row => row.romeCode)),
+    new Set(['G1803','D1102']));
+  readDates = [];
+  const sixty = await loadEditorialOccupationCatalogue(db, { days: 60, today });
+  assert.equal(readDates.length, 60);
+  assert.deepEqual(new Set(sixty.occupations.map(row => row.romeCode)),
+    new Set(['G1803','D1102','N1103']));
+  assert.equal(sixty.occupations.find(row=>row.romeCode==='N1103').lastObservedDate, '2026-08-15');
+  readDates = [];
+  const invalid = await loadEditorialOccupationCatalogue(db, { days: 999, today });
+  assert.equal(readDates.length, 7);
+  assert.equal(invalid.days, 7);
 });
