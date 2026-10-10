@@ -97,7 +97,7 @@ export function buildAdminNationalSimulationMap(payload) {
         d.basis === 'weighted' || d.basis === 'weighted_partial').length,
       densityOnly: departments.filter(d => d.basis === 'density_only').length,
       provisional: departments.filter(d =>
-        d.scoreRecord?.isProvisional === true).length,
+        d.scoreRecord?.isProvisional === true && d.score !== null).length,
     },
   };
 
