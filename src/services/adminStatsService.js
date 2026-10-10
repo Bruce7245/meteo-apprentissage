@@ -75,3 +75,25 @@ export async function getAdminOccupationOffers(romeCode,{days=7}={}){
   if(!response.ok || !result?.ok)throw new Error(result?.error || 'Statistiques métiers indisponibles.');
   return result;
 }
+
+const EDITORIAL_CATALOGUE_ENDPOINT =
+  'https://europe-west1-meteo-apprentissage.cloudfunctions.net/getAdminEditorialOccupationCatalogueHttp';
+
+export async function getAdminEditorialOccupationCatalogue({ days = 7 } = {}) {
+  const user = await getReadyAdminUser();
+  if (!user) throw new Error('Session administrateur absente.');
+  const response = await fetch(EDITORIAL_CATALOGUE_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + await user.getIdToken(),
+    },
+    body: JSON.stringify({ days: [7, 30, 60].includes(Number(days)) ? Number(days) : 7 }),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.error || 'Catalogue des métiers indisponible.');
+  }
+  return data;
+}
