@@ -75,6 +75,8 @@ jobs:
           npm run lint
           npm run test:ui:kpi
           npm run build
+          node --test scripts/test-hosting-assets.mjs
+          node scripts/verify-hosting-build.mjs
           node --check functions/admin-occupation-offers.cjs
           node --check functions/index.js
           node --test functions/test/admin-occupation-offers.test.cjs
