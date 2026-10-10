@@ -14,6 +14,7 @@ import {
   FiTrendingUp,
   FiSettings,
   FiRepeat,
+  FiCheckSquare,
 } from 'react-icons/fi';
 import AdminAuthGate from '../components/auth/AdminAuthGate.jsx';
 
@@ -40,6 +41,7 @@ const adminGroups = [
       { href: '/admin/entreprises', label: 'Entreprises', icon: FiBriefcase },
       { href: '/admin/parametrage', label: 'Paramétrage', icon: FiSettings },
       { href: '/admin/simulation', label: 'Simulation', icon: FiRepeat },
+      { href: '/admin/validation-modele', label: 'Validation du modèle', icon: FiCheckSquare },
     ],
   },
 ];
