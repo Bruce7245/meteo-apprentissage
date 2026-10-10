@@ -1,6 +1,8 @@
 import {
   collection,
   getDocs,
+  getDoc,
+  doc,
 } from 'firebase/firestore';
 import { db } from '../firebase.js';
 import { normalizeDepartmentCode } from '../utils/departmentUtils.js';
@@ -18,12 +20,13 @@ function finiteNumber(value) {
 }
 
 export async function getAdminCompaniesDashboard() {
-  const [departmentsSnapshot, statsSnapshot, importSnapshot, nafIndexSnapshot] =
+  const [departmentsSnapshot, statsSnapshot, importSnapshot, nafIndexSnapshot, jobSnapshot] =
     await Promise.all([
       getDocs(collection(db, 'departments')),
       getDocs(collection(db, 'inseeDepartmentStats')),
       getDocs(collection(db, 'inseeDepartmentImportIndex')),
       getDocs(collection(db, 'inseeDepartmentNafStatsIndex')),
+      getDoc(doc(db, 'adminJobs', 'inseeNationalBackgroundJob')),
     ]);
 
   const statsByDepartment = new Map(
@@ -139,13 +142,33 @@ export async function getAdminCompaniesDashboard() {
       department.nafStatsAvailable
   );
 
+  const job = jobSnapshot.exists() ? jobSnapshot.data() : null;
+
   return {
     departments,
+    job: job ? {
+      status: job.status || 'unknown',
+      currentDepartmentCode: job.currentDepartmentCode || null,
+      currentDepartmentName: job.currentDepartmentName || null,
+      currentPosition: finiteNumber(job.currentPosition),
+      endPosition: finiteNumber(job.endPosition),
+      totalPages: finiteNumber(job.totalPages),
+      totalReceived: finiteNumber(job.totalReceived),
+      completedDepartmentsCount: finiteNumber(job.completedDepartmentsCount),
+      lastCompletedDepartmentCode: job.lastCompletedDepartmentCode || null,
+      lastRunPages: finiteNumber(job.lastRunPages),
+      lastRunReceived: finiteNumber(job.lastRunReceived),
+      lastHeartbeatAt: timestampToIso(job.lastHeartbeatAt),
+      updatedAt: timestampToIso(job.updatedAt),
+      errorMessage: job.errorMessage || null,
+    } : null,
     totals: {
       departmentsCount: departments.length,
       statsReadyCount: readyDepartments.length,
       completedImportsCount: completedImports.length,
       fullyReadyCount: fullyReady.length,
+      partialCount: departments.filter((d) => d.importAvailable && !d.importComplete).length,
+      missingCount: departments.filter((d) => !d.importAvailable && !d.importComplete).length,
       activeEmployerEstablishmentsCount:
         readyDepartments.reduce(
           (total, department) =>
