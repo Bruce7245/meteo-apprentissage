@@ -160,7 +160,9 @@ export default function AdminNationalSimulationMap({month,onMonthChange}) {
     setTableFilter('all');
   },[month]);
 
-  const model = useMemo(() => buildAdminNationalSimulationMap(payload),[payload]);
+  const model = useMemo(() => buildAdminNationalSimulationMap(
+    payload?.month === month ? payload : null,
+  ),[payload,month]);
   const activeCode = hoveredCode || selectedCode;
   const activeDepartment = model.byCode.get(activeCode) || null;
   const previewBasis = model.previewBasis;
