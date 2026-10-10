@@ -62,10 +62,10 @@ function csvCell(value) {
   return /[;"\n\r]/.test(safe) ? '"'+safe.replace(/"/g,'""')+'"' : safe;
 }
 
-function exportAudit(audit) {
+function exportAudit(audit, auditedAt) {
   if (!audit?.available) return;
   const headings = [
-    'Version audit','Mois','Date publication','Version moteur','Année population INSEE',
+    'Version audit','Date exécution de l’audit','Mois','Date publication','Version moteur','Année population INSEE',
     'Jours communs score provisoire','Code','Département','Niveau publié','Publié explicitement',
     'Vert public par défaut','Niveau simulé','Variation entre modèles',
     'Indice simulé','Score pondéré','Base de couleur','Qualité score',
@@ -76,7 +76,7 @@ function exportAudit(audit) {
     'Évolution M-1','Évolution M-12','Distance au seuil','Anomalies',
   ];
   const lines = [headings].concat(audit.rows.map(row => [
-    audit.version,audit.month,audit.publicationDate,audit.modelVersion,
+    audit.version,auditedAt,audit.month,audit.publicationDate,audit.modelVersion,
     audit.populationReferenceYear,audit.sharedDays.join(' | '),
     row.code,row.name,row.oldLevel,row.oldExplicit,row.oldDefaultGreen,
     row.newLevel,row.change,row.index,row.score,row.scoreBasis,
@@ -114,6 +114,7 @@ export default function AdminModelValidationPage() {
   const [published,setPublished] = useState(null);
   const [attempted,setAttempted] = useState(false);
   const [loading,setLoading] = useState(false);
+  const [auditedAt,setAuditedAt] = useState('');
   const [monthlyError,setMonthlyError] = useState('');
   const [publishedError,setPublishedError] = useState('');
   const [filter,setFilter] = useState('all');
@@ -128,6 +129,7 @@ export default function AdminModelValidationPage() {
     setMonthlyError('');
     setPublishedError('');
     setAttempted(false);
+    setAuditedAt('');
     setLoading(false);
     setFilter('all');
   },[month]);
@@ -152,6 +154,7 @@ export default function AdminModelValidationPage() {
       getLatestPublicVigilanceIndex(),
     ]);
     if (ticket !== generation.current) return;
+    setAuditedAt(new Date().toISOString());
     if (newResult.status === 'fulfilled') {
       setPayload(newResult.value);
       if (newResult.value?.scope !== 'all_offers_department') {
@@ -249,7 +252,7 @@ export default function AdminModelValidationPage() {
             {loading?'Audit en cours…':attempted?'Relancer l’audit':'Lancer l’audit'}
           </button>
           <button type="button" className="admin-validation-export"
-            onClick={()=>exportAudit(audit)} disabled={!audit.available || loading}>
+            onClick={()=>exportAudit(audit,auditedAt)} disabled={!audit.available || loading}>
             <FiDownload aria-hidden="true"/> Exporter le rapport CSV
           </button>
         </form>
@@ -304,6 +307,7 @@ export default function AdminModelValidationPage() {
                   : 'Sans fenêtre provisoire'}</dd></div>
               <div><dt>Méthode des relevés</dt><dd>{audit.previewMethod || 'Non précisée'}</dd></div>
               <div><dt>Version du rapport</dt><dd>{audit.version}</dd></div>
+              <div><dt>Date du contrôle</dt><dd>{auditedAt ? new Date(auditedAt).toLocaleString('fr-FR') : '—'}</dd></div>
             </dl>
             {audit.isProvisional && (
               <p className="admin-validation-qualifier"><FiInfo aria-hidden="true"/>
