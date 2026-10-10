@@ -166,6 +166,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ADMIN - PILOTAGE COLLECTE INSEE (lecture du seul job autorise)
+    match /adminJobs/inseeNationalBackgroundJob {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     // ADMIN - ENTREPRISES / INSEE
     match /inseeEstablishments/{document=**} {
       allow read: if isAdmin();
