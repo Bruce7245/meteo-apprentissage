@@ -61,7 +61,7 @@ function Metric({label, value, note}) {
   );
 }
 
-function CurrentModelCard({payload, row, error, departmentName, romeCode}) {
+function CurrentModelCard({payload, row, error, departmentName, romeCode, hasRun}) {
   const run = payload?.run;
   const ratio = row?.observedVsExpectedRatio;
   const offers = row?.activeOffersCount;
@@ -87,7 +87,8 @@ function CurrentModelCard({payload, row, error, departmentName, romeCode}) {
         <span><b>Version :</b> {run?.calculationVersion || run?.configVersion || 'indisponible'}</span>
       </div>
       {error && <p role="alert" className="admin-simulation-error">{error}</p>}
-      {!error && !run && <p className="admin-simulation-absence">Aucun calcul métier publié disponible.</p>}
+      {!hasRun && <p className="admin-simulation-absence">Choisissez vos filtres et cliquez sur « Simulation ».</p>}
+      {hasRun && !error && !run && <p className="admin-simulation-absence">Aucun calcul métier publié disponible.</p>}
       {!error && run && !row && (
         <p className="admin-simulation-absence">Aucune observation publiée pour ce métier et ce département.</p>
       )}
@@ -111,7 +112,7 @@ function CurrentModelCard({payload, row, error, departmentName, romeCode}) {
   );
 }
 
-function NewModelCard({payload, row, score, error, departmentName, romeCode}) {
+function NewModelCard({payload, row, score, error, departmentName, romeCode, hasRun}) {
   const population = row?.population15To29;
   const employers = row?.activeEmployerEstablishmentsCount;
   const employerDensity = (
@@ -134,14 +135,15 @@ function NewModelCard({payload, row, score, error, departmentName, romeCode}) {
         <span><b>Statut :</b> {QUALITY_LABELS[row?.quality] || 'Indisponible'}</span>
       </div>
       {error && <p role="alert" className="admin-simulation-error">{error}</p>}
-      {!error && !row && <p className="admin-simulation-absence">Pas de relevés mensuels exploitables.</p>}
+      {!hasRun && <p className="admin-simulation-absence">Le nouveau modèle sera calculé uniquement après lancement de « Simulation ».</p>}
+      {hasRun && !error && !row && <p className="admin-simulation-absence">Pas de relevés mensuels exploitables.</p>}
       <div className="admin-simulation-metrics">
         <Metric label="Offres actives moyennes" value={num(row?.averageOffers)}
           note={'Indicateur source · poids ' + num(weights.offersFoundation) + ' / 5'} />
         <Metric label="Offres / 10 000 jeunes" value={num(row?.offersPer10000Young)}
           note={'Densité · poids ' + num(weights.density) + ' / 5'} />
         <Metric label="Établissements employeurs / 10 000 jeunes"
-          value={num(employerDensity)} note={'Potentiel · poids ' + num(weights.employers) + ' / 5'} />
+          value={num(employerDensity)} note={'Établissements tous secteurs · poids ' + num(weights.employers) + ' / 5'} />
         <Metric label="Offres / 100 employeurs" value={num(row?.offersPer100Employers)}
           note="Indicateur descriptif indépendant du poids employeur" />
         <Metric label="Évolution mensuelle M−1" value={change(row?.changeMonth)}
@@ -304,6 +306,7 @@ export default function AdminSimulationPage() {
         <CurrentModelCard
           payload={simulation?.previous}
           row={currentRow}
+          hasRun={Boolean(simulation)}
           error={simulation?.previousError}
           departmentName={displayDeptName}
           romeCode={simulation?.selected.romeCode || romeCode || '—'}
@@ -312,6 +315,7 @@ export default function AdminSimulationPage() {
           payload={simulation?.modern}
           row={modernRow}
           score={modernScore}
+          hasRun={Boolean(simulation)}
           error={simulation?.modernError}
           departmentName={displayDeptName}
           romeCode={simulation?.selected.romeCode || romeCode || '—'}
@@ -325,6 +329,8 @@ export default function AdminSimulationPage() {
             celle de droite est un agrégat mensuel expérimental.
             Une annonce peut être associée à plusieurs codes ROME, et des
             statistiques journalières peuvent être tronquées au-delà de 120 métiers.
+            Les établissements employeurs sont ceux de tous les secteurs économiques du département,
+            et non une liste certifiée d'employeurs de ce métier.
             L'historique ou la couverture insuffisante interdit alors le nouveau score.
             Aucun coefficient, seuil ou niveau de vigilance public n'est modifié.</p>
         </div>
