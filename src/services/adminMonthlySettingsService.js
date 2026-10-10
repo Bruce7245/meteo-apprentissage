@@ -6,3 +6,8 @@ async function call(body){const user=await getReadyAdminUser();if(!user)throw ne
 }
 export const getAdminMonthlySettings=month=>call({month});
 export const saveAdminSeasonality=(months,reason,expectedVersion)=>call({action:'save',months,reason,expectedVersion});
+
+export const previewAdminWeightedScores = (month, weights) =>
+  call({action:'previewScores',month,weights,seasonalityFactor:1});
+export const saveAdminWeightedScoreDraft = (weights, reason, expectedVersion) =>
+  call({action:'saveScoreWeights',weights,reason,expectedVersion,seasonalityFactor:1});
