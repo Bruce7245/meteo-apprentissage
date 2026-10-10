@@ -35,6 +35,7 @@ export async function auditHostingAssets({
   routes = DEFAULT_ROUTES,
   request = fetch,
   inspectMissing = true,
+  strictHostingConfig = false,
 } = {}) {
   const origin = new URL(site).origin;
   const errors = [];
@@ -50,7 +51,11 @@ export async function auditHostingAssets({
       });
       const html = await response.text();
       const type = response.headers.get('content-type') || '';
-      pages.push({ path: route, status: response.status, contentType: type, cacheControl: response.headers.get('cache-control') || '' });
+      const cacheControl = response.headers.get('cache-control') || '';
+      pages.push({ path: route, status: response.status, contentType: type, cacheControl });
+      if (strictHostingConfig && !/no-store/i.test(cacheControl)) {
+        errors.push('HTML encore cache par le navigateur: ' + route + ' (Cache-Control: ' + cacheControl + ')');
+      }
 
       if (!response.ok || !type.toLowerCase().includes('text/html') || !/<html\b/i.test(html)) {
         errors.push('Page SPA invalide: ' + route + ' (HTTP ' + response.status + ', ' + type + ')');
@@ -99,6 +104,9 @@ export async function auditHostingAssets({
     try {
       const response = await request(url);
       missingModule = { status: response.status, contentType: response.headers.get('content-type') || '' };
+      if (strictHostingConfig && response.status !== 404) {
+        errors.push('Un fichier /assets/ inexistant est renvoye en HTTP ' + response.status + ' au lieu de 404');
+      }
     } catch (error) {
       missingModule = { error: error.message };
     }
@@ -108,7 +116,10 @@ export async function auditHostingAssets({
 }
 
 async function main() {
-  const report = await auditHostingAssets({ site: process.env.HOSTING_URL || DEFAULT_SITE });
+  const report = await auditHostingAssets({
+    site: process.env.HOSTING_URL || DEFAULT_SITE,
+    strictHostingConfig: process.env.HOSTING_STRICT === '1',
+  });
   console.log(JSON.stringify(report, null, 2));
   if (!report.ok) process.exitCode = 1;
 }
