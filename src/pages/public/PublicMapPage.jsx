@@ -4,6 +4,8 @@ import VigilanceMap from '../../components/maps/VigilanceMap.jsx';
 import VigilanceLegend from '../../components/vigilance/VigilanceLegend.jsx';
 import { getLatestPublicVigilanceIndex } from '../../services/vigilanceService.js';
 import { editorialTopics, listPublishedArticles } from '../../content/publicArticles.js';
+import ArticleCarousel from '../../components/articles/ArticleCarousel.jsx';
+import { ArticleCard, EditorialTopicCard } from '../../components/articles/ArticleCard.jsx';
 
 const levelOrder = ['green', 'yellow', 'orange', 'red'];
 const levelMeta = {
@@ -41,7 +43,7 @@ export default function PublicMapPage() {
   }, []);
 
   const departments = index?.departments || [];
-  const featuredArticles = listPublishedArticles().slice(0, 3);
+  const featuredArticles = listPublishedArticles().slice(0, 6);
   const sortedDepartments = useMemo(() => [...departments].sort((a, b) => {
     const aName = a.name || a.departmentName || a.code || '';
     const bName = b.name || b.departmentName || b.code || '';
@@ -132,25 +134,19 @@ export default function PublicMapPage() {
             <a href="/articles" className="af-articles-section-action">Accéder aux analyses <span aria-hidden="true">→</span></a>
           </div>
           {featuredArticles.length ? (
-            <div className="af-articles-feature-list">
+            <ArticleCarousel label="Dernières analyses publiées">
               {featuredArticles.map(article => (
-                <article className="af-article-card" key={article.slug}>
-                  <span className="af-article-tag">{article.category || 'Analyse'}</span>
-                  <h3>{article.title}</h3>
-                  <p>{article.excerpt}</p>
-                  <a href={'/articles/' + encodeURIComponent(article.slug)}>Lire l'article <span aria-hidden="true">→</span></a>
-                </article>
+                <ArticleCard article={article} key={article.slug} />
               ))}
-            </div>
+            </ArticleCarousel>
           ) : (
-            <div className="af-articles-pending">
-              <div>
-                <h3>Nos premières analyses se préparent</h3>
-                <p>Retrouvez bientôt des décryptages sourcés sur les métiers, les territoires et les évolutions de l’apprentissage.</p>
-              </div>
-              <div className="af-articles-pending-topics" aria-label="Thématiques à venir">
-                {editorialTopics.map(topic => <span key={topic.title}>{topic.title}</span>)}
-              </div>
+            <div className="af-editorial-pending">
+              <p>Les premières analyses se préparent. Voici les thématiques que nous aborderons prochainement.</p>
+              <ArticleCarousel label="Thématiques des prochains articles">
+                {editorialTopics.map(topic => (
+                  <EditorialTopicCard topic={topic} key={topic.title} />
+                ))}
+              </ArticleCarousel>
             </div>
           )}
         </section>
