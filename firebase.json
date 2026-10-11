@@ -32,6 +32,10 @@
         "destination": "/metiers.html"
       },
       {
+        "source": "/qui-sommes-nous",
+        "destination": "/qui-sommes-nous.html"
+      },
+      {
         "source": "/departement/**",
         "destination": "/departement-unpublished.html"
       },
@@ -87,6 +91,16 @@
       {
         "source": "/metiers/",
         "destination": "/metiers",
+        "type": 301
+      },
+      {
+        "source": "/qui-sommes-nous.html",
+        "destination": "/qui-sommes-nous",
+        "type": 301
+      },
+      {
+        "source": "/qui-sommes-nous/",
+        "destination": "/qui-sommes-nous",
         "type": 301
       }
     ],
