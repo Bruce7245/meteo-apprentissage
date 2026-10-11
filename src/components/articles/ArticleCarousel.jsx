@@ -23,7 +23,7 @@ export default function ArticleCarousel({ children, label = 'Articles ApprentiFR
     if (cards.length) {
       const nearestIndex = cards.reduce((best, card, index) => (
         Math.abs(card.offsetLeft - track.scrollLeft)
-          < Math.abs(cards[best].offsetLeft - track.offsetLeft - track.scrollLeft)
+          < Math.abs(cards[best].offsetLeft - track.scrollLeft)
           ? index : best
       ), 0);
       current = nearestIndex + 1;
