@@ -5,192 +5,141 @@ import VigilanceLegend from '../../components/vigilance/VigilanceLegend.jsx';
 import { getLatestPublicVigilanceIndex } from '../../services/vigilanceService.js';
 
 const levelOrder = ['green', 'yellow', 'orange', 'red'];
-
 const levelMeta = {
-  green: { label: 'Vert', description: 'Situation favorable' },
-  yellow: { label: 'Jaune', description: 'Vigilance modérée' },
-  orange: { label: 'Orange', description: 'Vigilance renforcée' },
-  red: { label: 'Rouge', description: 'Tension élevée' },
+  green: { label: 'Favorable', description: 'Vigilance verte' },
+  yellow: { label: 'Modérée', description: 'Vigilance jaune' },
+  orange: { label: 'Renforcée', description: 'Vigilance orange' },
+  red: { label: 'Élevée', description: 'Vigilance rouge' },
 };
 
-function getLevel(department) {
-  return department?.publishedLevel || department?.level || 'green';
+const destinations = [
+  { icon: '⌖', title: 'Explorer les territoires', description: 'Consultez la situation publiée dans chaque département.', href: '#carte', kind: 'map' },
+  { icon: '▣', title: 'Explorer les métiers', description: 'Découvrez les secteurs et les métiers observés.', href: '/metiers', kind: 'work' },
+  { icon: '↗', title: 'Voir la situation nationale', description: 'Lisez la répartition actuelle des vigilances.', href: '#situation', kind: 'chart' },
+  { icon: 'ⓘ', title: 'Comprendre les données', description: 'Découvrez les limites et le sens des indicateurs.', href: '#comprendre', kind: 'help' },
+];
+
+function levelForCount(department) {
+  const level = department?.publishedLevel || department?.level;
+  return levelOrder.includes(level) ? level : null;
 }
 
 export default function PublicMapPage() {
   const [index, setIndex] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState('');
 
   useEffect(() => {
     let alive = true;
-
-    async function load() {
-      try {
-        setLoading(true);
-        setError('');
-        const result = await getLatestPublicVigilanceIndex();
-
-        if (alive) setIndex(result);
-      } catch (currentError) {
-        if (alive) {
-          setError(currentError?.message || 'Erreur inconnue');
-        }
-      } finally {
-        if (alive) setLoading(false);
-      }
-    }
-
-    load();
-
-    return () => {
-      alive = false;
-    };
+    getLatestPublicVigilanceIndex()
+      .then(value => { if (alive) setIndex(value); })
+      .catch(currentError => { if (alive) setError(currentError?.message || 'Données indisponibles'); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
   }, []);
 
   const departments = index?.departments || [];
+  const sortedDepartments = useMemo(() => [...departments].sort((a, b) => {
+    const aName = a.name || a.departmentName || a.code || '';
+    const bName = b.name || b.departmentName || b.code || '';
+    return aName.localeCompare(bName, 'fr');
+  }), [departments]);
 
-  const sortedDepartments = useMemo(() => {
-    return [...departments].sort((a, b) => {
-      const nameA = a.name || a.departmentName || a.code || '';
-      const nameB = b.name || b.departmentName || b.code || '';
-      return nameA.localeCompare(nameB, 'fr');
-    });
-  }, [departments]);
+  const levelCounts = useMemo(() => departments.reduce((counts, department) => {
+    const level = levelForCount(department);
+    if (level) counts[level] += 1;
+    return counts;
+  }, { green: 0, yellow: 0, orange: 0, red: 0 }), [departments]);
 
-  const levelCounts = useMemo(() => {
-    return departments.reduce(
-      (counts, department) => {
-        const level = getLevel(department);
-        counts[level] = (counts[level] || 0) + 1;
-        return counts;
-      },
-      { green: 0, yellow: 0, orange: 0, red: 0 }
-    );
-  }, [departments]);
+  const recognizedCount = levelOrder.reduce((sum, key) => sum + levelCounts[key], 0);
+  const missingCount = Math.max(0, departments.length - recognizedCount);
 
-  function openDepartment(event) {
-    const code = event.target.value;
-    if (code) {
-      window.location.href = `/departement/${encodeURIComponent(code)}`;
-    }
+  function openSelectedDepartment(event) {
+    event.preventDefault();
+    if (selectedDepartment) window.location.assign('/departement/' + encodeURIComponent(selectedDepartment));
   }
 
   return (
     <PublicLayout>
-      <section className="public-hero">
-        <div className="public-hero-copy">
-          <p className="eyebrow">Observatoire de l’apprentissage</p>
-          <h1>Comprendre la tension du marché, département par département.</h1>
-          <p className="public-hero-intro">
-            ApprentiFR synthétise les signaux du marché de l’apprentissage pour donner une lecture territoriale claire, actualisée et comparable.
-          </p>
-
-          <div className="public-hero-meta" aria-label="Informations de publication">
-            <span>
-              <strong>Dernière publication</strong>
-              {index?.latestDate || '—'}
-            </span>
-            <span>
-              <strong>Couverture</strong>
-              {departments.length ? `${departments.length} départements` : '—'}
-            </span>
-          </div>
-        </div>
-
-        <div className="department-jump-card">
-          <p className="eyebrow">Accès direct</p>
-          <h2>Trouver un département</h2>
-          <p>Accédez directement à son bulletin et à ses indicateurs publiés.</p>
-          <label className="department-select-label" htmlFor="department-select">
-            Département
-          </label>
-          <select
-            id="department-select"
-            className="department-select"
-            defaultValue=""
-            onChange={openDepartment}
-            disabled={loading || sortedDepartments.length === 0}
-          >
-            <option value="">Sélectionner un département</option>
-            {sortedDepartments.map((department) => {
-              const code = department.code || department.departmentCode;
-              const name = department.name || department.departmentName || code;
-              return (
-                <option key={code} value={code}>
-                  {code} — {name}
-                </option>
-              );
-            })}
-          </select>
-        </div>
-      </section>
-
-      <section className="national-summary" aria-labelledby="national-summary-title">
-        <div className="section-title-row">
-          <div>
-            <p className="eyebrow">Situation nationale</p>
-            <h2 id="national-summary-title">Répartition des niveaux de vigilance</h2>
-          </div>
-          <p className="section-note">Lecture synthétique de la dernière publication disponible.</p>
-        </div>
-
-        <div className="vigilance-summary-grid">
-          {levelOrder.map((level) => (
-            <article key={level} className={`vigilance-summary-card vigilance-summary-${level}`}>
-              <div className="vigilance-summary-head">
-                <span className="vigilance-summary-dot" aria-hidden="true" />
-                <strong>{levelMeta[level].label}</strong>
+      <div className="af-home">
+        <section className="af-hero" aria-labelledby="af-home-title">
+          <div className="af-hero-copy">
+            <p className="af-overline">Des données pour mieux comprendre les territoires</p>
+            <h1 id="af-home-title">L'apprentissage<br />en France,<br /><span>territoire par territoire.</span></h1>
+            <p className="af-hero-lead">ApprentiFR observe les offres, les métiers et les formations en apprentissage pour éclairer les réalités locales, sans promettre de résultats individuels.</p>
+            <form className="af-hero-search" onSubmit={openSelectedDepartment} aria-label="Accéder à un département">
+              <label htmlFor="af-department-select">Explorer un département</label>
+              <div className="af-hero-search-row">
+                <select id="af-department-select" value={selectedDepartment} onChange={event => setSelectedDepartment(event.target.value)} disabled={loading || sortedDepartments.length === 0}>
+                  <option value="">Choisissez un département...</option>
+                  {sortedDepartments.map(department => {
+                    const code = department.code || department.departmentCode;
+                    return <option key={code} value={code}>{code} — {department.name || department.departmentName || code}</option>;
+                  })}
+                </select>
+                <button type="submit" disabled={!selectedDepartment}>Explorer <span aria-hidden="true">→</span></button>
               </div>
-              <span className="vigilance-summary-value">
-                {loading ? '—' : levelCounts[level] || 0}
-              </span>
-              <small>{levelMeta[level].description}</small>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="public-map-section">
-        <div className="section-title-row map-section-heading">
-          <div>
-            <p className="eyebrow">Carte interactive</p>
-            <h2>Explorer la France</h2>
+            </form>
+            <p className="af-hero-links">Vous cherchez un métier ? <a href="/metiers">Parcourir les secteurs et les métiers <span aria-hidden="true">↗</span></a></p>
           </div>
-          <p className="section-note">
-            Survolez ou sélectionnez un département pour consulter son niveau publié.
-          </p>
-        </div>
+          <div className="af-hero-art" aria-hidden="true">
+            <div className="af-hero-halo" />
+            <img src="/apprenti_fr.svg" alt="" className="af-hero-art-mark" />
+            <div className="af-hero-art-copy"><span className="af-hero-art-rule" />Chaque territoire a son histoire.<br />Les données aident à la comprendre.</div>
+          </div>
+        </section>
 
-        <div className="public-map-grid">
-          <VigilanceMap
-            departments={departments}
-            loading={loading}
-            error={error}
-            latestDate={index?.latestDate}
-          />
+        <section className="af-quicklinks" aria-label="Explorer ApprentiFR">
+          {destinations.map(destination => (
+            <a className={'af-quicklink af-quicklink-' + destination.kind} href={destination.href} key={destination.title}>
+              <span className="af-quicklink-icon" aria-hidden="true">{destination.icon}</span>
+              <strong>{destination.title}</strong>
+              <span>{destination.description}</span>
+              <span className="af-quicklink-arrow" aria-hidden="true">→</span>
+            </a>
+          ))}
+        </section>
 
-          <aside className="public-map-aside">
-            <VigilanceLegend />
+        <section className="af-overview" id="situation" aria-labelledby="af-overview-title">
+          <div className="af-overview-intro">
+            <p className="af-overline">L'apprentissage aujourd'hui</p>
+            <h2 id="af-overview-title">Une vision d'ensemble<br />sur le territoire</h2>
+            <p>Une lecture des derniers niveaux de vigilance publiés. Un indicateur de tension ne constitue pas une prévision d'embauche.</p>
+            <a href="#carte" className="af-gold-link">Voir la carte <span aria-hidden="true">→</span></a>
+          </div>
+          <div className="af-vigilance-grid">
+            {levelOrder.map(level => (
+              <div className={'af-vigilance-card af-vigilance-' + level} key={level}>
+                <span className="af-vigilance-bar" aria-hidden="true" />
+                <div><strong>{loading || error ? '—' : levelCounts[level]}</strong><span>département{levelCounts[level] > 1 ? 's' : ''}</span><small>{levelMeta[level].label}</small></div>
+              </div>
+            ))}
+            {missingCount > 0 && !loading && !error ? <p className="af-overview-disclaimer">{missingCount} département(s) sans niveau explicite dans l'index.</p> : null}
+            {error ? <p className="af-overview-disclaimer" role="status">Les chiffres sont momentanément indisponibles.</p> : null}
+          </div>
+          <p className="af-overview-date">Dernière publication : {index?.latestDate || 'non disponible'}</p>
+        </section>
 
-            <section className="information-card">
-              <p className="eyebrow">Méthode de lecture</p>
-              <h3>Un indicateur, pas un verdict.</h3>
-              <p>
-                La vigilance combine plusieurs signaux observés. Elle aide à repérer les tensions territoriales mais ne remplace pas l’analyse détaillée d’un secteur ou d’un employeur.
-              </p>
-            </section>
-
-            {index && index.publishedCount === 0 ? (
-              <section className="information-card muted-information-card">
-                <p>
-                  Aucune vigilance détaillée n’est publiée actuellement. Les départements sont affichés au niveau par défaut.
-                </p>
+        <section className="af-map-editorial" id="carte" aria-labelledby="af-map-title">
+          <div className="af-section-header">
+            <div><p className="af-overline">Explorer les territoires</p><h2 id="af-map-title">La France, département par département.</h2></div>
+            <p>Sélectionnez un territoire pour accéder à son bulletin et découvrir les signaux disponibles.</p>
+          </div>
+          <div className="public-map-grid">
+            <VigilanceMap departments={departments} loading={loading} error={error} latestDate={index?.latestDate} />
+            <aside className="public-map-aside">
+              <VigilanceLegend />
+              <section className="information-card" id="comprendre">
+                <p className="eyebrow">Comprendre la vigilance</p>
+                <h3>Un indicateur, pas un verdict.</h3>
+                <p>La vigilance résume plusieurs signaux observés. Elle ne garantit ni l'obtention ni l'absence d'un contrat d'apprentissage.</p>
               </section>
-            ) : null}
-          </aside>
-        </div>
-      </section>
+              {index && index.publishedCount === 0 ? <section className="information-card muted-information-card"><p>Aucune vigilance détaillée n'est actuellement publiée. Ne déduisez pas une situation favorable de l'absence de publication.</p></section> : null}
+            </aside>
+          </div>
+        </section>
+      </div>
     </PublicLayout>
   );
 }
