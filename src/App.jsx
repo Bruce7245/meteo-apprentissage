@@ -2,6 +2,7 @@ import React from 'react';
 import PublicMapPage from './pages/public/PublicMapPage.jsx';
 import PublicDepartmentPage from './pages/public/PublicDepartmentPage.jsx';
 import PublicOccupationMapPage from './pages/public/PublicOccupationMapPage.jsx';
+import PublicFormationsPage from './pages/public/PublicFormationsPage.jsx';
 import AdminHomePage from './pages/admin/AdminHomePage.jsx';
 import AdminBulletinsPage from './pages/admin/AdminBulletinsPage.jsx';
 import AdminStatsPage from './pages/admin/AdminStatsPage.jsx';
@@ -42,6 +43,7 @@ function App() {
 
   if (path === '/') return <PublicMapPage />;
   if (path === '/metiers') return <PublicOccupationMapPage />;
+  if (path === '/formations') return <PublicFormationsPage />;
 
   const departmentMatch = path.match(/^\/departement\/([^/]+)$/);
 

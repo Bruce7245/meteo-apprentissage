@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import PublicLayout from '../../layouts/PublicLayout.jsx';
 import OccupationDomainBrowser from '../../components/occupation/OccupationDomainBrowser.jsx';
+import JobsFormationsSwitcher from '../../components/JobsFormationsSwitcher.jsx';
+import FullscreenSearchDialog from '../../components/FullscreenSearchDialog.jsx';
 import VigilanceMap from '../../components/maps/VigilanceMap.jsx';
 import VigilanceLegend from '../../components/vigilance/VigilanceLegend.jsx';
 import { getLatestPublicVigilanceIndex } from '../../services/vigilanceService.js';
@@ -38,6 +40,9 @@ export default function PublicOccupationMapPage() {
   const [domainError, setDomainError] = useState('');
   const [occupationsError, setOccupationsError] = useState('');
   const [mapError, setMapError] = useState('');
+  const [searchOpen, setSearchOpen] = useState(
+    () => new URLSearchParams(window.location.search).get('search') === '1'
+  );
 
   useEffect(() => {
     if (
@@ -285,10 +290,27 @@ export default function PublicOccupationMapPage() {
     ? occupationData?.date || null
     : generalIndex?.latestDate || null;
 
+  function openSearch() {
+    const url = new URL(window.location.href);
+    url.searchParams.set('search', '1');
+    window.history.replaceState(null, '', url.pathname + url.search);
+    setSearchOpen(true);
+  }
+
+  function closeSearch() {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('search');
+    window.history.replaceState(null, '', url.pathname + url.search);
+    setSearchOpen(false);
+  }
+
   function selectDomain(nextDomainCode) {
-    window.location.assign(
-      buildOccupationDomainMapUrl(nextDomainCode)
+    const nextUrl = new URL(
+      buildOccupationDomainMapUrl(nextDomainCode),
+      window.location.origin
     );
+    nextUrl.searchParams.set('search', '1');
+    window.location.assign(nextUrl.pathname + nextUrl.search);
   }
 
   function selectOccupation(occupation) {
@@ -328,8 +350,10 @@ export default function PublicOccupationMapPage() {
 
   return (
     <PublicLayout>
-      <section className="public-hero occupation-sector-hero">
-        <div className="public-hero-copy">
+      <JobsFormationsSwitcher active="metiers" />
+
+      <section className="jobs-formations-workspace">
+        <div className="jobs-formations-summary-card">
           <p className="eyebrow">Métiers</p>
           <h1>
             {occupationMode
@@ -351,47 +375,56 @@ export default function PublicOccupationMapPage() {
                   : 'Commencez par choisir un secteur professionnel ROME, puis sélectionnez un métier pour afficher sa vigilance territoriale.'}
           </p>
 
-          {domainCode ? (
-            <div className="occupation-context-actions">
-              {occupationMode ? (
-                <a
-                  className="button-link"
-                  href={buildOccupationDomainMapUrl(
-                    domainCode
-                  )}
-                >
-                  Revenir aux métiers du secteur
+          <div className="jobs-formations-primary-actions">
+            <button
+              type="button"
+              className="jobs-formations-search-trigger"
+              onClick={openSearch}
+            >
+              <span>Rechercher un métier</span>
+              <small>Secteur, code ROME ou intitulé</small>
+            </button>
+
+            {domainCode ? (
+              <div className="occupation-context-actions">
+                {occupationMode ? (
+                  <a
+                    className="button-link"
+                    href={buildOccupationDomainMapUrl(domainCode)}
+                  >
+                    Revenir aux métiers du secteur
+                  </a>
+                ) : null}
+
+                <a className="text-link" href="/metiers">
+                  Réinitialiser
                 </a>
-              ) : null}
-
-              <a className="text-link" href="/metiers">
-                Changer de secteur
-              </a>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="occupation-search-card occupation-sector-card">
-          <p className="eyebrow">Parcours guidé</p>
-          <h2>Choisir un secteur puis un métier</h2>
-          <p>
-            Les métiers sans données suffisantes restent visibles mais ne peuvent pas ouvrir une carte.
-          </p>
-
-          <OccupationDomainBrowser
-            domains={domainsResult.domains}
-            selectedDomainCode={domainCode}
-            selectedRomeCode={romeCode}
-            domainData={domainResult}
-            loadingDomains={loadingDomains}
-            loadingOccupations={loadingOccupations}
-            domainError={domainError}
-            occupationsError={occupationsError}
-            onDomainSelect={selectDomain}
-            onOccupationSelect={selectOccupation}
-          />
+              </div>
+            ) : null}
+          </div>
         </div>
       </section>
+
+      <FullscreenSearchDialog
+        open={searchOpen}
+        onClose={closeSearch}
+        eyebrow="Recherche métier"
+        title="Choisir un secteur puis un métier"
+        description="Les métiers sans données suffisantes restent visibles, mais leur carte demeure désactivée."
+      >
+        <OccupationDomainBrowser
+          domains={domainsResult.domains}
+          selectedDomainCode={domainCode}
+          selectedRomeCode={romeCode}
+          domainData={domainResult}
+          loadingDomains={loadingDomains}
+          loadingOccupations={loadingOccupations}
+          domainError={domainError}
+          occupationsError={occupationsError}
+          onDomainSelect={selectDomain}
+          onOccupationSelect={selectOccupation}
+        />
+      </FullscreenSearchDialog>
 
       {invalidSelection ? (
         <section
