@@ -3,7 +3,10 @@
  * Aucun article ne doit apparaître publiquement avant validation éditoriale.
  * Un contenu peut être ajouté ultérieurement avec:
  * { slug, title, excerpt, category, publishedAt: 'YYYY-MM-DD',
+ *   coverImage: '/illustrations/nom-image.webp', coverAlt: 'Description',
  *   status: 'published', sections: [{ heading, paragraphs: ['...'] }] }
+ * coverImage est optionnel ; la carte affiche sinon un décor aux couleurs
+ * ApprentiFR. L'illustration doit disposer des droits nécessaires.
  * Ne pas publier de chiffres inventés ni de textes générés non relus.
  */
 const articleRegistry = [];
