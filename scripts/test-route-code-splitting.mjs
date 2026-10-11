@@ -66,6 +66,9 @@ test('CSS for the administration is only imported by the deferred admin group', 
   assert.ok(!main.includes("import './admin-console.css'"));
   assert.match(routes, /lazy\(\(\) => import\('\.\/AdminRoutes\.jsx'\)\)/);
   assert.match(routes, /if \(path === '\/'\) return <PublicMapPage \/>/);
+  for (const [path, component] of [['/admin/parametrage', 'AdminSettingsPage'], ['/admin/simulation', 'AdminSimulationPage'], ['/admin/validation-modele', 'AdminModelValidationPage']]) {
+    assert.ok(admin.includes("'" + path + "': " + component + ","), 'Missing admin route after synchronization: ' + path);
+  }
   for (const name of ['admin-console.css', 'admin-console-mobile.css', 'admin-console-pages.css']) {
     assert.ok(admin.includes("import './" + name + "';"), 'Missing admin CSS: ' + name);
   }

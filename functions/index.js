@@ -14903,3 +14903,15 @@ exports.complementPreviousDayLbaOffers = onSchedule(
     return result;
   }
 );
+
+
+// Administration : ratios mensuels et saisonnalité versionnée (#129).
+exports.getAdminMonthlySettingsHttp = onRequest(
+  { region: 'europe-west1', timeoutSeconds: 540, memory: '1GiB', cors: true },
+  async (request, response) => {
+    return require('./admin-monthly-settings.cjs').handler({
+      request, response, auth: admin.auth(), db,
+      FieldValue: admin.firestore.FieldValue,
+    });
+  }
+);
