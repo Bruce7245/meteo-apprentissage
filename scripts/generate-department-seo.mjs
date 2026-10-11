@@ -169,9 +169,10 @@ export function renderDepartmentHtml(fallbackHtml, item) {
 export function renderSitemapXml(baselineXml, departments) {
   if (!baselineXml.includes('</urlset>')) throw new Error('Missing </urlset> in sitemap.xml');
   const baseline = [...baselineXml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(match => match[1]);
-  if (baseline.length !== 2 ||
+  if (baseline.length !== 3 ||
       baseline[0] !== CANONICAL_ORIGIN + '/' ||
-      baseline[1] !== CANONICAL_ORIGIN + '/metiers') {
+      baseline[1] !== CANONICAL_ORIGIN + '/metiers' ||
+      baseline[2] !== CANONICAL_ORIGIN + '/qui-sommes-nous') {
     throw new Error('Unexpected baseline sitemap: refusing to publish duplicate or untrusted URLs');
   }
   const entries = departments.map(item =>
