@@ -7,6 +7,7 @@ function getNavigationState() {
   const hasRome = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('rome');
   return {
     homeActive: path === '/',
+    articlesActive: path === '/articles' || path.startsWith('/articles/'),
     mapActive: path.startsWith('/departement/') && !hasRome,
     occupationActive: path === '/metiers' || (path.startsWith('/departement/') && hasRome),
   };
@@ -33,8 +34,8 @@ export default function PublicLayout({ children }) {
             <a className={'public-nav-link' + (navigation.mapActive ? ' is-active' : '')} href="/#carte" aria-current={navigation.mapActive ? 'page' : undefined}>Territoires</a>
             <a className={'public-nav-link' + (navigation.occupationActive ? ' is-active' : '')} href="/metiers" aria-current={navigation.occupationActive ? 'page' : undefined}>Métiers & formations</a>
             <a className="public-nav-link" href="/#situation">Observatoire</a>
+            <a className={'public-nav-link' + (navigation.articlesActive ? ' is-active' : '')} href="/articles" aria-current={navigation.articlesActive ? 'page' : undefined}>Articles</a>
           </nav>
-          <a className="public-header-action" href="/admin">Espace admin</a>
         </div>
       </header>
       <main className="site-main public-main">{children}</main>
@@ -44,6 +45,13 @@ export default function PublicLayout({ children }) {
             <span className="footer-project-name">ApprentiFR</span>
             <span>Observatoire territorial de l'apprentissage</span>
           </div>
+          <nav className="public-footer-links" aria-label="Informations et accès utiles">
+            <a href="/articles">Articles</a>
+            <a href="/mentions-legales">Mentions légales</a>
+            <a href="/politique-confidentialite">Confidentialité</a>
+            <a href="/contact">Contact</a>
+            <a href="/admin" className="public-footer-admin">Espace admin</a>
+          </nav>
           <p className="public-footer-note">Les niveaux de vigilance sont des indicateurs d'observation et ne constituent pas une information officielle de l'État. Les données manquantes ne présument pas d'une situation favorable.</p>
         </div>
       </footer>
