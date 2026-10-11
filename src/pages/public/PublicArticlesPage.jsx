@@ -2,7 +2,7 @@ import React from 'react';
 import PublicLayout from '../../layouts/PublicLayout.jsx';
 import { editorialTopics, getPublishedArticle, listPublishedArticles } from '../../content/publicArticles.js';
 import ArticleCarousel from '../../components/articles/ArticleCarousel.jsx';
-import { ArticleCard, formatArticleDate } from '../../components/articles/ArticleCard.jsx';
+import { ArticleCard, EditorialTopicCard, formatArticleDate } from '../../components/articles/ArticleCard.jsx';
 
 export function PublicArticleCards({ articles }) {
   return (
@@ -75,23 +75,32 @@ export default function PublicArticlesPage({ slug = null }) {
             </section>
           </>
         ) : (
-          <section className="af-content-panel" aria-labelledby="af-no-articles">
-            <h2 id="af-no-articles">Les premières analyses se préparent</h2>
-            <p>Cette rubrique accueillera des articles datés et vérifiés. Aucun article n’est encore publié.</p>
-            <div className="af-content-actions"><a href="/#carte">Explorer la carte des départements →</a><a href="/metiers">Découvrir les métiers →</a></div>
+          <section className="af-editorial-topics" aria-labelledby="af-no-articles">
+            <div className="af-content-panel">
+              <h2 id="af-no-articles">Les premières analyses se préparent</h2>
+              <p>Cette rubrique accueillera des articles datés et vérifiés. Aucun article n’est encore publié.</p>
+              <div className="af-content-actions"><a href="/#carte">Explorer la carte des départements →</a><a href="/metiers">Découvrir les métiers →</a></div>
+            </div>
+            <ArticleCarousel label="Thématiques des futurs articles">
+              {editorialTopics.map(topic => (
+                <EditorialTopicCard topic={topic} key={topic.title} />
+              ))}
+            </ArticleCarousel>
           </section>
         )}
-        <section className="af-editorial-topics" aria-labelledby="af-topics-title">
-          <h2 id="af-topics-title">Les thèmes à retrouver ici</h2>
-          <div className="af-editorial-topics-list">
-            {editorialTopics.map(topic => (
-              <div className="af-editorial-topic" key={topic.title}>
-                <strong>{topic.title}</strong>
-                <p>{topic.description}</p>
-              </div>
-            ))}
-          </div>
-        </section>
+        {publishedArticles.length > 0 ? (
+          <section className="af-editorial-topics" aria-labelledby="af-topics-title">
+            <h2 id="af-topics-title">Les thèmes à retrouver ici</h2>
+            <div className="af-editorial-topics-list">
+              {editorialTopics.map(topic => (
+                <div className="af-editorial-topic" key={topic.title}>
+                  <strong>{topic.title}</strong>
+                  <p>{topic.description}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
       </div>
     </PublicLayout>
   );
