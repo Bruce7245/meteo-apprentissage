@@ -1,27 +1,13 @@
 import React from 'react';
 import PublicLayout from '../../layouts/PublicLayout.jsx';
 import { editorialTopics, getPublishedArticle, listPublishedArticles } from '../../content/publicArticles.js';
-
-function formatDate(value) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return null;
-  const date = new Date(value + 'T12:00:00Z');
-  return Number.isNaN(date.getTime())
-    ? null
-    : new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(date);
-}
+import ArticleCarousel from '../../components/articles/ArticleCarousel.jsx';
+import { ArticleCard, formatArticleDate } from '../../components/articles/ArticleCard.jsx';
 
 export function PublicArticleCards({ articles }) {
   return (
     <div className="af-articles-feature-list">
-      {articles.map(article => (
-        <article className="af-article-card" key={article.slug}>
-          <span className="af-article-tag">{article.category || 'Analyse'}</span>
-          <h3>{article.title}</h3>
-          <p>{article.excerpt}</p>
-          {formatDate(article.publishedAt) ? <time dateTime={article.publishedAt}>{formatDate(article.publishedAt)}</time> : null}
-          <a href={'/articles/' + encodeURIComponent(article.slug)}>Lire l'article <span aria-hidden="true">→</span></a>
-        </article>
-      ))}
+      {articles.map(article => <ArticleCard article={article} key={article.slug} />)}
     </div>
   );
 }
@@ -40,7 +26,7 @@ export default function PublicArticlesPage({ slug = null }) {
                 <p className="af-overline">{article.category || 'Analyse'}</p>
                 <h1>{article.title}</h1>
                 <p className="af-content-lead">{article.excerpt}</p>
-                {formatDate(article.publishedAt) ? <time className="af-content-small" dateTime={article.publishedAt}>Publié le {formatDate(article.publishedAt)}</time> : null}
+                {formatArticleDate(article.publishedAt) ? <time className="af-content-small" dateTime={article.publishedAt}>Publié le {formatArticleDate(article.publishedAt)}</time> : null}
               </div>
               <div className="af-article-body">
                 {(article.sections || []).map((section, index) => (
@@ -74,14 +60,24 @@ export default function PublicArticlesPage({ slug = null }) {
           <p className="af-content-lead">Pour comprendre les évolutions de l’apprentissage, confronter les chiffres à leur contexte et découvrir les dynamiques territoriales.</p>
         </header>
         {publishedArticles.length > 0 ? (
-          <section className="af-editorial-topics" aria-labelledby="af-public-articles">
-            <h2 id="af-public-articles">Dernières publications</h2>
-            <PublicArticleCards articles={publishedArticles} />
-          </section>
+          <>
+            <section className="af-editorial-topics" aria-labelledby="af-public-featured">
+              <h2 id="af-public-featured">À la une</h2>
+              <ArticleCarousel label="Derniers articles publiés par ApprentiFR">
+                {publishedArticles.slice(0, 6).map(article => (
+                  <ArticleCard article={article} key={article.slug} />
+                ))}
+              </ArticleCarousel>
+            </section>
+            <section className="af-editorial-topics" aria-labelledby="af-public-articles">
+              <h2 id="af-public-articles">Toutes les publications</h2>
+              <PublicArticleCards articles={publishedArticles} />
+            </section>
+          </>
         ) : (
           <section className="af-content-panel" aria-labelledby="af-no-articles">
             <h2 id="af-no-articles">Les premières analyses se préparent</h2>
-            <p>Cette rubrique accueillera prochainement des articles datés et vérifiés. Aucun article n’est encore publié : nous préférons ne pas afficher de fausses actualités.</p>
+            <p>Cette rubrique accueillera des articles datés et vérifiés. Aucun article n’est encore publié.</p>
             <div className="af-content-actions"><a href="/#carte">Explorer la carte des départements →</a><a href="/metiers">Découvrir les métiers →</a></div>
           </section>
         )}
