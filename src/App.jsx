@@ -10,6 +10,9 @@ import './App.css';
 // Other routes load their code and CSS only when the visitor opens them.
 const PublicDepartmentPage = lazy(() => import('./pages/public/PublicDepartmentPage.jsx'));
 const PublicOccupationMapPage = lazy(() => import('./pages/public/PublicOccupationMapPage.jsx'));
+const PublicArticlesPage = lazy(() => import('./pages/public/PublicArticlesPage.jsx'));
+const PublicInstitutionalPage = lazy(() => import('./pages/public/PublicInstitutionalPage.jsx'));
+
 const AdminRoutes = lazy(() => import('./AdminRoutes.jsx'));
 
 function DeferredPage({ children }) {
@@ -46,6 +49,24 @@ function App() {
 
   if (path === '/') return <PublicMapPage />;
   if (path === '/metiers') return <DeferredPage><PublicOccupationMapPage /></DeferredPage>;
+
+  if (path === '/articles') return <DeferredPage><PublicArticlesPage /></DeferredPage>;
+  const articleMatch = path.match(/^\/articles\/([^/]+)$/);
+  if (articleMatch) {
+    let slug;
+    try {
+      slug = decodeURIComponent(articleMatch[1]);
+    } catch {
+      return <NotFoundPage />;
+    }
+    return <DeferredPage><PublicArticlesPage slug={slug} /></DeferredPage>;
+  }
+
+  if (['/mentions-legales', '/politique-confidentialite', '/contact'].includes(path)) {
+    return <DeferredPage><PublicInstitutionalPage page={path.slice(1)} /></DeferredPage>;
+  }
+
+
 
   const departmentMatch = path.match(/^\/departement\/([^/]+)$/);
 
