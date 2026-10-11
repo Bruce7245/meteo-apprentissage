@@ -353,7 +353,7 @@ export default function PublicDepartmentPage({ departmentCode }) {
     : globalData.publishedLevel ||
       fallback.publishedLevel ||
       fallback.level ||
-      'green';
+      'insufficient_data';
 
   const reasons = useMemo(() => {
     if (occupationMode) {
@@ -437,7 +437,7 @@ export default function PublicDepartmentPage({ departmentCode }) {
         <span>Département {code}</span>
       </nav>
 
-      <section className="department-overview">
+      <section className="department-overview department-portrait" aria-label="Portrait territorial de l’apprentissage">
         <div className="department-overview-main">
           <DepartmentShape
             code={code}
@@ -461,6 +461,16 @@ export default function PublicDepartmentPage({ departmentCode }) {
                 ? departmentName + ' — ' + occupationLabel
                 : departmentName}
             </h1>
+            <div className="department-portrait-meta">
+              <span className="department-portrait-kicker">Observatoire territorial</span>
+              {publicationDate ? (
+                <span className="department-portrait-date">
+                  Situation publiée le {formatDate(publicationDate)}
+                </span>
+              ) : (
+                <span className="department-portrait-date">Date de publication indisponible</span>
+              )}
+            </div>
             <p className="department-overview-intro">
               {occupationMode
                 ? 'Lecture de la vigilance métier à partir de la projection ROME publiée' +
@@ -483,7 +493,7 @@ export default function PublicDepartmentPage({ departmentCode }) {
           <small>
             {occupationMode
               ? 'Niveau calculé pour le code ROME ' + romeCode + '.'
-              : 'Situation observée à la date de publication.'}
+              : 'Indicateur de vigilance publié, distinct des volumes recensés.'}
           </small>
         </div>
       </section>
@@ -521,6 +531,46 @@ export default function PublicDepartmentPage({ departmentCode }) {
 
       {!loading && !error && !occupationNotFound ? (
         <>
+          <section className="department-essentials" aria-labelledby="department-essentials-title">
+            <div className="department-essentials-head">
+              <div>
+                <p className="eyebrow">En un regard</p>
+                <h2 id="department-essentials-title">Les chiffres-clés du territoire</h2>
+              </div>
+              <span className="department-essentials-qualifier">Volumes observés, non exhaustifs</span>
+            </div>
+            <div className="department-essentials-grid">
+              <DepartmentKpiCard
+                label="Offres observées"
+                value={formatNumber(offersData?.totalOffers ?? (occupationMode ? data.activeOffersCount : getMetric(metrics, ['activeOffers', 'offers', 'totalOffers'])))}
+                detail={occupationMode ? 'Pour le métier sélectionné' : 'Dans le département'}
+                history={offerHistoryValues}
+                trend={offersData?.trends?.offers ?? null}
+                trendLabel="sur l’historique récent"
+              />
+              <DepartmentKpiCard
+                label="Postes proposés"
+                value={formatNumber(offersData?.totalOpenings ?? (occupationMode ? data.openingsCount : getMetric(metrics, ['openingCountTotal', 'openingCount', 'postsToFill'])))}
+                detail="Postes annoncés dans les offres"
+                history={openingHistoryValues}
+                trend={offersData?.trends?.openings ?? null}
+                trendLabel="sur l’historique récent"
+              />
+              <DepartmentKpiCard
+                label="Formations recensées"
+                value={formatNumber(occupationMode ? data.formationsCount : formationStats?.formationsCount)}
+                detail="Formations rattachées au territoire"
+              />
+              <DepartmentKpiCard
+                label="Sessions à venir"
+                value={formatNumber(occupationMode ? data.upcomingSessionsCount : formationStats?.upcomingSessionsCount)}
+                detail="Démarrages futurs recensés"
+              />
+            </div>
+            <p className="department-essentials-note">
+              Chiffres issus des dernières données disponibles, dont les dates peuvent différer. Une valeur « — » signifie que l’information est indisponible, et non qu’elle vaut zéro. Les variations éventuelles sont indicatives.
+            </p>
+          </section>
           {occupationMode ? (
             <section className="department-metrics-section">
               <div className="section-title-row">
@@ -625,10 +675,10 @@ export default function PublicDepartmentPage({ departmentCode }) {
             <Tabs.Root defaultValue="bulletin" className="department-tabs">
               <Tabs.List className="department-tabs-list">
                 <Tabs.Trigger value="bulletin" className="department-tab-trigger">
-                  Bulletin de vigilance
+                  Comprendre la situation
                 </Tabs.Trigger>
                 <Tabs.Trigger value="offers" className="department-tab-trigger">
-                  Offres d’apprentissage
+                  Explorer les offres
                 </Tabs.Trigger>
               </Tabs.List>
 

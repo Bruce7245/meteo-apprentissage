@@ -2065,3 +2065,38 @@ h2 {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Portrait territorial public — issue #91. Purely presentational changes. */
+.department-portrait {
+  align-items: stretch;
+  gap: clamp(18px, 3vw, 32px);
+  padding: clamp(22px, 3vw, 40px);
+  border: 1px solid #dfe6ee;
+  border-radius: 26px;
+  background: linear-gradient(125deg, #ffffff 0%, #f5f8fc 72%, #eaf2fa 100%);
+  box-shadow: 0 16px 48px rgba(19, 35, 58, 0.05);
+}
+.department-portrait .department-overview-main {grid-template-columns: 160px minmax(0,1fr);gap:clamp(18px,3vw,34px)}
+.department-portrait .department-shape {width:160px;height:160px;border-radius:24px;border-color:#d5e1ec;box-shadow:0 12px 34px rgba(19,35,58,.05)}
+.department-portrait .department-shape-svg {width:128px;height:128px}
+.department-portrait h1 {font-size:clamp(2.15rem,4vw,3.9rem);line-height:1.04}
+.department-portrait-meta {display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:17px 0 0}
+.department-portrait-kicker,.department-portrait-date {display:inline-flex;align-items:center;border:1px solid #d7e3ef;border-radius:100px;padding:7px 11px;font-size:.78rem;font-weight:750;color:#344e6a;background:#fff}
+.department-portrait-date {color:#60758c;background:#f2f6fa}
+.department-portrait .department-overview-intro {margin-top:15px;line-height:1.6}
+.department-portrait .department-status-card {align-self:center;padding:24px;border-radius:20px;border-color:#d6e1ec;box-shadow:0 12px 30px rgba(19,35,58,.06)}
+.department-essentials {padding-top:38px}
+.department-essentials-head {display:flex;justify-content:space-between;align-items:end;gap:18px;margin-bottom:18px}
+.department-essentials-head h2 {margin:0;font-size:clamp(1.45rem,2.4vw,2rem)}
+.department-essentials-qualifier {font-size:.8rem;color:#55708f;font-weight:750;background:#eaf2f9;border-radius:100px;padding:8px 12px}
+.department-essentials-grid {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.department-essentials-grid .department-kpi-card {border-radius:20px!important;box-shadow:0 6px 24px rgba(19,35,58,.035)!important}
+.department-essentials-grid .department-kpi-card-body {min-height:170px}
+.department-essentials-note {color:#6c7c90;font-size:.8rem;line-height:1.6;margin:14px 0 0}
+.department-tabs-section {scroll-margin-top:88px}
+.department-tab-trigger:focus-visible,.offer-apply-link:focus-visible {outline:3px solid #426f9d;outline-offset:3px}
+@media(max-width:1100px) {.department-essentials-grid {grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:980px) {.department-portrait {grid-template-columns:1fr}.department-portrait .department-overview-main {grid-template-columns:130px minmax(0,1fr)}.department-portrait .department-shape {width:130px;height:130px}.department-portrait .department-shape-svg {width:106px;height:106px}}
+@media(max-width:680px) {.department-portrait {padding:20px;border-radius:20px}.department-portrait .department-overview-main {grid-template-columns:86px minmax(0,1fr);gap:16px}.department-portrait .department-shape {width:86px;height:86px;border-radius:16px}.department-portrait .department-shape-svg {width:70px;height:70px}.department-portrait h1 {font-size:clamp(1.7rem,7.3vw,2.4rem)}.department-essentials-head {align-items:flex-start;flex-direction:column}.department-essentials-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.department-essentials-grid .department-kpi-card-body {padding:15px!important;min-height:156px}.department-essentials-grid .department-kpi-value {font-size:clamp(1.4rem,6vw,2rem)}}
+@media(max-width:440px) {.department-portrait .department-overview-main {grid-template-columns:1fr}.department-essentials-grid {grid-template-columns:1fr}.department-essentials-grid .department-kpi-card-body {min-height:120px}.department-portrait .department-status-card {width:100%}}
