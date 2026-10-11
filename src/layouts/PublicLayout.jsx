@@ -7,6 +7,7 @@ function getNavigationState() {
   const hasRome = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('rome');
   return {
     homeActive: path === '/',
+    aboutActive: path === '/qui-sommes-nous',
     articlesActive: path === '/articles' || path.startsWith('/articles/'),
     mapActive: path.startsWith('/departement/') && !hasRome,
     occupationActive: path === '/metiers' || (path.startsWith('/departement/') && hasRome),
@@ -35,6 +36,7 @@ export default function PublicLayout({ children }) {
             <a className={'public-nav-link' + (navigation.occupationActive ? ' is-active' : '')} href="/metiers" aria-current={navigation.occupationActive ? 'page' : undefined}>Métiers & formations</a>
             <a className="public-nav-link" href="/#situation">Observatoire</a>
             <a className={'public-nav-link' + (navigation.articlesActive ? ' is-active' : '')} href="/articles" aria-current={navigation.articlesActive ? 'page' : undefined}>Articles</a>
+            <a className={'public-nav-link' + (navigation.aboutActive ? ' is-active' : '')} href="/qui-sommes-nous" aria-current={navigation.aboutActive ? 'page' : undefined}>Qui sommes-nous ?</a>
           </nav>
         </div>
       </header>
@@ -46,6 +48,7 @@ export default function PublicLayout({ children }) {
             <span>Observatoire territorial de l'apprentissage</span>
           </div>
           <nav className="public-footer-links" aria-label="Informations et accès utiles">
+            <a href="/qui-sommes-nous">Qui sommes-nous ?</a>
             <a href="/articles">Articles</a>
             <a href="/mentions-legales">Mentions légales</a>
             <a href="/politique-confidentialite">Confidentialité</a>
