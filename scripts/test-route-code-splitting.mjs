@@ -46,7 +46,7 @@ test('The public homepage does not preload administration and heavy optional pag
 });
 
 test('Every public SEO page still references working Vite entrypoint', async () => {
-  for (const path of ['index.html', 'metiers.html', 'departement-unpublished.html']) {
+  for (const path of ['index.html', 'metiers.html', 'qui-sommes-nous.html', 'departement-unpublished.html']) {
     const html = await readFile(join(dist, path), 'utf8');
     const assets = extractProductionAssets(html);
     assert.ok(assets.some(item => item.kind === 'js'));
@@ -65,6 +65,8 @@ test('CSS for the administration is only imported by the deferred admin group', 
   ]);
   assert.ok(!main.includes("import './admin-console.css'"));
   assert.match(routes, /lazy\(\(\) => import\('\.\/AdminRoutes\.jsx'\)\)/);
+  assert.ok(routes.includes("lazy(() => import('./pages/public/PublicAboutPage.jsx'))"),
+    'Qui sommes-nous must remain lazy-loaded');
   assert.match(routes, /if \(path === '\/'\) return <PublicMapPage \/>/);
   for (const [path, component] of [['/admin/parametrage', 'AdminSettingsPage'], ['/admin/simulation', 'AdminSimulationPage'], ['/admin/validation-modele', 'AdminModelValidationPage']]) {
     assert.ok(admin.includes("'" + path + "': " + component + ","), 'Missing admin route after synchronization: ' + path);

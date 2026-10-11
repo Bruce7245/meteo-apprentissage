@@ -42,6 +42,11 @@ const pages = [
     url: 'https://apprentifr.fr/metiers',
     title: 'Métiers et formations en apprentissage — ApprentiFR',
   },
+  {
+    file: 'dist/qui-sommes-nous.html',
+    url: 'https://apprentifr.fr/qui-sommes-nous',
+    title: "Qui sommes-nous ? — ApprentiFR, observatoire de l'apprentissage",
+  },
 ];
 
 test('Each public page has unique server HTML SEO metadata and Vite production assets', async () => {
@@ -78,11 +83,12 @@ test('Sitemap and robots only advertise canonical public stable URLs', async () 
   assert.match(robots, /Sitemap: https:\/\/apprentifr\.fr\/sitemap\.xml/);
 });
 
-test('Firebase Hosting serves dedicated /metiers HTML before SPA fallback, preserves admin noindex', async () => {
+test('Firebase Hosting serves dedicated public HTML before SPA fallback, preserves admin noindex', async () => {
   const config = JSON.parse(await read('firebase.json'));
   const rewrites = config.hosting.rewrites;
   assert.deepEqual(rewrites, [
     { source: '/metiers', destination: '/metiers.html' },
+    { source: '/qui-sommes-nous', destination: '/qui-sommes-nous.html' },
     { source: '/departement/**', destination: '/departement-unpublished.html' },
     { source: '!/@(assets|src)/**', destination: '/index.html' },
   ]);
@@ -90,6 +96,11 @@ test('Firebase Hosting serves dedicated /metiers HTML before SPA fallback, prese
   for (const source of ['/metiers/', '/metiers.html']) {
     assert.ok(redirects.some(rule =>
       rule.source === source && rule.destination === '/metiers' && rule.type === 301
+    ), 'Missing canonical redirect: ' + source);
+  }
+  for (const source of ['/qui-sommes-nous/', '/qui-sommes-nous.html']) {
+    assert.ok(redirects.some(rule =>
+      rule.source === source && rule.destination === '/qui-sommes-nous' && rule.type === 301
     ), 'Missing canonical redirect: ' + source);
   }
   assert.equal(config.hosting.cleanUrls, true);

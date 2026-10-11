@@ -16,6 +16,7 @@ const NOW = new Date('2026-10-11T10:00:00Z');
 const sitemap = '<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
   '<url><loc>https://apprentifr.fr/</loc></url>\n' +
   '<url><loc>https://apprentifr.fr/metiers</loc></url>\n' +
+  '<url><loc>https://apprentifr.fr/qui-sommes-nous</loc></url>\n' +
   '</urlset>\n';
 const fallback = '<!doctype html><html lang="fr"><head>\n' +
   '<title>Apprentissage par département — ApprentiFR</title>\n' +
@@ -112,12 +113,13 @@ test('Published HTML has canonical, meaningful content, and escapes untrusted pu
   assert.equal(escapeHtml('<b>"'), '&lt;b&gt;&quot;');
 });
 
-test('Sitemap includes only original two pages and explicitly eligible department URLs', () => {
+test('Sitemap preserves stable pages and adds only eligible department URLs', () => {
   const data = selectSeoDepartments(makeIndex(['72']), [makePublished()], NOW);
   const xml = renderSitemapXml(sitemap, data);
   assert.deepEqual([...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(x => x[1]), [
     'https://apprentifr.fr/',
     'https://apprentifr.fr/metiers',
+    'https://apprentifr.fr/qui-sommes-nous',
     'https://apprentifr.fr/departement/72',
   ]);
   assert.match(xml, /<lastmod>2026-10-10<\/lastmod>/);
