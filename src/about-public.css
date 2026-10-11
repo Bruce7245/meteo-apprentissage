@@ -1,0 +1,450 @@
+/* Page publique Qui sommes-nous ? — direction editoriale ApprentiFR (#148).
+   Styles limites au perimetre .af-about. */
+.af-about {
+  --about-ink: #102a4b;
+  --about-blue: #183b63;
+  --about-gold: #ffcb27;
+  width: 100%;
+  color: var(--about-ink);
+}
+
+.af-about a:focus-visible {
+  outline: 3px solid var(--about-gold);
+  outline-offset: 5px;
+  border-radius: 3px;
+}
+
+.af-about-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: 30px 0 0;
+  color: #657e98;
+  font-size: .8rem;
+}
+
+.af-about-breadcrumb a {
+  color: var(--about-blue);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.af-about-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.22fr) minmax(290px, .78fr);
+  gap: clamp(28px, 5vw, 90px);
+  align-items: center;
+  padding: clamp(48px, 6vw, 98px) 0 94px;
+}
+
+.af-about-hero h1 {
+  max-width: 810px;
+  margin: 0;
+  color: var(--about-ink);
+  font-size: clamp(2.65rem, 5vw, 5.2rem);
+  font-weight: 850;
+  line-height: 1.06;
+  letter-spacing: -.055em;
+}
+
+.af-about-hero h1 span {
+  color: #e5aa07;
+}
+
+.af-about-lead {
+  margin: 26px 0 21px;
+  max-width: 720px;
+  color: #4f6985;
+  font-size: clamp(1.03rem, 1.25vw, 1.14rem);
+  line-height: 1.8;
+}
+
+.af-about-text-link {
+  color: var(--about-blue);
+  font-size: .95rem;
+  font-weight: 800;
+  text-decoration: underline;
+  text-decoration-color: #f1c345;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 7px;
+}
+
+.af-about-visual {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 395px;
+  padding: clamp(27px, 3.5vw, 48px);
+  overflow: hidden;
+  border-radius: 24px;
+  background: #102c4d;
+  color: #fff;
+}
+
+.af-about-visual::before,
+.af-about-visual::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 50%;
+  width: 370px;
+  height: 370px;
+  right: -195px;
+  top: -160px;
+}
+
+.af-about-visual::after {
+  width: 260px;
+  height: 260px;
+  right: -137px;
+  top: -95px;
+  background: rgba(255,255,255,.025);
+}
+
+.af-about-visual-eyebrow,
+.af-about-visual-signature {
+  color: #c3d6e8;
+  font-size: .7rem;
+  font-weight: 800;
+  line-height: 1.5;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.af-about-visual-statement {
+  margin: 31px 0 18px;
+  color: #fff;
+  font-size: clamp(1.65rem, 2.55vw, 2.75rem);
+  font-weight: 800;
+  line-height: 1.22;
+  letter-spacing: -.04em;
+}
+
+.af-about-visual-statement strong {
+  color: var(--about-gold);
+}
+
+.af-about-visual-rule {
+  width: 45px;
+  height: 4px;
+  border-radius: 4px;
+  background: var(--about-gold);
+}
+
+.af-about-visual p {
+  margin: 19px 0 22px;
+  color: #d6e3f0;
+  font-size: .92rem;
+  line-height: 1.65;
+}
+
+.af-about-visual-signature {
+  font-size: .62rem;
+  letter-spacing: .055em;
+}
+
+.af-about-why {
+  display: grid;
+  grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr);
+  gap: clamp(32px, 8vw, 140px);
+  padding: 65px 0 90px;
+  border-top: 1px solid #e0e8f0;
+}
+
+.af-about-why h2,
+.af-about-approach h2,
+.af-about-section-heading h2,
+.af-about-transparency h2,
+.af-about-conclusion h2 {
+  margin: 0;
+  color: var(--about-ink);
+  font-size: clamp(1.95rem, 3.2vw, 3.25rem);
+  letter-spacing: -.045em;
+  line-height: 1.19;
+}
+
+.af-about-prose p {
+  margin: 0 0 22px;
+  color: #4b6683;
+  font-size: 1.015rem;
+  line-height: 1.85;
+}
+
+.af-about-approach {
+  display: grid;
+  grid-template-columns: minmax(0, .78fr) minmax(0, 1.22fr);
+  gap: clamp(30px, 5vw, 80px);
+  border-radius: 22px;
+  background: #f1f6fb;
+  padding: clamp(28px, 5vw, 70px);
+}
+
+.af-about-approach-heading > p:last-child {
+  margin: 19px 0 0;
+  color: #516d88;
+  line-height: 1.75;
+  max-width: 440px;
+}
+
+.af-about-steps {
+  list-style: none;
+  display: grid;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.af-about-steps li {
+  display: grid;
+  grid-template-columns: 46px minmax(0,1fr);
+  gap: 20px;
+  padding: 23px 0;
+  border-bottom: 1px solid #d5e1ed;
+}
+
+.af-about-steps li:first-child {
+  padding-top: 0;
+}
+
+.af-about-steps li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.af-about-step-number {
+  color: #bc8b00;
+  font-size: .88rem;
+  font-weight: 900;
+}
+
+.af-about-steps h3 {
+  margin: 0 0 8px;
+  color: var(--about-ink);
+  font-size: 1.25rem;
+  letter-spacing: -.02em;
+}
+
+.af-about-steps p {
+  margin: 0;
+  color: #53708d;
+  line-height: 1.65;
+  font-size: .95rem;
+}
+
+.af-about-audiences {
+  padding: 105px 0 97px;
+}
+
+.af-about-section-heading {
+  max-width: 750px;
+}
+
+.af-about-section-heading > p:last-child {
+  margin: 17px 0 0;
+  color: #5b7590;
+  font-size: 1.02rem;
+  line-height: 1.7;
+}
+
+.af-about-audience-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 28px;
+  margin-top: 41px;
+}
+
+.af-about-audience {
+  padding: 29px 0 0;
+  border-top: 3px solid #e5edf5;
+}
+
+.af-about-audience-number {
+  color: #c59815;
+  font-size: .82rem;
+  font-weight: 900;
+}
+
+.af-about-audience h3 {
+  margin: 16px 0 10px;
+  font-size: 1.22rem;
+  letter-spacing: -.025em;
+  color: var(--about-ink);
+}
+
+.af-about-audience p {
+  margin: 0;
+  color: #5a7490;
+  line-height: 1.7;
+  font-size: .94rem;
+}
+
+.af-about-transparency {
+  padding: 63px 0 75px;
+  border-top: 1px solid #e0e8f0;
+}
+
+.af-about-transparency-intro {
+  max-width: 820px;
+  margin-bottom: 38px;
+}
+
+.af-about-transparency-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: clamp(30px, 6vw, 100px);
+}
+
+.af-about-transparency-columns > div {
+  border-left: 3px solid #cddae8;
+  padding-left: 23px;
+}
+
+.af-about-transparency-columns > div:last-child {
+  border-left-color: var(--about-gold);
+}
+
+.af-about-transparency h3 {
+  margin: 0 0 16px;
+  color: var(--about-ink);
+  font-size: 1.17rem;
+}
+
+.af-about-transparency-columns p {
+  margin: 0 0 18px;
+  color: #52708d;
+  line-height: 1.8;
+  font-size: .96rem;
+}
+
+.af-about-conclusion {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
+  align-items: center;
+  gap: 40px;
+  padding: clamp(30px, 4vw, 60px);
+  margin: 20px 0 30px;
+  background: #102c4d;
+  border-radius: 22px;
+}
+
+.af-about-conclusion h2 {
+  color: #fff;
+  font-size: clamp(1.8rem, 2.85vw, 2.8rem);
+}
+
+.af-about-conclusion .af-overline {
+  color: #cfdeec;
+}
+
+.af-about-conclusion p:not(.af-overline) {
+  margin: 18px 0 0;
+  line-height: 1.7;
+  color: #d3e1ee;
+}
+
+.af-about-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.af-about-action-primary,
+.af-about-action-secondary {
+  display: flex;
+  gap: 17px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 19px;
+  border-radius: 12px;
+  font-size: .89rem;
+  font-weight: 800;
+}
+
+.af-about-action-primary {
+  background: var(--about-gold);
+  color: var(--about-ink);
+}
+
+.af-about-action-primary:hover {
+  background: #eab815;
+}
+
+.af-about-action-secondary {
+  color: #fff;
+  border: 1px solid rgba(255,255,255,.22);
+}
+
+.af-about-action-secondary:hover {
+  background: rgba(255,255,255,.1);
+}
+
+@media (max-width: 1050px) {
+  .af-about-hero {
+    grid-template-columns: minmax(0, 1fr) minmax(270px, .75fr);
+    gap: 26px;
+  }
+  .af-about-hero h1 {
+    font-size: clamp(2.4rem, 4.6vw, 4.2rem);
+  }
+}
+
+@media (max-width: 850px) {
+  .af-about-hero,
+  .af-about-why,
+  .af-about-approach,
+  .af-about-conclusion {
+    grid-template-columns: 1fr;
+  }
+  .af-about-hero {
+    padding: 42px 0 61px;
+  }
+  .af-about-visual {
+    min-height: 260px;
+  }
+  .af-about-why {
+    padding: 48px 0 60px;
+  }
+  .af-about-audiences {
+    padding: 70px 0 65px;
+  }
+  .af-about-audience-list {
+    grid-template-columns: 1fr;
+    gap: 26px;
+  }
+  .af-about-audience {
+    padding-top: 21px;
+  }
+}
+
+@media (max-width: 600px) {
+  .af-about-hero h1 {
+    font-size: clamp(2.25rem, 10vw, 3.1rem);
+  }
+  .af-about-hero {
+    padding-bottom: 48px;
+  }
+  .af-about-visual {
+    padding: 28px;
+    border-radius: 17px;
+  }
+  .af-about-visual-statement {
+    font-size: 2rem;
+  }
+  .af-about-approach,
+  .af-about-conclusion {
+    padding: 27px 22px;
+    border-radius: 17px;
+  }
+  .af-about-transparency-columns {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .af-about-steps li {
+    grid-template-columns: 35px minmax(0,1fr);
+    gap: 12px;
+  }
+}
