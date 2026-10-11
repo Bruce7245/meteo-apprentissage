@@ -22,7 +22,7 @@ export default function ArticleCarousel({ children, label = 'Articles ApprentiFR
     let current = 1;
     if (cards.length) {
       const nearestIndex = cards.reduce((best, card, index) => (
-        Math.abs(card.offsetLeft - track.offsetLeft - track.scrollLeft)
+        Math.abs(card.offsetLeft - track.scrollLeft)
           < Math.abs(cards[best].offsetLeft - track.offsetLeft - track.scrollLeft)
           ? index : best
       ), 0);
@@ -65,7 +65,7 @@ export default function ArticleCarousel({ children, label = 'Articles ApprentiFR
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     track.scrollBy({
       left: direction * distance,
-      behavior: reducedMotion ? 'instant' : 'smooth',
+      behavior: reducedMotion ? 'auto' : 'smooth',
     });
   }
 
