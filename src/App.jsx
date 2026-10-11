@@ -11,6 +11,7 @@ import './App.css';
 const PublicDepartmentPage = lazy(() => import('./pages/public/PublicDepartmentPage.jsx'));
 const PublicOccupationMapPage = lazy(() => import('./pages/public/PublicOccupationMapPage.jsx'));
 const PublicArticlesPage = lazy(() => import('./pages/public/PublicArticlesPage.jsx'));
+const PublicAboutPage = lazy(() => import('./pages/public/PublicAboutPage.jsx'));
 const PublicInstitutionalPage = lazy(() => import('./pages/public/PublicInstitutionalPage.jsx'));
 
 const AdminRoutes = lazy(() => import('./AdminRoutes.jsx'));
@@ -50,6 +51,7 @@ function App() {
   if (path === '/') return <PublicMapPage />;
   if (path === '/metiers') return <DeferredPage><PublicOccupationMapPage /></DeferredPage>;
 
+  if (path === '/qui-sommes-nous') return <DeferredPage><PublicAboutPage /></DeferredPage>;
   if (path === '/articles') return <DeferredPage><PublicArticlesPage /></DeferredPage>;
   const articleMatch = path.match(/^\/articles\/([^/]+)$/);
   if (articleMatch) {
