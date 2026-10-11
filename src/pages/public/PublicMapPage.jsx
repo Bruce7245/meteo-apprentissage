@@ -3,6 +3,7 @@ import PublicLayout from '../../layouts/PublicLayout.jsx';
 import VigilanceMap from '../../components/maps/VigilanceMap.jsx';
 import VigilanceLegend from '../../components/vigilance/VigilanceLegend.jsx';
 import { getLatestPublicVigilanceIndex } from '../../services/vigilanceService.js';
+import { editorialTopics, listPublishedArticles } from '../../content/publicArticles.js';
 
 const levelOrder = ['green', 'yellow', 'orange', 'red'];
 const levelMeta = {
@@ -40,6 +41,7 @@ export default function PublicMapPage() {
   }, []);
 
   const departments = index?.departments || [];
+  const featuredArticles = listPublishedArticles().slice(0, 3);
   const sortedDepartments = useMemo(() => [...departments].sort((a, b) => {
     const aName = a.name || a.departmentName || a.code || '';
     const bName = b.name || b.departmentName || b.code || '';
@@ -119,6 +121,38 @@ export default function PublicMapPage() {
             {error ? <p className="af-overview-disclaimer" role="status">Les chiffres sont momentanément indisponibles.</p> : null}
           </div>
           <p className="af-overview-date">Dernière publication : {index?.latestDate || 'non disponible'}</p>
+        </section>
+
+        <section className="af-articles-preview" id="analyses" aria-labelledby="af-articles-title">
+          <div className="af-section-header">
+            <div>
+              <p className="af-overline">Analyses & articles</p>
+              <h2 id="af-articles-title">À la une sur ApprentiFR</h2>
+            </div>
+            <a href="/articles" className="af-articles-section-action">Accéder aux analyses <span aria-hidden="true">→</span></a>
+          </div>
+          {featuredArticles.length ? (
+            <div className="af-articles-feature-list">
+              {featuredArticles.map(article => (
+                <article className="af-article-card" key={article.slug}>
+                  <span className="af-article-tag">{article.category || 'Analyse'}</span>
+                  <h3>{article.title}</h3>
+                  <p>{article.excerpt}</p>
+                  <a href={'/articles/' + encodeURIComponent(article.slug)}>Lire l'article <span aria-hidden="true">→</span></a>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="af-articles-pending">
+              <div>
+                <h3>Nos premières analyses se préparent</h3>
+                <p>Retrouvez bientôt des décryptages sourcés sur les métiers, les territoires et les évolutions de l’apprentissage.</p>
+              </div>
+              <div className="af-articles-pending-topics" aria-label="Thématiques à venir">
+                {editorialTopics.map(topic => <span key={topic.title}>{topic.title}</span>)}
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="af-map-editorial" id="carte" aria-labelledby="af-map-title">
